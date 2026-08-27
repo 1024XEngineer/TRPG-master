@@ -60,7 +60,11 @@ from collaboration_framework.engine import (
 from collaboration_framework.engine.initialization import create_initial_game_state
 from collaboration_framework.engine.navigation import resolve_location_target
 from collaboration_framework.engine.projection_v3 import location_breadcrumbs
-from collaboration_framework.engine.rules_v3 import evaluate_condition, walk_rule
+from collaboration_framework.engine.rules_v3 import (
+    evaluate_condition,
+    pending_check_for,
+    walk_rule,
+)
 from tests.time_fixtures import day_cycle_module
 
 FIXTURE = (
@@ -862,9 +866,25 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
         菜单是按「玩家站在哪」发布的，所以 `question_neighbors` 会出现在候选里；
         `target=lyla` 仍需在提交时复查，但模型把打招呼归成 `social` 不再导致
         `RULE_OUT_OF_SCOPE`。
+
+        `fast-talk` 分支是要掷骰的，所以这里带上与它一致的 check：这条断言盯的是
+        动作族差异不阻断规则，不该顺带依赖「漏写 check 也能返回 success」那个
+        静默吞规则的老行为（#462）。
         """
 
-        store, engine, rules = self.build(scene_id="neighborhood")
+        store, engine, rules = self.build(
+            scene_id="neighborhood",
+            actors={
+                ACTOR: ActorState(
+                    player_id=PLAYER,
+                    name="陈探员",
+                    source_character_id="character_v3",
+                    source_character_version=1,
+                    state={"skills": {"spot-hidden": 60, "fast-talk": 55}},
+                    resources=ActorResources(san=55, luck=50),
+                )
+            },
+        )
         snapshot = await rules.read(
             PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
         )
@@ -881,7 +901,17 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
             summary="跟邻居打个招呼",
             target=ActionTarget(kind="entity", id="lyla"),
             method=ActionMethod(family="social", description="打招呼"),
-            check=NoAdjudicationCheck(),
+            check=RequiredAdjudicationCheck(
+                candidates=(
+                    SkillCheckCandidate(
+                        candidate_id="fast-talk",
+                        skill_id="fast-talk",
+                        difficulty="regular",
+                        method_summary="搭话套近乎",
+                        player_safe_reason="使用话术",
+                    ),
+                )
+            ),
             rule_decision=RuleDecisionRef(
                 rule_id="question_neighbors", option_id="fast-talk"
             ),
@@ -891,7 +921,9 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
                 room_id=ROOM, player_id=PLAYER, adjudication=greeting
             )
         )
-        self.assertEqual(execution.status, "resolved")
+        # 没被 RULE_OUT_OF_SCOPE 挡下，而是走到了这条分支本来就该有的检定上。
+        self.assertEqual(execution.status, "awaiting_skill_choice")
+        self.assertIsNotNone(execution.pending_decision)
         self.assertGreater(self.store_events(store), 0)
 
     @staticmethod
@@ -2317,6 +2349,245 @@ class RuleOwnedCheckTests(unittest.IsolatedAsyncioTestCase):
                     ),
                 )
             )
+
+
+class RuleCheckAlignmentTests(unittest.IsolatedAsyncioTestCase):
+    """分支要不要掷骰，和裁决带不带检定，必须一致（#462）。
+
+    不一致的两个方向过去都是静默的：漏写 check 时规则整个被吞掉（不掷骰、不提交
+    效果，却照报 `outcome=success`），多写 check 时掷骰结果被完全忽略（分支效果
+    无条件提交，失败也照样生效）。两种都不留痕迹，对上层和玩家等价于「这条规则
+    不存在」/「这次掷骰不算数」，比可见的失败更糟。
+    """
+
+    def setUp(self) -> None:
+        self.content = module()
+
+    def build(self, **overrides):
+        store = InMemoryEngineStore()
+        store.register_room(
+            module_content=self.content,
+            initial_state=game_state(self.content, **overrides),
+        )
+        return store, AdjudicationEngineService(store), RuleEngineService(store)
+
+    def night_watch_room(self):
+        return self.build(
+            scene_id="kimball_grounds",
+            world_time=WorldTimeState(
+                current_point_id="hour_18",
+                current=WorldTimePoint(day_index=0, hour_of_day=18),
+                current_time_segment="evening",
+            ),
+            entities={
+                "case_tracker": {"night_watch_checked": False},
+                "cemetery_figure": {
+                    "visit_observed": False,
+                    "left_forever": False,
+                    "sighted": False,
+                },
+            },
+        )
+
+    def crypt_room(self):
+        return self.build(
+            scene_id="crypt",
+            entities={
+                "cemetery_figure": {
+                    "visit_observed": True,
+                    "sighted": True,
+                    "confronted": True,
+                    "left_forever": False,
+                }
+            },
+        )
+
+    @staticmethod
+    def night_watch_adjudication(revision, check):
+        return ActionAdjudication(
+            request_id="night-watch-alignment",
+            source_revision=revision,
+            actor_id=ACTOR,
+            summary="监视周围环境",
+            target=ActionTarget(kind="location", id="kimball_grounds"),
+            method=ActionMethod(family="surveil", description="监视"),
+            rule_decision=RuleDecisionRef(rule_id="keep_night_watch", option_id="luck"),
+            check=check,
+            success_effects=(),
+            failure_effects=(),
+        )
+
+    @staticmethod
+    def let_leave_adjudication(revision, check):
+        return ActionAdjudication(
+            request_id="let-leave-alignment",
+            source_revision=revision,
+            actor_id=ACTOR,
+            summary="让道格拉斯离开",
+            target=ActionTarget(kind="entity", id="cemetery_figure"),
+            method=ActionMethod(family="let_leave", description="放他走"),
+            rule_decision=RuleDecisionRef(
+                rule_id="let_douglas_leave", option_id="proceed"
+            ),
+            check=check,
+            success_effects=(),
+            failure_effects=(),
+        )
+
+    async def revision(self, rules) -> int:
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        return snapshot.revision
+
+    def assert_requires_check(
+        self, rule_id: str, option_id: str, expected: bool
+    ) -> None:
+        """把断言钉在投影发布给 Agent 的那个 `requires_check` 上。
+
+        引擎判断和候选标注同源（都是 `pending_check_for`），所以这两条前置断言
+        既固定了模组事实，也保证下面测的正是 Agent 看得见的那个契约。
+        """
+
+        rule = next(item for item in self.content.rules if item.id == rule_id)
+        self.assertEqual(pending_check_for(rule, option_id)[0] is not None, expected)
+
+    async def test_branch_requiring_a_roll_refuses_a_check_free_adjudication(
+        self,
+    ) -> None:
+        """#462 主体：《追书人》守夜的幸运检定不能被静默吞掉。
+
+        真实模型下两次都复现：`rule_decision` 选对了 `keep_night_watch/luck`，
+        `check` 却写成 `{"mode":"none"}`。此前引擎照报 `action.succeeded`，而
+        `cemetery_figure.sighted` 始终是 false —— 规则从未执行。
+        """
+
+        self.assert_requires_check("keep_night_watch", "luck", True)
+        store, engine, rules = self.night_watch_room()
+        revision = await self.revision(rules)
+
+        with self.assertRaises(AdjudicationValidationError) as rejected:
+            await engine.submit(
+                SubmitAdjudicationRequest(
+                    room_id=ROOM,
+                    player_id=PLAYER,
+                    adjudication=self.night_watch_adjudication(
+                        revision, NoAdjudicationCheck()
+                    ),
+                )
+            )
+
+        result = rejected.exception.result
+        self.assertEqual(result.code, "RULE_REQUIRES_CHECK")
+        # 与 RULE_OUT_OF_SCOPE 同级：Agent 的失误，补上 check 就能重来，
+        # 没有理由让玩家的回合死在这里。
+        self.assertEqual(result.repairability, "auto_repairable")
+        self.assertEqual(result.fault, "agent")
+        # 拒绝必须是干净的：既不推进世界，也不发 action.succeeded。
+        self.assertEqual(len(store.inspect_domain_events(ROOM)), 0)
+        figure = store.inspect_state(ROOM).entities.get("cemetery_figure", {})
+        self.assertIs(figure.get("sighted"), False)
+
+    async def test_branch_without_a_roll_refuses_an_adjudication_carrying_a_check(
+        self,
+    ) -> None:
+        """#462 镜像面：不掷骰的分支多带一个 check，掷骰结果会被完全丢弃。
+
+        `let_douglas_leave/proceed` 是纯效果分支。此前提交一个
+        `RequiredAdjudicationCheck` 会真的掷骰、掷失败、报 `action.failed`，
+        而 `cemetery_figure.left_forever` 照样被翻成 true —— 世界按成功推进了。
+        """
+
+        self.assert_requires_check("let_douglas_leave", "proceed", False)
+        store, engine, rules = self.crypt_room()
+        revision = await self.revision(rules)
+
+        with self.assertRaises(AdjudicationValidationError) as rejected:
+            await engine.submit(
+                SubmitAdjudicationRequest(
+                    room_id=ROOM,
+                    player_id=PLAYER,
+                    adjudication=self.let_leave_adjudication(
+                        revision,
+                        RequiredAdjudicationCheck(
+                            candidates=(
+                                SkillCheckCandidate(
+                                    candidate_id="spot-hidden",
+                                    skill_id="spot-hidden",
+                                    difficulty="regular",
+                                    method_summary="盯住他",
+                                    player_safe_reason="使用侦查",
+                                ),
+                            )
+                        ),
+                    ),
+                )
+            )
+
+        result = rejected.exception.result
+        self.assertEqual(result.code, "RULE_FORBIDS_CHECK")
+        self.assertEqual(result.repairability, "auto_repairable")
+        self.assertEqual(result.fault, "agent")
+        self.assertEqual(len(store.inspect_domain_events(ROOM)), 0)
+        figure = store.inspect_state(ROOM).entities.get("cemetery_figure", {})
+        self.assertIs(figure.get("left_forever"), False)
+
+    async def test_aligned_check_reaches_the_roll(self) -> None:
+        """对齐之后就是主路径：补上 check 的那一版必须能正常走到掷骰。
+
+        这条钉住修复出口 —— 拒绝只有在「补 check 能重新提交」时才算可修复。
+        """
+
+        _, engine, rules = self.night_watch_room()
+        revision = await self.revision(rules)
+
+        execution = await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=self.night_watch_adjudication(
+                    revision,
+                    RequiredAdjudicationCheck(
+                        candidates=(
+                            SkillCheckCandidate(
+                                candidate_id="luck",
+                                skill_id="luck",
+                                difficulty="regular",
+                                method_summary="留守观察",
+                                player_safe_reason="规则要求进行幸运检定",
+                            ),
+                        )
+                    ),
+                ),
+            )
+        )
+
+        self.assertEqual(execution.status, "awaiting_skill_choice")
+        self.assertIsNotNone(execution.pending_decision)
+
+    async def test_check_free_branch_still_commits_without_a_check(self) -> None:
+        """反向出口：32 条 `requires_check=false` 的分支合法地「有规则、无检定」。
+
+        新的不变量挂在分支的 `requires_check` 上，不是挂在「有没有
+        `rule_decision`」上，所以纯效果分支必须照常整条提交。
+        """
+
+        store, engine, rules = self.crypt_room()
+        revision = await self.revision(rules)
+
+        execution = await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=self.let_leave_adjudication(
+                    revision, NoAdjudicationCheck()
+                ),
+            )
+        )
+
+        self.assertEqual(execution.outcome, "success")
+        figure = store.inspect_state(ROOM).entities.get("cemetery_figure", {})
+        self.assertIs(figure.get("left_forever"), True)
 
 
 if __name__ == "__main__":

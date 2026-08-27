@@ -31,6 +31,7 @@ from collaboration_framework.contracts import (
     PushAdjudication,
     Repairability,
     RequiredAdjudicationCheck,
+    RuleDecisionRef,
     SelectCheckChoice,
     SingleActionDecision,
     SkillCheckCandidate,
@@ -2587,3 +2588,211 @@ async def test_narrator_rejects_first_person_subject_in_prose() -> None:
         await ActionPlanNarrator(FirstPersonNarrationModel()).narrate(context)
 
     assert raised.value.reason == "subject_ownership"
+
+
+# --------------------------------------------------------------------------- #
+# #462：`RULE_REQUIRES_CHECK` 被拒之后，Agent 那一次重新生成的端到端走向
+#
+# 语义保持闸门本身的逐行判定在 tests/test_semantic_preservation.py 的 #462 一节
+# （A–E 五行）。这里钉的是它下游真正发生了什么——因为「判 requires_clarification」
+# 和「玩家这一回合真的停下来被问」之间还隔着 orchestrator 的一整段分流：
+#
+# - A 规则不动 + 补 check
+#     → waiting_for_player，停在这条分支本来就该有的检定上（唯一自动通过的路）
+# - B 丢规则 + 不掷骰
+#     → needs_clarification，safe_failure_code = SEMANTIC_REPAIR_REQUIRES_CLARIFICATION
+# - E 原样返回没改
+#     → needs_clarification，safe_failure_code = REPAIR_BUDGET_EXHAUSTED
+#
+# C/D 与 B 走同一条 orchestrator 分支（都是 RULE_DECISION_CHANGED），差别只在语义
+# 保持那一层，不重复铺端到端。
+#
+# 三行都必须满足同一条底线：世界没有被写过，玩家的回合没有白白消耗成一次“成功但
+# 什么都没发生”。
+# --------------------------------------------------------------------------- #
+
+NEIGHBOUR_SKILL = "fast-talk"
+
+
+def neighbourhood_runtime():
+    """站在邻里、手上有 fast-talk 的房间：`question_neighbors` 在这里可用。"""
+
+    module = ModuleContentV3.model_validate_json(V3_FIXTURE.read_text(encoding="utf-8"))
+    state = GameState(
+        room_id="room_01",
+        scene_id="neighborhood",
+        actors={
+            "pc_1": ActorState(
+                player_id="player_01",
+                name="陈探员",
+                source_character_id="character_v3",
+                source_character_version=1,
+                state={
+                    "skills": {SKILL: 60, NEIGHBOUR_SKILL: 55},
+                    "skill_labels": {SKILL: "侦查", NEIGHBOUR_SKILL: "话术"},
+                },
+            )
+        },
+        entities={},
+    )
+    engine_store = InMemoryEngineStore()
+    engine_store.register_room(module_content=module, initial_state=state)
+    return module, engine_store, PlayerViewProjector(RuleEngineService(engine_store))
+
+
+class MissingCheckAdjudicator:
+    """先犯真实模型犯过的那个错，再照着指引改。
+
+    实测两次都是这样：规则和选项都选对，`check` 却写成 `{"mode":"none"}`。
+    """
+
+    def __init__(self) -> None:
+        self.contexts = []
+
+    async def adjudicate(self, context):
+        self.contexts.append(context)
+        repairing = context.previous_rejection is not None
+        check = (
+            RequiredAdjudicationCheck(
+                candidates=(
+                    SkillCheckCandidate(
+                        candidate_id=NEIGHBOUR_SKILL,
+                        skill_id=NEIGHBOUR_SKILL,
+                        difficulty="regular",
+                        method_summary="搭话套近乎",
+                        player_safe_reason="使用话术",
+                    ),
+                )
+            )
+            if repairing
+            else NoAdjudicationCheck()
+        )
+        return ActionAdjudication(
+            request_id="untrusted",
+            source_revision="untrusted",
+            actor_id="untrusted",
+            summary="跟邻居打听消息",
+            target=ActionTarget(kind="entity", id="lyla"),
+            method=ActionMethod(family="social", description="跟邻居打听消息"),
+            rule_decision=RuleDecisionRef(
+                rule_id="question_neighbors", option_id="fast-talk"
+            ),
+            check=check,
+        )
+
+
+class RuleDroppingAdjudicator(MissingCheckAdjudicator):
+    """B 行：被拒之后不补 check，而是把规则整个丢掉，退回纯叙事。"""
+
+    async def adjudicate(self, context):
+        proposal = await super().adjudicate(context)
+        if context.previous_rejection is None:
+            return proposal
+        return proposal.model_copy(
+            update={"rule_decision": None, "check": NoAdjudicationCheck()},
+            deep=True,
+        )
+
+
+class StubbornAdjudicator(MissingCheckAdjudicator):
+    """E 行：原样返回，什么都不改。"""
+
+    async def adjudicate(self, context):
+        proposal = await super().adjudicate(context)
+        return proposal.model_copy(update={"check": NoAdjudicationCheck()}, deep=True)
+
+
+def issue462_service(adjudicator):
+    _, engine_store, projector = neighbourhood_runtime()
+    engine = AdjudicationEngineService(
+        engine_store,
+        dice=DiceRoller(SequenceDiceSource([10])),
+    )
+    service = ActionPlanOrchestrator(
+        store=InMemoryActionPlanRunStore(),
+        adjudicator=adjudicator,
+        executor=engine,
+        player_view_projector=projector,
+    )
+    return engine_store, service
+
+
+@pytest.mark.asyncio
+async def test_missing_rule_check_is_repaired_back_into_a_roll() -> None:
+    """#462 全链路：拒绝 → 带指引重试 → 语义保持放行 → 真的走到掷骰。
+
+    这条把四处改动串起来测：引擎的 RULE_REQUIRES_CHECK、`to_feedback` 不改写这个
+    码（改写了指引就查不到）、`_REPAIR_HINTS` 的指引跟着拒绝理由回到模型、
+    `_check_is_mechanical` 放行 none → required。少任何一环，这一步都会停成
+    needs_clarification，而不是停在玩家面前的那次检定上。
+    """
+
+    _, engine_store, projector = neighbourhood_runtime()
+    adjudicator = MissingCheckAdjudicator()
+    engine = AdjudicationEngineService(
+        engine_store,
+        dice=DiceRoller(SequenceDiceSource([10])),
+    )
+    service = ActionPlanOrchestrator(
+        store=InMemoryActionPlanRunStore(),
+        adjudicator=adjudicator,
+        executor=engine,
+        player_view_projector=projector,
+    )
+    original = player_input("issue462-parent", "跟邻居打听消息")
+
+    result = await service.start_or_resume(original, plan=plan(1))
+
+    # 修复过一次，而且第二次拿到的是这条错误码和它的指引。
+    assert len(adjudicator.contexts) == 2
+    rejection = adjudicator.contexts[1].previous_rejection
+    assert rejection is not None
+    assert rejection.startswith("RULE_REQUIRES_CHECK: ")
+    assert _REPAIR_HINTS["RULE_REQUIRES_CHECK"] in rejection
+
+    # 停在检定上等玩家，而不是「成功了但什么都没发生」。
+    assert result.run.status == "waiting_for_player"
+    assert result.latest_execution is not None
+    assert result.latest_execution.pending_decision is not None
+
+
+@pytest.mark.asyncio
+async def test_dropping_the_rule_stops_the_plan_to_ask_the_player() -> None:
+    """B 行端到端：放弃规则不被禁止，但这一步要停下来问玩家。
+
+    与 `RULE_OUT_OF_SCOPE` 的分岔就在这里 —— 那边丢规则是静默放行的收窄
+    （`RULE_DECISION_DROPPED`），这边规则确实适用，丢掉它会把一个掷骰门控的模组
+    分支交给自由叙事，所以降级成「要玩家确认」。回合不死，是停下来问。
+    """
+
+    engine_store, service = issue462_service(RuleDroppingAdjudicator())
+    original = player_input("issue462-drop-parent", "跟邻居打听消息")
+
+    result = await service.start_or_resume(original, plan=plan(1))
+
+    assert result.run.status == "needs_clarification"
+    assert result.run.steps[0].status == "stopped"
+    assert result.run.steps[0].safe_failure_code == (
+        "SEMANTIC_REPAIR_REQUIRES_CLARIFICATION"
+    )
+    # 停下来问，不是「成功但什么都没发生」：世界一个字都没写过。
+    assert len(engine_store.inspect_domain_events(original.room_id)) == 0
+
+
+@pytest.mark.asyncio
+async def test_an_unchanged_repair_exhausts_the_budget_instead_of_committing() -> None:
+    """E 行端到端：空转修复撞回同一个拒绝，预算耗尽后停下问玩家。
+
+    语义保持那层判它 preserved（确实什么都没换），所以拦住它的必须是引擎——重新
+    提交会再次撞上 RULE_REQUIRES_CHECK。这条钉住「拒绝是稳定的」：同样的裁决第二
+    次提交不会因为走了修复回路就被放行。
+    """
+
+    engine_store, service = issue462_service(StubbornAdjudicator())
+    original = player_input("issue462-stubborn-parent", "跟邻居打听消息")
+
+    result = await service.start_or_resume(original, plan=plan(1))
+
+    assert result.run.status == "needs_clarification"
+    assert result.run.steps[0].safe_failure_code == "REPAIR_BUDGET_EXHAUSTED"
+    assert len(engine_store.inspect_domain_events(original.room_id)) == 0

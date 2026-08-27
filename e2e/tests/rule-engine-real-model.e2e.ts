@@ -465,13 +465,23 @@ async function settleChecksFor(
   }
 }
 
-// 已知阻塞：真实模型两次都把规则与选项选对（`keep_night_watch` / `luck`），却把
-// `check` 声明成 `{"mode":"none"}`，而候选上的 `requires_check` 明明是 true。引擎
-// 拿到"分支要掷骰、裁决没带检定"时 `return ()`——不提交任何效果，却照样报
-// `action.succeeded`。于是规则静默不触发、叙事写"什么都没发生"、无处报错。
-// 这是模组之外的第三个成因，不属于 #451；待引擎侧改成可修复的显式拒绝后解开 skip。
+// 这条用例的**第一个**阻塞是 #462：真实模型两次都把规则与选项选对
+// （`keep_night_watch` / `luck`），却把 `check` 声明成 `{"mode":"none"}`。引擎拿到
+// "分支要掷骰、裁决没带检定"时 `return ()`——不提交任何效果，却照样报
+// `action.succeeded`。#462 已修：改成拒 `RULE_REQUIRES_CHECK`（auto_repairable /
+// fault=agent），模型拿着 `_REPAIR_HINTS` 的指引补上 check 就能重新提交。
+//
+// 但换到**第二个**阻塞上了，实测 3/3（模组 3.0.9 @ e5ef4c7）：模型不再点名任何
+// 规则，`rule_decision` 直接不出，改为即兴掷一次侦察（`可取消: true`、目标值 60，
+// 而不是规则的幸运 99），于是 `sighted` 始终是 false。候选本身发布得好好的——
+// `keep_night_watch` 在场、`requires_check=True`、`check_skill_id=luck`，
+// semantic_hints 里就有「监视」，而玩家这句正是「监视周围环境」。
+//
+// 「没有规则时不该掷骰」归 #480（即兴检定只验技能归属，不验背后有无规则/后果），
+// 不属于 #462 的范围（#462 明确不含「Agent 侧为何会漏写/不写」）。待 #480 落地后
+// 再解开这条 skip。
 const NPC_SIGHTING_BLOCKED =
-  '阻塞：Agent 声明 check=none 时引擎静默吞掉规则，既不掷骰也不提交效果'
+  '阻塞：真实模型不出 rule_decision，改为即兴侦察检定，规则从不进入链路（#480）'
 
 test(
   '#451 真实模型：守夜幸运成功后人影现身，且喊得出道格拉斯',

@@ -53,7 +53,7 @@ def compare_repair_semantics(
     rule_dropped = _rule_decision_dropped(original, repaired, validation_feedback)
     if not rule_dropped and original.rule_decision != repaired.rule_decision:
         return _clarification("RULE_DECISION_CHANGED")
-    if not _check_is_mechanical(original, repaired):
+    if not _check_is_mechanical(original, repaired, validation_feedback):
         return _clarification("CHECK_CHANGED")
     constraint_result = _check_explicit_constraints(
         player_input,
@@ -236,13 +236,39 @@ def _compare_target(
     return _clarification("TARGET_CHANGED")
 
 
+def _check_realigns_with_rule(
+    original: ActionAdjudication,
+    repaired: ActionAdjudication,
+    feedback: ValidationFeedback,
+) -> bool:
+    """把 check 调整到与规则分支一致，是唯一可自动接受的 mode 变化（#462）。
+
+    引擎拒绝时已经点明了差在哪一边，修复只能朝那一边走：分支要掷骰就补上检定，
+    分支不掷骰就去掉检定。反方向、以及任何别的错误码下的 mode 变化，仍然是
+    `CHECK_CHANGED`——那等于修复把玩家这一步换成了另一件事。
+
+    这里只放行 mode 本身；候选技能、难度是否可用由引擎重新整体校验一遍
+    （`_validated_options`），Host 不替模型认领这部分判断。
+    """
+
+    before, after = original.check, repaired.check
+    if feedback.code == "RULE_REQUIRES_CHECK":
+        return before.mode == "none" and after.mode != "none"
+    if feedback.code == "RULE_FORBIDS_CHECK":
+        return before.mode != "none" and after.mode == "none"
+    return False
+
+
 def _check_is_mechanical(
     original: ActionAdjudication,
     repaired: ActionAdjudication,
+    feedback: ValidationFeedback,
 ) -> bool:
     before = original.check
     after = repaired.check
-    if before.mode != after.mode or len(before.candidates) != len(after.candidates):
+    if before.mode != after.mode:
+        return _check_realigns_with_rule(original, repaired, feedback)
+    if len(before.candidates) != len(after.candidates):
         return False
     for old, new in zip(before.candidates, after.candidates, strict=True):
         if (

@@ -1479,7 +1479,7 @@ class AdjudicationEngineService:
         if adjudication.rule_decision is not None:
             # Refuses an id the module never declared, so a model cannot invent
             # a rule or reach a branch its option does not select.
-            rule, _ = resolve_rule_option(
+            rule, branch_id = resolve_rule_option(
                 runtime.module_content,
                 rule_id=adjudication.rule_decision.rule_id,
                 option_id=adjudication.rule_decision.option_id,
@@ -1508,6 +1508,44 @@ class AdjudicationEngineService:
                     internal_reason=(
                         "RuleDecision 超出当前可用范围: "
                         f"{adjudication.rule_decision.rule_id}"
+                    ),
+                )
+            # 分支声明的掷骰需求，和这次裁决实际带的检定，必须一致（#462）。
+            #
+            # `requires_check` 不是模组字段，投影发布候选时现算的就是下面这个
+            # `pending_check_for`（projection_v3.py），所以 Agent 手里的标注与
+            # 这里的判断同源、不可能不一致——不一致只可能是 Agent 自己写错了。
+            #
+            # 两个方向都必须拦：漏写 check，规则会被静默吞掉（不掷骰、不提交效果，
+            # 却照报 success）；多写 check，掷骰结果会被完全忽略（分支效果无条件
+            # 提交，失败也照样生效）。两种都比可见的失败更糟，因为它们不留痕迹。
+            #
+            # 与 RULE_OUT_OF_SCOPE 一样是 fault="agent" 且可自动修复：补上或去掉
+            # check 就能重新提交，没有理由让玩家的回合死在这里。区别在于此处
+            # agent_match_admits 已经通过、规则确实适用，所以放弃 rule_decision
+            # 不算可自动接受的修复（见 semantic_preservation 的 _rule_decision_dropped）。
+            check_step, _ = pending_check_for(rule, branch_id)
+            declares_check = adjudication.check.mode != "none"
+            if check_step is not None and not declares_check:
+                self._reject_validation(
+                    "RULE_REQUIRES_CHECK",
+                    repairability="auto_repairable",
+                    fault="agent",
+                    player_safe_reason="这次行动需要先进行一次检定",
+                    internal_reason=(
+                        f"Rule {rule.id} 的分支 {branch_id} 在 {check_step.id} 处要求掷骰，"
+                        "裁决却声明 check.mode=none"
+                    ),
+                )
+            if check_step is None and declares_check:
+                self._reject_validation(
+                    "RULE_FORBIDS_CHECK",
+                    repairability="auto_repairable",
+                    fault="agent",
+                    player_safe_reason="这次行动的结果不取决于检定",
+                    internal_reason=(
+                        f"Rule {rule.id} 的分支 {branch_id} 不含检定步，"
+                        f"裁决却声明 check.mode={adjudication.check.mode}"
                     ),
                 )
         else:
@@ -1837,10 +1875,37 @@ class AdjudicationEngineService:
         step, _ = pending_check_for(rule, branch_id)
         if step is not None:
             if check_run is None:
-                # 分支要求掷骰，裁决却没带检定：拒绝提交后果，而不是当作成功。
-                return ()
+                # 兜底：`_validate_adjudication` 已在提交期拦下这种裁决（#462），
+                # 走到这里说明有别的路径绕过了校验。过去这里 `return ()`，效果
+                # 确实没提交，但行动仍被判成功——规则对上层和玩家等价于不存在。
+                AdjudicationEngineService._reject_validation(
+                    "RULE_REQUIRES_CHECK",
+                    repairability="auto_repairable",
+                    fault="agent",
+                    player_safe_reason="这次行动需要先进行一次检定",
+                    internal_reason=(
+                        f"Rule {rule.id} 的分支 {branch_id} 要求掷骰，"
+                        "结算时却没有 CheckRun"
+                    ),
+                    classification_coverage="rule_effects_excluded",
+                )
             degree = (check_run.final_result or check_run.roll).degree
             return tuple(effects_after_degree(rule, step.id, degree))
+
+        if check_run is not None:
+            # 镜像面兜底（#462）：分支不掷骰，却带着掷骰结果走到了结算。下面那条
+            # 「整条链就是它的后果」的路径不看 degree，会把失败的掷骰照成功提交。
+            AdjudicationEngineService._reject_validation(
+                "RULE_FORBIDS_CHECK",
+                repairability="auto_repairable",
+                fault="agent",
+                player_safe_reason="这次行动的结果不取决于检定",
+                internal_reason=(
+                    f"Rule {rule.id} 的分支 {branch_id} 不含检定步，"
+                    "结算时却带着 CheckRun"
+                ),
+                classification_coverage="rule_effects_excluded",
+            )
 
         walk = walk_rule(rule, branch_id=branch_id)
         if walk.completed:

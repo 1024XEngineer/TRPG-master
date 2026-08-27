@@ -82,6 +82,20 @@ _REPAIR_HINTS: dict[str, str] = {
         "target_kinds、target_ids 为空即表示该维度不设限，非空才要求本次裁决落在"
         "其中。确认硬约束不匹配后，才去掉 rule_decision，按普通裁决重新给出这一步。"
     ),
+    "RULE_REQUIRES_CHECK": (
+        "所选 rule_decision 的分支需要掷骰（该候选的 requires_check=true），"
+        "但这一版把 check 写成了 mode=none。保留 summary、method、target 与"
+        " rule_decision 原样不动，只把 check 换成 RequiredAdjudicationCheck，"
+        "技能取该候选的 check_skill_id（没有就选玩家最贴合本次方法的技能）。"
+        "不要为了绕开这个错误去掉 rule_decision——规则此时此地确实适用，去掉它"
+        "会把一个由掷骰决定的模组分支变成自由叙事，这一步会因此停下来问玩家。"
+    ),
+    "RULE_FORBIDS_CHECK": (
+        "所选 rule_decision 的分支不掷骰（该候选的 requires_check=false），"
+        "结果是确定的，但这一版多带了一个 check。保留 summary、method、target 与"
+        " rule_decision 原样不动，只把 check 换成 NoAdjudicationCheck()。"
+        "不要为了凑格式编一个技能出来，也不要去掉 rule_decision。"
+    ),
     "INVENTORY_TARGET_NOT_PORTABLE": (
         "holder_actor_id 只接受 player_view.scene.loose_items、player_view.inventory，"
         "或同一 effects 序列先用 ensure_runtime_entity(entity_kind=object) 创建的物品。"

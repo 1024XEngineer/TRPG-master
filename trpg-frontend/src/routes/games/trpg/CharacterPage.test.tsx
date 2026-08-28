@@ -334,6 +334,27 @@ describe('CharacterPage', () => {
     await advanceToAttributesAfterOccupationPreview()
   })
 
+  it('preserves the current form when the first luck roll creates an empty draft', async () => {
+    renderPage()
+
+    fireEvent.change(screen.getByPlaceholderText('请输入角色姓名'), { target: { value: '当前调查员' } })
+    fireEvent.click(screen.getByText('会计师'))
+    await waitFor(() => {
+      expect(mockPreviewCharacter).toHaveBeenCalledWith(expect.objectContaining({ occupationId: 1 }))
+    })
+    fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
+    await waitFor(() => expect(screen.getByText('属性分配')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '掷幸运骰' }))
+    await waitFor(() => expect(mockCharacterApi.createCharacterDraft).toHaveBeenCalledWith('room-1'))
+    await waitFor(() => expect(mockCharacterApi.rollLuckCharacter).toHaveBeenCalledWith('room-1', 'draft-1'))
+
+    // 首次掷骰创建的草稿尚未保存姓名和职业，回读不能把向导中的内容清空。
+    fireEvent.click(screen.getByRole('tab', { name: '基础信息' }))
+    expect(screen.getByPlaceholderText('请输入角色姓名')).toHaveValue('当前调查员')
+    expect(screen.getByText('取消选择')).toBeInTheDocument()
+  })
+
   it('shows quick-create validation in a dialog without moving the trigger button', () => {
     renderPage()
 
@@ -777,6 +798,8 @@ describe('CharacterPage', () => {
       occupationId: 1,
       skills: { accounting: 1, stealth: 1 },
     }))
+    // 属性状态只在属性页展示，先切换页面再验证幸运值的待掷状态。
+    fireEvent.click(screen.getByRole('tab', { name: '属性' }))
     expect(screen.getByText('待掷')).toBeInTheDocument()
   })
 })

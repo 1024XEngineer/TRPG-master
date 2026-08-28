@@ -236,3 +236,10 @@ async def test_fake_router_delegates_complex_actions() -> None:
     assert decision.route == "delegate_to_legacy"
     assert decision.text is None
     assert provenance == "legacy_delegate"
+
+
+def test_composite_rule_route_carries_no_frozen_rule_fields() -> None:
+    decision = HostEntryDecision(route="composite_rule")
+    assert decision.route == "composite_rule"
+    with pytest.raises(ValidationError):
+        HostEntryDecision(route="composite_rule", rule_id="r1", option_id="o1")

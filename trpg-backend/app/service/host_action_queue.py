@@ -6,10 +6,12 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Literal, cast
 
+from pydantic import ValidationError
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.host_rule_loop import RuleLoopState
 from app.dto.ws import ActionRecipientPayload, RoomActionQueueItemPayload
 from app.models.engine import HostActionQueueItem
 from app.models.room import Player
@@ -132,6 +134,7 @@ async def enqueue(
         own.continuation_text = None
         own.execution_provenance = None
         own.rule_request_json = None
+        own.rule_loop_json = None
         own.result_event_ids = []
         own.attempt_count = 0
         own.next_attempt_at = None
@@ -253,7 +256,13 @@ async def save_execution_route(
     db: AsyncSession,
     item: HostActionQueueItem,
     *,
-    route: Literal["direct_response", "rule_once", "delegate_to_legacy", "needs_clarification"],
+    route: Literal[
+        "direct_response",
+        "rule_once",
+        "composite_rule",
+        "delegate_to_legacy",
+        "needs_clarification",
+    ],
     text: str | None,
     provenance: str,
     rule_request: dict | None = None,
@@ -267,11 +276,33 @@ async def save_execution_route(
     await db.commit()
 
 
+async def save_rule_loop(db: AsyncSession, item: HostActionQueueItem, state: RuleLoopState) -> None:
+    """Persist a validated composite-action cursor atomically with the queue row."""
+
+    if state.client_action_id != item.client_action_id or state.player_id != item.player_id:
+        raise HostActionQueueError("RULE_LOOP_SCOPE", "规则循环不属于当前队列项")
+    item.rule_loop_json = state.dump()
+    await db.commit()
+
+
+def load_rule_loop(item: HostActionQueueItem) -> RuleLoopState | None:
+    if not item.rule_loop_json:
+        return None
+    try:
+        return RuleLoopState.model_validate(item.rule_loop_json)
+    except ValidationError:
+        # Recovery callers treat a malformed cursor as a fail-closed composite
+        # action. Returning no cursor lets the queue finalizer persist a safe stop
+        # and release the room slot instead of leaving ``processing`` forever.
+        return None
+
+
 def effective_execution_route(
     item: HostActionQueueItem,
 ) -> Literal[
     "direct_response",
     "rule_once",
+    "composite_rule",
     "delegate_to_legacy",
     "needs_clarification",
     "unresolved",
@@ -281,6 +312,7 @@ def effective_execution_route(
     if item.execution_route in {
         "direct_response",
         "rule_once",
+        "composite_rule",
         "delegate_to_legacy",
         "needs_clarification",
         "unresolved",
@@ -289,6 +321,7 @@ def effective_execution_route(
             Literal[
                 "direct_response",
                 "rule_once",
+                "composite_rule",
                 "delegate_to_legacy",
                 "needs_clarification",
                 "unresolved",

@@ -511,6 +511,7 @@ async def roll_luck(
     character = await _get_own_character(db, room_id, character_id, reconnect_token)
     room = await find_room_by_id(db, room_id)
     _require_character_editable(room)
+    ruleset = await _resolve_ruleset(db, room)
     current_luck = (character.attributes or {}).get("LUCK")
     if isinstance(current_luck, int) and 1 <= current_luck <= 99:
         raise RoomConflictError("幸运值已经掷出，不能重复掷骰")
@@ -518,6 +519,11 @@ async def roll_luck(
     dice = [random.randint(1, 6) for _ in range(3)]
     luck = sum(dice) * 5
     attributes = dict(character.attributes or {})
+    # 首次点击幸运骰可能直接创建空草稿；补齐缺失的可加点属性，但不覆盖已有值。
+    if ruleset.attribute_point_buy is not None:
+        for attribute in ruleset.attributes:
+            if attribute.point_buy:
+                attributes.setdefault(attribute.key, ruleset.attribute_point_buy.default_value)
     attributes["LUCK"] = luck
     # 用版本条件完成原子写入：两个并发请求最多一个成功，后到者不能覆盖先到结果。
     result = cast(

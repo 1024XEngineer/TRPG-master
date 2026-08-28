@@ -240,6 +240,11 @@ export default function CharacterPage() {
     .getState()
     .getForRoom(useRoomStore.getState().roomId ?? '')
 
+  // 首次掷幸运时会先创建一张空的服务端草稿。这个草稿随后只补齐属性，
+  // 还没有姓名、职业和技能，不能反过来覆盖用户正在填写的向导表单。
+  // 仅跳过这一次回读；刷新页面或重新进入时仍按服务端数据正常水合。
+  const skipNextCharacterHydrationRef = useRef<string | null>(null)
+
   const [generationMethod, setGenerationMethod] = useState<'pointbuy' | 'roll'>(
     existingCharacter?.generationMethod ?? 'pointbuy'
   )
@@ -287,6 +292,15 @@ export default function CharacterPage() {
   // 有 characterId 就以后端那份为准覆盖表单，清掉浏览器缓存也照样能继续编辑。
   useEffect(() => {
     if (!ruleset) return
+    if (
+      !templateHostId
+      && roomId
+      && characterId
+      && skipNextCharacterHydrationRef.current === characterId
+    ) {
+      skipNextCharacterHydrationRef.current = null
+      return
+    }
     // 卡库宿主没有房间，也没有 characterId；读的是那张卡库卡，摊平成向导已经
     // 会读的形状后走同一条水合路径（属性 → 权威 preview 反推技能点 → 填表单）。
     const load = templateHostId
@@ -933,6 +947,9 @@ export default function CharacterPage() {
       let characterId = useRoomStore.getState().characterId
       if (!characterId) {
         characterId = await createCharacterDraft(roomId)
+        // 这张草稿还没保存当前向导里的基础信息，避免下面的回读 effect
+        // 用服务端空字段覆盖用户已经填好的姓名和职业。
+        skipNextCharacterHydrationRef.current = characterId
         setCharacterId(characterId)
       }
       const result = await rollLuckCharacter(roomId, characterId)

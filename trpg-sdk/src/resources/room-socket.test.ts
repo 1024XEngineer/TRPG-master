@@ -801,6 +801,33 @@ class HeartbeatFakeWebSocket {
   }
 }
 
+async function withHeartbeatSocketAsync(
+  run: (socket: RoomSocket) => Promise<void>,
+): Promise<void> {
+  const original = globalThis.WebSocket;
+  HeartbeatFakeWebSocket.instances = [];
+  Object.defineProperty(globalThis, 'WebSocket', {
+    configurable: true,
+    value: HeartbeatFakeWebSocket,
+  });
+  try {
+    const socket = new RoomSocket('ws://example.test');
+    await run(socket);
+    socket.disconnect();
+  } finally {
+    Object.defineProperty(globalThis, 'WebSocket', {
+      configurable: true,
+      value: original,
+    });
+  }
+}
+
+/** mock timers 是同步 tick，promise 的 then 排在微任务里——断言前必须冲一次。 */
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 function withHeartbeatSocket(run: (socket: RoomSocket) => void): void {
   const original = globalThis.WebSocket;
   HeartbeatFakeWebSocket.instances = [];
@@ -917,4 +944,73 @@ test('连接状态：掉线进入 reconnecting，主动断开进入 disconnected
       value: original,
     });
   }
+});
+
+test('重连：可恢复的掉线不清 pending action，重连后仍能被 turn.completed 结算', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+  await withHeartbeatSocketAsync(async (socket) => {
+    const first = socket.connect('room-1', 'token') as unknown as HeartbeatFakeWebSocket;
+    socket.joinRoom('player-1', { reconnectToken: 'rt' } as never);
+    first.onopen?.();
+
+    let settled: unknown = null;
+    void socket
+      .submitPlannedAction('player-1', {
+        clientActionId: completedEvent.correlation_id,
+      } as never)
+      .then((value) => {
+        settled = value;
+      })
+      .catch((error: unknown) => {
+        settled = error;
+      });
+
+    // 掉线：行动在服务端是 durable 的，这里不能把它判失败。
+    first.onclose?.();
+    t.mock.timers.tick(1_000);
+    const second = HeartbeatFakeWebSocket.instances[1]!;
+    second.onopen?.();
+
+    // 服务端按恢复路径重投结果。
+    second.emit(completedEvent);
+    await flushMicrotasks();
+    assert.notEqual(settled, null, 'turn.completed 应当结算那条被保住的 pending action');
+    assert.ok(!(settled instanceof Error), `不应以错误收敛，实际是 ${String(settled)}`);
+  });
+});
+
+/** 与实现保持一致；实现里的常量不导出，这里显式重复一份并在断言中体现其含义。 */
+const RECONNECT_MAX_ATTEMPTS = 8;
+
+test('重连：放弃重连时才把 pending action 判失败', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+  await withHeartbeatSocketAsync(async (socket) => {
+    const first = socket.connect('room-1', 'token') as unknown as HeartbeatFakeWebSocket;
+    socket.joinRoom('player-1', { reconnectToken: 'rt' } as never);
+    first.onopen?.();
+
+    let failure: unknown = null;
+    void socket
+      .submitPlannedAction('player-1', { clientActionId: 'act-lost' } as never)
+      .catch((error: unknown) => {
+        failure = error;
+      });
+
+    // 每次重连出来的连接都连不上（不触发 onopen，直接 close），这样重连计数才会
+    // 累积——一次成功的 onopen 会把计数清零，那是正常恢复，不该走到放弃这一步。
+    let current = first;
+    for (let attempt = 0; attempt < RECONNECT_MAX_ATTEMPTS + 2; attempt += 1) {
+      current.onclose?.();
+      t.mock.timers.tick(30_000);
+      const next = HeartbeatFakeWebSocket.instances.at(-1)!;
+      if (next === current) break;
+      current = next;
+    }
+
+    await flushMicrotasks();
+    assert.ok(
+      failure instanceof RoomSocketTransportError,
+      `重连到顶后必须让调用方拿到失败，实际是 ${String(failure)}`
+    );
+  });
 });

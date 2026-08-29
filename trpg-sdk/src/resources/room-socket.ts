@@ -50,6 +50,12 @@ const RECONNECT_MAX_DELAY_MS = 15_000;
 /** 连续重连失败的上限；到顶后停在 disconnected，等调用方决定是否重新连接。 */
 const RECONNECT_MAX_ATTEMPTS = 8;
 
+/**
+ * 重连成功后，等待服务端重新投递断线期间行动结果的上限。超过就按失败收敛——
+ * 保住 pending 是为了让结果能接回来，不是为了让界面无限期等下去。
+ */
+const PENDING_RECOVERY_GRACE_MS = 60_000;
+
 interface PendingAction {
   promise: Promise<AgentTurnPayload>;
   resolve: (payload: AgentTurnPayload) => void;
@@ -593,6 +599,7 @@ export class RoomSocket {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private pongTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempts = 0;
   private connectionState: RoomSocketConnectionState = 'disconnected';
   private readonly connectionHandlers = new Set<RoomSocketConnectionHandler>();
@@ -611,7 +618,11 @@ export class RoomSocket {
     }
     const previousSocket = this.ws;
     this.ws = null;
-    this.rejectPendingActions(new RoomSocketTransportError('WebSocket connection replaced'));
+    // 自动重连也要经过 connect()，但那条路径必须保住 pendingActions——重连正是为了
+    // 把断线期间在服务端跑完的行动接回来（issue #505）。只有调用方主动换连接时才清。
+    if (!this.pendingRejoin) {
+      this.rejectPendingActions(new RoomSocketTransportError('WebSocket connection replaced'));
+    }
     this.clearTimers();
     // 主动替换不会触发重连：下面 onclose 里的 `this.ws !== socket` 守卫会让旧
     // socket 的关闭事件直接返回。disconnect() 同理（它先把 this.ws 置空）。
@@ -656,6 +667,7 @@ export class RoomSocket {
           return;
         }
         this.pendingActions.delete(parsed.correlation_id);
+        if (this.pendingActions.size === 0) this.clearPendingRecoveryTimer();
         pending.resolve(parsed.payload);
         return;
       }
@@ -722,6 +734,10 @@ export class RoomSocket {
         this.pendingRejoin = false;
         const join = this.lastJoin;
         if (join) this.send('room.join', join.playerId, join.payload);
+        // 断线期间保住的 pending action 要等服务端按恢复路径重新投递结果。给它一个
+        // 上限：服务端如果没有重投（例如那次行动根本没落到 durable plan 上），
+        // 不能让调用方的 promise 永远挂着，界面会一直停在处理中。
+        this.startPendingRecoveryDeadline();
       }
     };
     socket.onclose = () => {
@@ -730,9 +746,16 @@ export class RoomSocket {
       this.roomId = null;
       this.openingMessageId = null;
       this.clearTimers();
-      this.rejectPendingActions(new RoomSocketTransportError('WebSocket connection closed'));
       // 走到这里说明不是调用方主动断开（那两条路径会先把 this.ws 置空/换掉，
       // 上面的守卫就已经返回了），所以是掉线，需要自动恢复（issue #505）。
+      //
+      // 关键：能恢复时**不要**清掉 pendingActions。行动在服务端是 durable 的，
+      // 断线期间它照样跑完；重连后服务端会按 room.join 的恢复路径重新投递
+      // turn.completed。如果这里先 reject 掉，那条恢复结果回来时就找不到匹配的
+      // pending 而被丢弃，界面停在"失败可重试"上，而这次行动其实已经结算了。
+      if (!this.canReconnect()) {
+        this.rejectPendingActions(new RoomSocketTransportError('WebSocket connection closed'));
+      }
       this.scheduleReconnect();
     };
     this.ws = socket;
@@ -952,6 +975,9 @@ export class RoomSocket {
     // disconnected，由调用方决定要不要再 connect()。
     if (this.reconnectAttempts >= RECONNECT_MAX_ATTEMPTS) {
       console.warn('[RoomSocket] 重连次数已达上限，停止自动重连');
+      // 到这一步才真正放弃：保留到现在的 pending action 不可能再收敛了，必须让
+      // 调用方拿到失败，否则界面会永远停在处理中。
+      this.rejectPendingActions(new RoomSocketTransportError('WebSocket connection closed'));
       this.setConnectionState('disconnected');
       return;
     }
@@ -970,6 +996,35 @@ export class RoomSocket {
       this.connect(args.roomId, args.token);
       this.reconnectAttempts = attempts;
     }, delay);
+  }
+
+  /** 这次掉线还有没有自动恢复的机会——决定要不要保住 pendingActions。 */
+  private canReconnect(): boolean {
+    return (
+      this.connectArgs !== null &&
+      this.lastJoin !== null &&
+      this.reconnectAttempts < RECONNECT_MAX_ATTEMPTS
+    );
+  }
+
+  private startPendingRecoveryDeadline(): void {
+    this.clearPendingRecoveryTimer();
+    if (this.pendingActions.size === 0) return;
+    this.pendingRecoveryTimer = setTimeout(() => {
+      this.pendingRecoveryTimer = null;
+      if (this.pendingActions.size === 0) return;
+      console.warn('[RoomSocket] 重连后未收到行动结果，按失败处理以免界面永远停在处理中');
+      this.rejectPendingActions(
+        new RoomSocketTransportError('WebSocket reconnected but the action result never arrived'),
+      );
+    }, PENDING_RECOVERY_GRACE_MS);
+  }
+
+  private clearPendingRecoveryTimer(): void {
+    if (this.pendingRecoveryTimer !== null) {
+      clearTimeout(this.pendingRecoveryTimer);
+      this.pendingRecoveryTimer = null;
+    }
   }
 
   private setConnectionState(state: RoomSocketConnectionState): void {
@@ -995,6 +1050,7 @@ export class RoomSocket {
 
   private clearTimers(): void {
     this.clearHeartbeat();
+    this.clearPendingRecoveryTimer();
     if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

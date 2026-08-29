@@ -187,7 +187,7 @@ from app.service.npc_dialogue import (
 )
 from app.service.time_advance import ConsentAwareAdjudicationEngine
 from app.service.ws_events import broadcast_room_state
-from app.service.ws_manager import manager
+from app.service.ws_manager import manager, send_json_locked
 
 router = APIRouter()
 logger = structlog.get_logger()
@@ -205,6 +205,10 @@ def _listener_ids_for_utterance(utterance: str, player_view: PlayerView) -> tupl
 _UNAUTHORIZED_CLOSE_CODE = 4401
 _NOT_FOUND_CLOSE_CODE = 4404
 _OPENING_MESSAGE_ID = "game-opening"
+# 业务消息队列容量。心跳由 reader 就地应答、不进队列，所以这里只用装下玩家在一个
+# 长回合期间可能连发的几条指令；满了之后 reader 会停在 send 上，对端被 TCP 自然
+# 反压，不会把内存吃掉。
+_CLIENT_MESSAGE_BUFFER = 32
 
 _host_entry_router: HostEntryRouter | None = None
 
@@ -1721,7 +1725,9 @@ async def _send_to_player(websocket: WebSocket | None, message: dict) -> bool:
     if websocket is None:
         return False
     try:
-        await websocket.send_json(message)
+        # 走带锁的出口：心跳的 pong 由独立 reader 任务发出，同一连接上会有两个
+        # 任务并发 send（issue #505）。
+        await send_json_locked(websocket, message)
     except Exception as exc:
         if not _connection_is_gone(websocket, exc):
             raise
@@ -3048,7 +3054,7 @@ async def _handle_room_join(
     await room_service.set_player_connected(db, player_id, True)
     payload = SessionBoundPayload(room_id=room_id, player_id=player_id)
     envelope = ServerEnvelope(type="session.bound", payload=payload.model_dump(by_alias=True))
-    await websocket.send_json(envelope.model_dump(by_alias=True))
+    await send_json_locked(websocket, envelope.model_dump(by_alias=True))
     return True
 
 
@@ -3068,9 +3074,53 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
     await websocket.accept()
     bound_player_id: str | None = None
 
+    # 心跳必须和业务消息走两条路（issue #505）。
+    #
+    # 回合是在这个收消息循环里内联跑完的：`game.start` 会在循环内 await 开场生成
+    # （最长 opening_narration_timeout_seconds，当前 45 秒），行动恢复同理。只要
+    # 循环还在处理这条消息，就不会再次 receive——客户端第 20 秒发出的 ping 要排在
+    # 长流程后面才被读到，10 秒后拿不到 pong 就会关掉一条其实完全正常的连接，
+    # 反而制造出心跳本来要消除的断线。
+    #
+    # 所以由一个独立的 reader 任务负责 receive：ping 就地应答，其余消息投进队列交给
+    # 下面的主循环。主循环的循环体一个字都没动，只是把消息来源从 websocket 换成了
+    # 队列。队列容量有限，业务消息堆积时对端会被 receive 自然反压。
+    send_stream, receive_stream = anyio.create_memory_object_stream[object](
+        max_buffer_size=_CLIENT_MESSAGE_BUFFER
+    )
+
+    reader_failure: list[BaseException] = []
+
+    async def _read_client_messages() -> None:
+        try:
+            async with send_stream:
+                while True:
+                    message = await websocket.receive_json()
+                    if isinstance(message, dict) and message.get("type") == "ping":
+                        # 不开数据库 session、不要求已完成 room.join：连接建立到绑定
+                        # 之间的窗口同样会被中间网关按空闲切断，这段也要保活。
+                        await _send_to_player(
+                            websocket,
+                            ServerEnvelope(type="pong", payload={}).model_dump(by_alias=True),
+                        )
+                        continue
+                    await send_stream.send(message)
+        except BaseException as exc:  # noqa: BLE001 - 原样转交给下面统一的断线判定
+            reader_failure.append(exc)
+            raise
+
+    reader_task = asyncio.create_task(_read_client_messages())
+
     try:
         while True:
-            raw = await websocket.receive_json()
+            try:
+                raw = await receive_stream.receive()
+            except anyio.EndOfStream:
+                # reader 结束了：要么对端断开，要么 receive_json 自己抛了错。把原因
+                # 抛回下面原有的 except 分支，让断线判定始终只有一处。
+                if reader_failure:
+                    raise reader_failure[0] from None
+                raise WebSocketDisconnect(code=1000) from None
 
             # 信封校验不碰数据库，放在开 session 之前。一条信封本身就不合法的
             # 消息（不是对象、type 缺失等）只丢弃这一条，不打断整条连接。
@@ -3088,25 +3138,6 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
             event_type = client_envelope.type
             player_id = client_envelope.player_id
             raw_payload = client_envelope.payload
-
-            if event_type == "ping":
-                # 应用层心跳（issue #505）。刻意放在开 session 之前、也放在
-                # room.join 绑定检查之前：
-                #
-                # - 不开 session：心跳按固定间隔到达，每条都开一个短 session 会在
-                #   多人房间里凭空放大数据库连接压力，而这一帧根本不读写任何状态。
-                # - 不要求已绑定：连接建立到 room.join 之间的窗口同样会被中间网关
-                #   按空闲切断，这段也需要保活。
-                #
-                # 为什么不用 uvicorn 自带的协议级 ping 代替：那条 ping 只覆盖
-                # 「Caddy ↔ 后端」这一段 TCP，而浏览器与后端之间还隔着预览网关和
-                # Caddy 两跳；任意一跳静默失效，协议级 ping 都发现不了。这条心跳是
-                # 端到端的，客户端据此判断整条链路是否还活着。
-                await _send_to_player(
-                    websocket,
-                    ServerEnvelope(type="pong", payload={}).model_dump(by_alias=True),
-                )
-                continue
 
             # 每条消息各开一个短 session，处理完立刻释放——WebSocket 在两条消息
             # 之间等待（receive_json 阻塞）时不持有任何数据库连接。
@@ -4150,6 +4181,8 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
         if not _connection_is_gone(websocket, exc):
             raise
     finally:
+        # reader 还挂在 receive_json 上，连接收尾时必须停掉它，否则任务会泄漏。
+        reader_task.cancel()
         manager.remove(room_id, websocket)
         # 断线清理另开一个短 session：上面每条消息用的 db 作用域已经结束，
         # 这里要把玩家标记为已断开，需要一个新的会话。

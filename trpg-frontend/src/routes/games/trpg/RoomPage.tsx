@@ -1809,9 +1809,29 @@ export default function RoomPage() {
         setProgressLabel(null)
         setSecondaryProgressLabel(null)
       }
+      // 断线重连后补齐的历史里如果已经有这次行动的叙事，说明它在服务端早就结算
+      // 完了，本地那份"处理中/待结算"状态必须一起收掉，否则界面会继续等一个永远
+      // 不会再来的推送（issue #505 PR review）。
+      const inFlightActionId = pendingNarrationActionIdRef.current
+      if (
+        inFlightActionId &&
+        restored.some(
+          (item) =>
+            item.messageId === conversationMessageId('narration.push', inFlightActionId),
+        )
+      ) {
+        pendingNarrationActionIdRef.current = null
+        clearSettledAction(inFlightActionId)
+        setPendingAction((current) =>
+          current?.clientActionId === inFlightActionId ? null : current,
+        )
+        setTyping(false)
+        setProgressLabel(null)
+        setSecondaryProgressLabel(null)
+      }
     }).catch(() => {})
     return () => { cancelled = true }
-  }, [markHostSpeechSeen, roomId, reconnectToken, playerId, senderName, historyReloadKey])
+  }, [clearSettledAction, markHostSpeechSeen, roomId, reconnectToken, playerId, senderName, historyReloadKey])
 
   useEffect(() => {
     // ★ block: 'nearest' 很关键——默认的 scrollIntoView 会尝试把目标"居中"，

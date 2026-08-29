@@ -9,12 +9,16 @@ import uuid
 from dataclasses import dataclass
 from typing import Protocol
 
+import httpx
 import structlog
 from websockets.asyncio.client import connect
 
 logger = structlog.get_logger()
 
 DOUBAO_TTS_ENDPOINT = "wss://openspeech.bytedance.com/api/v3/tts/unidirectional/stream"
+DOUBAO_LIST_SPEAKERS_ENDPOINT = (
+    "https://open.volcengineapi.com/?Action=ListSpeakers&Version=2025-05-20"
+)
 
 _FULL_CLIENT_NO_EVENT = b"\x11\x10\x10\x00"
 _FULL_CLIENT_WITH_EVENT = b"\x11\x14\x10\x00"
@@ -49,6 +53,14 @@ class HostSpeechRequest:
 class HostSpeechResult:
     audio: bytes
     content_type: str = "audio/mpeg"
+
+
+@dataclass(frozen=True, slots=True)
+class HostSpeechCatalogItem:
+    """豆包资源包返回的可用音色；只保留稳定 ID 和公开名称。"""
+
+    voice_type: str
+    label: str
 
 
 class HostSpeechProvider(Protocol):
@@ -178,10 +190,58 @@ class DoubaoHostSpeechProvider:
         api_key: str,
         resource_id: str,
         timeout_seconds: float,
+        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._api_key = api_key
         self._resource_id = resource_id
         self._timeout_seconds = timeout_seconds
+        self._transport = transport
+
+    async def list_speakers(self, resource_id: str) -> tuple[HostSpeechCatalogItem, ...]:
+        """按当前 ResourceID 读取豆包可用音色，失败交给服务层安全降级。"""
+
+        payload = {
+            "ResourceIDs": [resource_id],
+            "Page": 1,
+            "Limit": "1000",
+        }
+        headers = {
+            "X-Api-Key": self._api_key,
+            "X-Api-Resource-Id": resource_id,
+            "Content-Type": "application/json",
+        }
+        async with httpx.AsyncClient(
+            timeout=self._timeout_seconds,
+            transport=self._transport,
+        ) as client:
+            response = await client.post(
+                DOUBAO_LIST_SPEAKERS_ENDPOINT,
+                headers=headers,
+                json=payload,
+            )
+            response.raise_for_status()
+            body = response.json()
+        result = body.get("Result") if isinstance(body, dict) else None
+        speakers = result.get("Speakers") if isinstance(result, dict) else None
+        if not isinstance(speakers, list):
+            raise HostSpeechProviderError("豆包音色列表响应格式无效")
+        items: dict[str, HostSpeechCatalogItem] = {}
+        for speaker in speakers:
+            if not isinstance(speaker, dict):
+                continue
+            voice_type = speaker.get("VoiceType")
+            label = speaker.get("Name") or voice_type
+            if isinstance(voice_type, str) and voice_type.startswith("zh_"):
+                # 上游偶尔会在分页或资源聚合结果中重复音色；首个公开名称
+                # 足够稳定，最终按 voice_type 排序保证配置和测试可复现。
+                items.setdefault(
+                    voice_type,
+                    HostSpeechCatalogItem(
+                        voice_type=voice_type,
+                        label=label if isinstance(label, str) else voice_type,
+                    ),
+                )
+        return tuple(items[key] for key in sorted(items))
 
     async def synthesize(self, request: HostSpeechRequest) -> HostSpeechResult:
         request_id = str(uuid.uuid4())

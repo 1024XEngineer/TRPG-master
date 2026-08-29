@@ -151,6 +151,8 @@ class Settings(BaseSettings):
     doubao_tts_voices: list[HostSpeechVoiceConfig] = Field(default_factory=list)
     doubao_tts_default_voice_type: str | None = None
     doubao_tts_timeout_seconds: float = Field(default=15.0, gt=0, le=60)
+    # ListSpeakers 目录只需短时刷新，避免每次播放都请求豆包，同时能感知资源包变化。
+    doubao_tts_catalog_ttl_seconds: int = Field(default=300, ge=0, le=86400)
     host_speech_max_sentence_bytes: int = Field(default=900, ge=100, le=4000)
     host_speech_cache_ttl_seconds: int = Field(default=3600, ge=0, le=86400)
     host_speech_cache_max_bytes: int = Field(default=67_108_864, ge=0)

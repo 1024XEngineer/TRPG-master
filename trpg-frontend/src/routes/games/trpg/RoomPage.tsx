@@ -2552,6 +2552,8 @@ export default function RoomPage() {
           const isPlayer = msg.type === 'player' && msg.isSelf
           const isNarr = msg.type === 'narr'
           const isNpc = msg.type === 'npc'
+          const speechId = isNpc ? speechEventId(msg) : msg.narrationId
+          const isCurrentSpeechMessage = speechId === hostSpeech.currentMessageId
           const portraitUrl = msg.playerId ? portraitUrls[msg.playerId] : undefined
 
           return (
@@ -2587,7 +2589,7 @@ export default function RoomPage() {
                 </div>
                 <div className={`room-play__message-card ${isNarr ? 'room-play__narration-card' : ''} ${isNpc ? 'room-play__npc-card' : ''}`}>
                   <div className="room-play__narration-text whitespace-pre-wrap">
-                    {isNarr && msg.narrationId === hostSpeech.currentMessageId && hostSpeech.currentSentences.length > 0
+                    {isCurrentSpeechMessage && hostSpeech.currentSentences.length > 0
                       ? hostSpeech.currentSentences.map((sentence) => (
                           <span
                             key={sentence.index}

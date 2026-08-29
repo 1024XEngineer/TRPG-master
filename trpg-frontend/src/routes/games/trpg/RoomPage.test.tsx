@@ -1610,6 +1610,39 @@ describe('RoomPage conversation history', () => {
     await waitFor(() => expect(mockGetHostSpeechManifest).toHaveBeenCalledTimes(1))
   })
 
+  it('highlights the NPC sentence currently being spoken', async () => {
+    installRoomSpeechApi()
+    localStorage.setItem('aidm-host-speech-settings', JSON.stringify({ enabled: true }))
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    emitWsMessage({
+      type: 'dialogue.npc',
+      payload: {
+        messageId: 'npc-live-1',
+        speakerId: 'caretaker',
+        speakerName: '守墓人',
+        avatarUrl: null,
+        listenerIds: ['actor-1'],
+        participantIds: ['caretaker', 'actor-1'],
+        text: '历史 NPC 语音',
+        sceneId: 'scene-1',
+        sourceDialogueId: 'dialogue-player-1',
+        sourceActionId: 'action-dialogue-1',
+        ordinal: 0,
+        sourceRevision: 'revision-1',
+        sentAt: '2026-07-28T10:03:00Z',
+        audiencePlayerIds: ['player-1'],
+      },
+    })
+
+    expect(await screen.findByText('历史 NPC 语音')).toBeInTheDocument()
+    await waitFor(() => expect(mockGetNpcSpeechManifest).toHaveBeenCalledWith(
+      'room-1', 'npc-live-1', 'token-1', 'reconnect-1', expect.any(AbortSignal),
+    ))
+    expect(screen.getByText('历史 NPC 语音')).toHaveClass('bg-brass/20', 'rounded-sm')
+  })
+
   it('does not auto-speak restored history but supports manual replay', async () => {
     installRoomSpeechApi()
     localStorage.setItem('aidm-host-speech-settings', JSON.stringify({ enabled: true, voiceURI: null }))

@@ -1475,3 +1475,35 @@ def test_model_http_timeout_never_widens_a_tighter_budget() -> None:
     assert timeout.connect == 2.0
     assert timeout.write == 2.0
     assert timeout.pool == 2.0
+
+
+def test_no_production_http_client_passes_a_scalar_timeout() -> None:
+    """所有生产 HTTP 客户端都必须用分阶段超时（issue #510）。
+
+    这条是防漏网的：#510 第一版只扫了 `timeout=self._timeout_seconds` 这一种写法，
+    漏掉了 DashScope 的 `min(self._timeout_seconds, 30.0)`（review 抓到）和
+    portrait_image 的下载客户端。标量 timeout 会被 httpx 同时套到 connect 上，
+    这正是本 issue 要消除的形态，所以用源码扫描把它钉住。
+    """
+
+    import re
+    from pathlib import Path
+
+    backend_root = Path(__file__).resolve().parents[1] / "app"
+    offenders: list[str] = []
+    for path in sorted(backend_root.rglob("*.py")):
+        source = path.read_text(encoding="utf-8")
+        for match in re.finditer(r"httpx\.AsyncClient\((.*?)\)", source, re.DOTALL):
+            block = match.group(1)
+            timeout_match = re.search(r"timeout=([^,\n]+)", block)
+            if timeout_match is None:
+                continue
+            expression = timeout_match.group(1).strip()
+            if not expression.startswith("model_http_timeout("):
+                line = source[: match.start()].count("\n") + 1
+                offenders.append(f"{path.relative_to(backend_root.parent)}:{line} -> {expression}")
+
+    assert not offenders, (
+        "这些 httpx 客户端还在用标量 timeout，连不上时会把整份预算耗在建连上：\n"
+        + "\n".join(offenders)
+    )

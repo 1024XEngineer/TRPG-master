@@ -16,6 +16,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from PIL import Image, UnidentifiedImageError
 
+from app.adapters.structured_http import model_http_timeout
 from app.service.portrait_generation import (
     PortraitImageGenerationError,
     PortraitImageTimeoutError,
@@ -88,7 +89,8 @@ class PortraitImageMaterializer:
         current_url = value
         try:
             async with httpx.AsyncClient(
-                timeout=self._timeout_seconds,
+                # 下载同样要把建连拆出来：连不上时不该占满整份下载预算。
+                timeout=model_http_timeout(self._timeout_seconds),
                 transport=self._transport,
             ) as client:
                 for redirect_count in range(_MAX_REDIRECTS + 1):

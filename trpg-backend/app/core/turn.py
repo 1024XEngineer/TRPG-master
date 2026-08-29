@@ -36,6 +36,7 @@ from collaboration_framework.host.ports import (
 from collaboration_framework.host.prompts.action_plan import PROMPT_VERSION
 from collaboration_framework.host.schemas import (
     NarrationOutput,
+    OpeningNarrationContext,
     RecentHistoryBudget,
     RecentTurnContext,
 )
@@ -155,6 +156,37 @@ class SessionViewApplication:
         )
         return await PlayerViewProjector(self.engine).project_scope(scope)
 
+    async def _narrate_opening_with_retry(
+        self,
+        context: OpeningNarrationContext,
+    ) -> NarrationOutput:
+        """安全校验拒绝时带提示重试一次，再不过才让调用方降级（issue #505）。
+
+        原来这里是「一次不过立刻降级」。实测最常撞上的不是超时，而是
+        `participant_coverage`——校验要求正文逐字包含每位玩家的角色名，而玩家
+        起的名字可能是任意短语（实测「回家了」），模型写出的自然叙事很容易没有
+        原样嵌进那几个字，于是整段作废。这类失败模型自己是能改对的，缺的只是
+        「你哪里没做到」这一句话，和回合叙事那条链的处理方式一致。
+
+        重试只做一轮：再多就是在用玩家的等待时间赌模型，而降级模板本身已经点名
+        了全部参与者，安全性不依赖这次重试。
+        """
+
+        narrator = OpeningNarrator(self.opening_narration_model)
+        try:
+            return await narrator.narrate(context)
+        except OpeningNarrationValidationError as exc:
+            logger.warning(
+                "opening_narration_rejected",
+                message_id="game-opening",
+                attempt=1,
+                reason=exc.reason,
+            )
+            hint = _opening_retry_hint(exc.reason, context)
+            if hint is None:
+                raise
+            return await narrator.narrate(context.model_copy(update={"narration_retry_hint": hint}))
+
     async def generate_opening(
         self,
         player_view: PlayerView,
@@ -181,8 +213,10 @@ class SessionViewApplication:
             result = "template"
         else:
             try:
+                # 整个重试序列共用一份超时预算：重试是为了救回被安全校验拒绝的
+                # 那一版，不是把玩家的等待时间翻倍。
                 with anyio.fail_after(self.opening_narration_timeout_seconds):
-                    narration = await OpeningNarrator(self.opening_narration_model).narrate(context)
+                    narration = await self._narrate_opening_with_retry(context)
                 result = "model"
             except Exception as exc:  # the opening must never prevent entering InGame
                 failure_category = _opening_failure_category(exc)
@@ -211,6 +245,34 @@ class SessionViewApplication:
             result=result,
             failure_category=failure_category,
         )
+
+
+def _opening_retry_hint(
+    reason: str,
+    context: OpeningNarrationContext,
+) -> str | None:
+    """把拒绝类别翻译成模型能照着改的一句话；不可自愈的类别返回 None。"""
+
+    if reason == "participant_coverage":
+        names = "、".join(participant.name for participant in context.participants)
+        return (
+            "上一版开场没有逐字写出全部玩家角色的姓名。必须在正文中原样出现："
+            f"{names}。这些是玩家自己起的名字，不得改写、简称、翻译或用称谓替代，"
+            "即使它读起来不像人名。"
+        )
+    if reason == "subject_ownership":
+        return (
+            "上一版开场用错了叙述人称。addressing_mode=named_actor 时，引号外不得用"
+            "“你”或“您”称呼玩家角色，必须使用 participants 中的姓名。"
+        )
+    if reason in {"protocol_tail", "schema_fragment", "opening_contract"}:
+        return (
+            "上一版开场把协议内容写进了正文。text 只能是自然的角色内叙事，"
+            "不得包含 JSON、字段名、schema 片段或自检说明；"
+            "claimed_fact_ids 与 suggested_actions 必须是空数组。"
+        )
+    # outer_schema 是整份输出结构就不对，给提示也谈不上"改正哪里"，直接降级。
+    return None
 
 
 def _opening_failure_category(exc: Exception) -> str:

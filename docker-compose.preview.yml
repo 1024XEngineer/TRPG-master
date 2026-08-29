@@ -43,9 +43,13 @@ services:
       # 宽松值只是兜底（比如直接拿后端端口调试），不依赖它生效。
       CORS_ORIGINS: '["*"]'
       HOST_MODEL_PROVIDER: ${HOST_MODEL_PROVIDER:-fake}
-      # 开场超时独立于 Provider HTTP 超时，便于预览环境快速降级到安全模板。
+      # 开场超时必须严格大于 provider 的 HTTP 超时（QWEN_TIMEOUT_SECONDS 等），
+      # 否则 provider 侧的超时与重试永远轮不到，外层守卫总是先取消整个调用。
+      # 原来这里写 10 秒（"便于预览环境快速降级到安全模板"），那个取舍在"验证功能
+      # 能不能跑"时成立，在"稳定游玩"时不成立：真实 provider 几乎必然超时，预览上
+      # 每一局开场都是模板文案（issue #505）。留空即采用后端默认值 45 秒。
       OPENING_NARRATION_MODE: ${OPENING_NARRATION_MODE:-model}
-      OPENING_NARRATION_TIMEOUT_SECONDS: ${OPENING_NARRATION_TIMEOUT_SECONDS:-10}
+      OPENING_NARRATION_TIMEOUT_SECONDS: ${OPENING_NARRATION_TIMEOUT_SECONDS:-45}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       # Preview 默认使用当前新厂商的 v4 Pro；CI 仍可通过 Repository
       # Variables 显式覆盖，通用后端配置不受这里的 Preview 默认值影响。

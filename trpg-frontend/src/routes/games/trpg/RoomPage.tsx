@@ -121,9 +121,16 @@ const checkDifficultyLabels: Record<string, string> = {
 
 function checkResultContent(payload: CheckResultPayload): string {
   const levelLabel = checkResultLevelLabels[payload.successLevel] ?? payload.result
-  const outcomeLabel = payload.passed
-    ? levelLabel
-    : `${levelLabel}（未通过${checkDifficultyLabels[payload.difficulty] ?? ''}检定）`
+  // 括号只在"够到了常规成功、但没够到这次要求的难度"时才有信息量（issue #505）。
+  // 判定本身已经是失败或大失败时再附一句「未通过困难检定」会误导——玩家会以为
+  // 只是差在难度档位上，实际连常规都没过（实测 侦察 43% 掷出 95 也带这个括号）。
+  const missedRequiredDifficultyOnly =
+    !payload.passed &&
+    payload.successLevel !== 'failure' &&
+    payload.successLevel !== 'fumble'
+  const outcomeLabel = missedRequiredDifficultyOnly
+    ? `${levelLabel}（未通过${checkDifficultyLabels[payload.difficulty] ?? ''}检定）`
+    : levelLabel
   const resolutionLabel =
     payload.resolutionKind === 'spend_luck' && payload.luckSpent
       ? ` · 消耗 ${payload.luckSpent} 点幸运 → ${outcomeLabel}`

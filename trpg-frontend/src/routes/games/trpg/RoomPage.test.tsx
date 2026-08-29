@@ -2330,6 +2330,59 @@ describe('RoomPage conversation history', () => {
     vi.useRealTimers()
   })
 
+  it('只在够到常规成功但未达要求难度时才附注难度说明', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    // 要求困难成功、只掷到常规成功：括号有信息量，保留。
+    await act(async () => {
+      emitWsMessage({
+        type: 'check.result',
+        payload: {
+          playerId: 'player-1',
+          clientActionId: 'check-hard-miss',
+          skill: 'skill-persuade',
+          skillName: '取悦',
+          targetValue: 15,
+          rollValue: 11,
+          difficulty: 'hard',
+          successLevel: 'regular',
+          passed: false,
+          result: 'regular',
+          resolutionKind: 'initial_roll',
+        },
+      })
+    })
+    expect(
+      screen.getByText('取悦 15% · D100 11 · 成功（未通过困难检定）'),
+    ).toBeInTheDocument()
+
+    // 彻底失败：再附"未通过困难检定"会让玩家以为只差在难度档位上（issue #505）。
+    await act(async () => {
+      emitWsMessage({
+        type: 'check.result',
+        payload: {
+          playerId: 'player-1',
+          clientActionId: 'check-outright-fail',
+          skill: 'skill-search',
+          skillName: '侦察',
+          targetValue: 43,
+          rollValue: 95,
+          difficulty: 'hard',
+          successLevel: 'failure',
+          passed: false,
+          result: 'failure',
+          resolutionKind: 'initial_roll',
+        },
+      })
+    })
+    expect(screen.getByText('侦察 43% · D100 95 · 失败')).toBeInTheDocument()
+    expect(
+      screen.queryByText('侦察 43% · D100 95 · 失败（未通过困难检定）'),
+    ).not.toBeInTheDocument()
+  })
+
+
   it('shows copyable diagnostics and only offers retry for retryable failures', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'clipboard', {

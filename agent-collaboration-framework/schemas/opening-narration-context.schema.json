@@ -154,6 +154,19 @@
       ],
       "title": "Addressing Mode",
       "type": "string"
+    },
+    "narration_retry_hint": {
+      "anyOf": [
+        {
+          "maxLength": 500,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Narration Retry Hint"
     }
   },
   "required": [

@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { RoomSocketServerError, TurnFailedError, type AdjudicationPendingPayload, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type CheckResultPayload, type EndingDraft, type NarrationPushPayload, type RoomActionStatePayload, type RoomConversationEvent, type RoomPlayerSummary, type SceneTransitionPendingPayload, type TimeAdvancePendingPayload } from 'trpg-sdk'
+import { RoomSocketServerError, TurnFailedError, type RoomSocketConnectionState, type AdjudicationPendingPayload, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type CheckResultPayload, type EndingDraft, type NarrationPushPayload, type RoomActionStatePayload, type RoomConversationEvent, type RoomPlayerSummary, type SceneTransitionPendingPayload, type TimeAdvancePendingPayload } from 'trpg-sdk'
 import { ArrowLeft, Users, Map, MapPin, BookOpen, ScrollText, Star, X, SendHorizontal, Plus, Save, FlagOff, Heart, Brain, Volume2, Pause, Play, Square, RotateCcw, Mic, LoaderCircle, Clock3, Check } from 'lucide-react'
 import { useCallback, useState, useRef, useEffect, useMemo, type Dispatch, type FormEvent, type SetStateAction } from 'react'
 import { useRoomStore } from '@/stores/room-store'
@@ -121,9 +121,16 @@ const checkDifficultyLabels: Record<string, string> = {
 
 function checkResultContent(payload: CheckResultPayload): string {
   const levelLabel = checkResultLevelLabels[payload.successLevel] ?? payload.result
-  const outcomeLabel = payload.passed
-    ? levelLabel
-    : `${levelLabel}（未通过${checkDifficultyLabels[payload.difficulty] ?? ''}检定）`
+  // 括号只在"够到了常规成功、但没够到这次要求的难度"时才有信息量（issue #505）。
+  // 判定本身已经是失败或大失败时再附一句「未通过困难检定」会误导——玩家会以为
+  // 只是差在难度档位上，实际连常规都没过（实测 侦察 43% 掷出 95 也带这个括号）。
+  const missedRequiredDifficultyOnly =
+    !payload.passed &&
+    payload.successLevel !== 'failure' &&
+    payload.successLevel !== 'fumble'
+  const outcomeLabel = missedRequiredDifficultyOnly
+    ? `${levelLabel}（未通过${checkDifficultyLabels[payload.difficulty] ?? ''}检定）`
+    : levelLabel
   const resolutionLabel =
     payload.resolutionKind === 'spend_luck' && payload.luckSpent
       ? ` · 消耗 ${payload.luckSpent} 点幸运 → ${outcomeLabel}`
@@ -1563,6 +1570,11 @@ export default function RoomPage() {
     return cached?.room_id === roomId ? cached : null
   })
   const [progressLabel, setProgressLabel] = useState<string | null>(null)
+  const [wsConnectionState, setWsConnectionState] =
+    useState<RoomSocketConnectionState>('connecting')
+  const wsConnectionStateRef = useRef<RoomSocketConnectionState>('connecting')
+  /** 每次重连成功后 +1，用来重新拉取断线期间错过的会话历史。 */
+  const [historyReloadKey, setHistoryReloadKey] = useState(0)
   const [secondaryProgressLabel, setSecondaryProgressLabel] = useState<string | null>(null)
   const [streamingNarration, setStreamingNarration] = useState<StreamingNarration | null>(null)
   // 队列而不是单槽：揭示窗口最长 REVEAL_MAX_MS，这期间完全可能再来一条叙事
@@ -1755,6 +1767,24 @@ export default function RoomPage() {
     if (roomInfo?.phase) setRoomPhase(roomInfo.phase)
   }, [roomInfo?.phase])
 
+  // 连接状态与断线恢复（issue #505）。
+  //
+  // 断线期间服务端的 narration.push / view.updated / turn.completed 全部投递失败
+  // （服务端日志里是 ws_send_dropped），这些帧不会补发。所以重连成功后必须重新
+  // 拉一次会话历史——这正是过去只能靠用户手动刷新页面才能做到的事。
+  useEffect(() => {
+    const previousStateRef = { current: wsConnectionStateRef.current }
+    return sdk.roomSocket.onConnectionChange((state) => {
+      const previous = previousStateRef.current
+      previousStateRef.current = state
+      wsConnectionStateRef.current = state
+      setWsConnectionState(state)
+      if (previous === 'reconnecting' && state === 'open') {
+        setHistoryReloadKey((key) => key + 1)
+      }
+    })
+  }, [])
+
   useEffect(() => {
     if (!roomId || !reconnectToken) return
     let cancelled = false
@@ -1779,9 +1809,29 @@ export default function RoomPage() {
         setProgressLabel(null)
         setSecondaryProgressLabel(null)
       }
+      // 断线重连后补齐的历史里如果已经有这次行动的叙事，说明它在服务端早就结算
+      // 完了，本地那份"处理中/待结算"状态必须一起收掉，否则界面会继续等一个永远
+      // 不会再来的推送（issue #505 PR review）。
+      const inFlightActionId = pendingNarrationActionIdRef.current
+      if (
+        inFlightActionId &&
+        restored.some(
+          (item) =>
+            item.messageId === conversationMessageId('narration.push', inFlightActionId),
+        )
+      ) {
+        pendingNarrationActionIdRef.current = null
+        clearSettledAction(inFlightActionId)
+        setPendingAction((current) =>
+          current?.clientActionId === inFlightActionId ? null : current,
+        )
+        setTyping(false)
+        setProgressLabel(null)
+        setSecondaryProgressLabel(null)
+      }
     }).catch(() => {})
     return () => { cancelled = true }
-  }, [markHostSpeechSeen, roomId, reconnectToken, playerId, senderName])
+  }, [clearSettledAction, markHostSpeechSeen, roomId, reconnectToken, playerId, senderName, historyReloadKey])
 
   useEffect(() => {
     // ★ block: 'nearest' 很关键——默认的 scrollIntoView 会尝试把目标"居中"，
@@ -2615,6 +2665,20 @@ export default function RoomPage() {
                 </div>
               </div>
               <div className="room-play__message-meta">生成中…</div>
+            </div>
+          </div>
+        )}
+
+        {/* 连接状态（issue #505）。断线必须可见：过去连接断了以后既不重连也不
+            提示，界面停在"处理中"的点点上，玩家只能猜要不要刷新页面。*/}
+        {isActionChannel && wsConnectionState !== 'open' && wsConnectionState !== 'connecting' && (
+          <div className="room-play__message room-play__message--narration">
+            <div className="room-play__typing">
+              <span className="text-[11px] text-text-muted">
+                {wsConnectionState === 'reconnecting'
+                  ? '连接已断开，正在重新连接…'
+                  : '连接已断开，请刷新页面重试'}
+              </span>
             </div>
           </div>
         )}

@@ -15,6 +15,7 @@ from collaboration_framework.contracts import (
     VisibleActorView,
 )
 from collaboration_framework.engine import InMemoryEngineStore, RuleEngineService
+from collaboration_framework.host.ports import OpeningNarrationModelPort
 from collaboration_framework.host.schemas import OpeningNarrationContext
 
 from app.core.config import Settings
@@ -97,7 +98,7 @@ class CandidateOpeningModel:
 
 
 def application(
-    model: CandidateOpeningModel,
+    model: OpeningNarrationModelPort,
     *,
     mode: Literal["model", "template"] = "model",
 ):
@@ -153,3 +154,78 @@ async def test_template_mode_does_not_call_model() -> None:
 
     assert result.result == "template"
     assert model.calls == 0
+
+
+class RetryAwareOpeningModel:
+    """第一次给出缺名字的开场，收到重试提示后改对（issue #505）。"""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.hints: list[str | None] = []
+
+    async def generate(self, context) -> dict:
+        self.calls += 1
+        self.hints.append(context.narration_retry_hint)
+        if context.narration_retry_hint is None:
+            return {
+                "kind": "narration",
+                "text": "杜明站在旧宅门厅。",
+                "claimed_fact_ids": [],
+                "suggested_actions": [],
+            }
+        return {
+            "kind": "narration",
+            "text": "杜明与林夏一同站在旧宅门厅的昏黄灯光下。",
+            "claimed_fact_ids": [],
+            "suggested_actions": [],
+        }
+
+
+async def test_participant_coverage_rejection_retries_once_with_hint() -> None:
+    """校验拒绝不该直接降级：模型缺的只是"哪里没做到"这一句话。
+
+    实测最常见的失败不是超时，而是玩家把角色起名成任意短语（例如"回家了"），
+    模型写出的自然叙事没有原样嵌进那几个字，整段被 participant_coverage 作废。
+    """
+
+    model = RetryAwareOpeningModel()
+    result = await application(model).generate_opening(opening_view())
+
+    assert result.result == "model", "带提示重试后应当拿到模型开场，而不是降级模板"
+    assert result.failure_category is None
+    assert model.calls == 2, "只重试一轮"
+    assert model.hints[0] is None
+    assert model.hints[1] is not None
+    # 提示必须点名缺失的角色，否则模型无从改起。
+    assert "杜明" in model.hints[1]
+    assert "林夏" in model.hints[1]
+    assert "杜明" in result.narration.text
+    assert "林夏" in result.narration.text
+
+
+class AlwaysMissingParticipantModel:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def generate(self, context) -> dict:
+        self.calls += 1
+        return {
+            "kind": "narration",
+            "text": "杜明站在旧宅门厅。",
+            "claimed_fact_ids": [],
+            "suggested_actions": [],
+        }
+
+
+async def test_opening_retry_is_capped_at_one_extra_attempt() -> None:
+    """重试只做一轮：再多就是拿玩家的等待时间赌模型。"""
+
+    model = AlwaysMissingParticipantModel()
+    result = await application(model).generate_opening(opening_view())
+
+    assert model.calls == 2
+    assert result.result == "fallback"
+    assert result.failure_category == "validation_participant_coverage"
+    # 降级模板本身点名了全部参与者，安全性不依赖这次重试。
+    assert "杜明" in result.narration.text
+    assert "林夏" in result.narration.text

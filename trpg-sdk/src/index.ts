@@ -23,7 +23,11 @@ export {
   RoomSocketTransportError,
   TurnFailedError,
 } from './resources/room-socket';
-export type { RoomSocketHandler } from './resources/room-socket';
+export type {
+  RoomSocketHandler,
+  RoomSocketConnectionState,
+  RoomSocketConnectionHandler,
+} from './resources/room-socket';
 
 export interface TrpgSdkOptions extends ApiClientOptions {
   /** WS 连接的根地址，比如 "ws://127.0.0.1:8000"（不含 /api/v1，也不含

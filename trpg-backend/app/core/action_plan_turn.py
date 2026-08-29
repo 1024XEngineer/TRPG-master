@@ -2109,8 +2109,7 @@ class ActionPlanTurnApplication:
             (
                 entity
                 for entity in context.player_view.scene.visible_entities
-                if entity.id == context.player_input.interlocutor_id
-                and entity.kind == "npc"
+                if entity.id == context.player_input.interlocutor_id and entity.kind == "npc"
             ),
             None,
         )
@@ -2118,9 +2117,7 @@ class ActionPlanTurnApplication:
             return narration
         return narration.model_copy(
             update={
-                "npc_replies": (
-                    ActionPlanNpcReply(speaker_id=npc.id, text="我听见了你的话。"),
-                )
+                "npc_replies": (ActionPlanNpcReply(speaker_id=npc.id, text="我听见了你的话。"),)
             }
         )
 

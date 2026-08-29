@@ -462,9 +462,7 @@ async def test_narration_drops_the_offending_sentence_instead_of_the_whole_prose
     text = "你在门厅站定，四下打量。你把传单收进外套口袋。远处传来钟声。"
     offending = "你把传单收进外套口袋。"
     start = text.index(offending)
-    narrator = _ValidatingNarrator(
-        _rejection_with_span(text, start, start + len(offending))
-    )
+    narrator = _ValidatingNarrator(_rejection_with_span(text, start, start + len(offending)))
     application._narrator = narrator
     context = cast(
         ActionPlanNarrationContext,
@@ -566,9 +564,7 @@ async def test_narration_retry_hint_points_at_the_declaration_field(
     """申报类拒绝必须给出可操作的出路；通用提示在 narrative_only 上无从执行。"""
     application = object.__new__(ActionPlanTurnApplication)
     success = SimpleNamespace(kind="narration", text="环境恢复正常。", npc_replies=())
-    narrate = AsyncMock(
-        side_effect=[ActionPlanNarrationValidationError(reason), success]
-    )
+    narrate = AsyncMock(side_effect=[ActionPlanNarrationValidationError(reason), success])
     application._narrator = SimpleNamespace(narrate=narrate)
     context = cast(
         ActionPlanNarrationContext,
@@ -686,9 +682,7 @@ def test_disclosure_source_maps_index_without_leaking_the_term() -> None:
 
     # 越界或缺失时安静返回 None，不能让诊断字段本身把日志写崩。
     for index in (None, -1, 2):
-        exc = ActionPlanNarrationValidationError(
-            "hidden_disclosure", disclosure_term_index=index
-        )
+        exc = ActionPlanNarrationValidationError("hidden_disclosure", disclosure_term_index=index)
         assert _disclosure_source(exc, sources) is None
     assert _disclosure_source(hit, ()) is None
 

@@ -255,6 +255,28 @@ class _PersistentNarrationModel:
         }
 
 
+class _DeclaringNarrationModel:
+    """按 #512 的申报范式返回叙事：正文之外还自报背包与状态变化。"""
+
+    def __init__(self, text, *, inventory_ids=(), state_changes=()):
+        self.text = text
+        self.inventory_ids = inventory_ids
+        self.state_changes = state_changes
+
+    async def generate(self, context):
+        return {
+            "kind": "narration",
+            "text": self.text,
+            "claimed_evidence_refs": [],
+            "claimed_inventory_ids": list(self.inventory_ids),
+            "claimed_state_changes": [
+                {"entity_id": entity_id, "key": key, "value": value}
+                for entity_id, key, value in self.state_changes
+            ],
+            "suggested_actions": [],
+        }
+
+
 class _PersistentNarrationWithNpcRepliesModel:
     def __init__(self, text: str) -> None:
         self.text = text
@@ -272,13 +294,24 @@ class _PersistentNarrationWithNpcRepliesModel:
 
 
 class PersistentNarrationPolicyTests(unittest.IsolatedAsyncioTestCase):
-    def _context(self, *, results=(), inventory=(), utterance="行动"):
+    def _context(
+        self,
+        *,
+        results=(),
+        inventory=(),
+        utterance="行动",
+        entities=(),
+        loose_items=(),
+    ):
         view = SimpleNamespace(
             room_id="room",
             player_id="player",
             actor_id="actor",
             background="背景",
-            scene=SimpleNamespace(visible_entities=()),
+            scene=SimpleNamespace(
+                visible_entities=entities,
+                loose_items=loose_items,
+            ),
             inventory=inventory,
         )
         return ActionPlanNarrationContext.model_construct(
@@ -624,6 +657,162 @@ class PersistentNarrationPolicyTests(unittest.IsolatedAsyncioTestCase):
             ).narrate(self._context())
 
         self.assertEqual(raised.exception.reason, "npc_dialogue_embedded_in_text")
+
+
+# 《幸福蛙蛙村》lane_manor 的权威投影：两件场景物件与一位在场 NPC。
+# 传单在模组里是 kind=object 的可见实体，不是 loose_item——权威物品名闭集
+# 必须同时覆盖这两个来源，#512 的验收用例正压在这上面。
+_FLYER = SimpleNamespace(
+    id="resort_flyer",
+    kind="object",
+    name="蛙蛙度假村传单",
+    aliases=(),
+    observable_state=(),
+)
+_COMMISSION = SimpleNamespace(
+    id="lane_commission",
+    kind="object",
+    name="莱恩夫妇的委托",
+    aliases=(),
+    observable_state=(),
+)
+_MADAM_LANE = SimpleNamespace(
+    id="madam_lane", kind="npc", name="莱恩夫人", aliases=(), observable_state=()
+)
+_LANE_MANOR = (_FLYER, _COMMISSION, _MADAM_LANE)
+
+# Issue #512 验收用例。传单与委托都在场，最终 inventory 为空。
+_TRANSIENT_HANDLING_CASES = (
+    "你拿起电话，拨打了传单上的号码，但电话那头传来的只是一阵持续的忙音，无人接听。",
+    "你拿起听筒贴到耳边，线路那头一片死寂。",
+    "你拿起桌上的照片，指腹擦过詹姆斯的脸。",
+    "你拿起茶杯抿了一口，茶已经凉了。",
+    "你拿起手册翻到第一页。",
+    "莱恩夫人拿起手帕擦了擦眼角。",
+    "你拿起门边的雨伞掂了掂重量。",
+    "你拿起传单，仔细端详上面的图案。",
+)
+_ACQUISITION_CLAIM_CASES = (
+    "你把传单收进外套口袋。",
+    "你把蛙蛙度假村传单放进背包。",
+    "你顺手把那张传单带走了。",
+)
+
+
+class InventoryClaimDeclarationTests(unittest.IsolatedAsyncioTestCase):
+    """#512：取得判定由动词词表改为申报 + 对引擎真值的集合包含判断。"""
+
+    _context = PersistentNarrationPolicyTests._context
+
+    async def test_transient_handling_is_not_an_acquisition_claim(self):
+        """临时取用是开集搭配，词表追不上；它本就不声称物品进了背包。"""
+        context = self._context(entities=_LANE_MANOR)
+        for text in _TRANSIENT_HANDLING_CASES:
+            with self.subTest(text=text):
+                output = await ActionPlanNarrator(
+                    _PersistentNarrationModel(text)
+                ).narrate(context)
+                self.assertEqual(output.text, text)
+
+    async def test_rejects_unsupported_acquisition_of_a_scene_item(self):
+        """声称权威物品进了背包、而最终 inventory 里没有它时仍然必须拒绝。"""
+        context = self._context(entities=_LANE_MANOR)
+        for text in _ACQUISITION_CLAIM_CASES:
+            with self.subTest(text=text):
+                with self.assertRaises(ActionPlanNarrationValidationError) as raised:
+                    await ActionPlanNarrator(
+                        _PersistentNarrationModel(text)
+                    ).narrate(context)
+                self.assertEqual(
+                    raised.exception.reason,
+                    "persistent_claim_without_evidence:inventory_acquisition",
+                )
+
+    async def test_allows_deposit_once_the_item_reached_final_inventory(self):
+        """同一句话在传单确实入包后必须通过——判据是最终 inventory，不是措辞。"""
+        context = self._context(
+            entities=_LANE_MANOR,
+            inventory=(SimpleNamespace(id="resort_flyer", name="蛙蛙度假村传单"),),
+        )
+        output = await ActionPlanNarrator(
+            _DeclaringNarrationModel(
+                "你把传单收进背包。", inventory_ids=("resort_flyer",)
+            )
+        ).narrate(context)
+        self.assertEqual(output.claimed_inventory_ids, ("resort_flyer",))
+
+    async def test_rejects_inventory_declaration_absent_from_final_inventory(self):
+        """过度申报：申报的 id 不在最终 inventory，集合校验当场挡掉。"""
+        with self.assertRaises(ActionPlanNarrationValidationError) as raised:
+            await ActionPlanNarrator(
+                _DeclaringNarrationModel(
+                    "你把传单收进背包。", inventory_ids=("resort_flyer",)
+                )
+            ).narrate(self._context(entities=_LANE_MANOR))
+        self.assertEqual(raised.exception.reason, "inventory_claim_scope")
+
+    async def test_rejects_state_declaration_absent_from_engine_truth(self):
+        """状态申报同样只做集合包含判断，写不出引擎认得的三元组就过不去。"""
+        with self.assertRaises(ActionPlanNarrationValidationError) as raised:
+            await ActionPlanNarrator(
+                _DeclaringNarrationModel(
+                    "守墓人靠在墓碑上。",
+                    state_changes=(("butler", "consciousness", "unconscious"),),
+                )
+            ).narrate(self._context())
+        self.assertEqual(raised.exception.reason, "state_claim_scope")
+
+    async def test_allows_state_declaration_backed_by_committed_result(self):
+        result = CommittedResult(
+            kind="character_state",
+            target_id="butler",
+            state_key="consciousness",
+            state_value="unconscious",
+            event_ref="event-1",
+        )
+        output = await ActionPlanNarrator(
+            _DeclaringNarrationModel(
+                "守墓人昏迷了。",
+                state_changes=(("butler", "consciousness", "unconscious"),),
+            )
+        ).narrate(self._context(results=(result,)))
+        self.assertEqual(len(output.claimed_state_changes), 1)
+
+    async def test_under_declared_claim_carries_the_offending_sentence(self):
+        """申报不足时优先修复正文而不是丢弃它：错误必须带上可剔除的那一句。"""
+        text = "你在门厅站定，四下打量。你把传单收进外套口袋。远处传来钟声。"
+        with self.assertRaises(ActionPlanNarrationValidationError) as raised:
+            await ActionPlanNarrator(_PersistentNarrationModel(text)).narrate(
+                self._context(entities=_LANE_MANOR)
+            )
+        error = raised.exception
+        self.assertIsNotNone(error.output)
+        self.assertEqual(len(error.offending_spans), 1)
+        start, end = error.offending_spans[0]
+        self.assertEqual(text[start:end], "你把传单收进外套口袋。")
+        self.assertEqual(
+            text[:start] + text[end:],
+            "你在门厅站定，四下打量。远处传来钟声。",
+        )
+
+    async def test_npc_subject_deposit_is_not_a_player_acquisition(self):
+        """主语是在场 NPC 时，这句与玩家背包无关；判别沿用 #425 的实体类型口径。"""
+        output = await ActionPlanNarrator(
+            _PersistentNarrationModel("莱恩夫人把委托的信件收进口袋。")
+        ).narrate(self._context(entities=_LANE_MANOR))
+        self.assertIn("收进口袋", output.text)
+
+    async def test_loose_scene_items_also_bind_takeaway_verbs(self):
+        """权威物品名闭集必须覆盖场景散落物，不只是可见实体。"""
+        loose = (SimpleNamespace(id="brass_key", name="一枚黄铜钥匙"),)
+        with self.assertRaises(ActionPlanNarrationValidationError) as raised:
+            await ActionPlanNarrator(
+                _PersistentNarrationModel("你顺手把那枚黄铜钥匙带走了。")
+            ).narrate(self._context(loose_items=loose))
+        self.assertEqual(
+            raised.exception.reason,
+            "persistent_claim_without_evidence:inventory_acquisition",
+        )
 
 
 if __name__ == "__main__":

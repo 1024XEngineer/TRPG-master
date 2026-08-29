@@ -18,15 +18,31 @@ from .narration_policy import (
     normalize_narration_text,
 )
 from .persistent_results import (
+    sentence_span_at,
     unsupported_inventory_acquisition_claim,
     unsupported_persistent_claim,
 )
 
 
 class ActionPlanNarrationValidationError(ContractError):
-    def __init__(self, reason: str) -> None:
+    """一次玩家可见输出校验失败。
+
+    ``output`` 与 ``offending_spans`` 只在拒绝可以定位到具体句子时给出，供调用方
+    做句级降级——剔除违规小句后复校验剩余正文，而不是把整段替换成状态播报。
+    两者都是可选的：调用方仍可只带 ``reason`` 构造。
+    """
+
+    def __init__(
+        self,
+        reason: str,
+        *,
+        output: ActionPlanNarrationOutput | None = None,
+        offending_spans: tuple[tuple[int, int], ...] = (),
+    ) -> None:
         super().__init__("ActionPlanNarrationOutput 未通过玩家可见输出安全校验")
         self.reason = reason
+        self.output = output
+        self.offending_spans = offending_spans
 
 
 _CORPSE_SEARCH_QUESTION = re.compile(
@@ -46,7 +62,19 @@ class ActionPlanNarrator:
         self,
         context: ActionPlanNarrationContext,
     ) -> ActionPlanNarrationOutput:
-        raw = await self._model.generate(context)
+        return self.validate(context, await self._model.generate(context))
+
+    def validate(
+        self,
+        context: ActionPlanNarrationContext,
+        raw: object,
+    ) -> ActionPlanNarrationOutput:
+        """Run every player-visible safety gate over one narration candidate.
+
+        与 ``narrate`` 分开是为了让句级降级阶梯能在不再调用模型的情况下复校验
+        剔除违规小句后的正文。
+        """
+
         if isinstance(raw, dict) and isinstance(raw.get("text"), str):
             raw = {**raw, "text": normalize_narration_text(raw["text"])}
         try:
@@ -57,11 +85,40 @@ class ActionPlanNarrator:
             context.allowed_evidence_refs
         ):
             raise ActionPlanNarrationValidationError("evidence_scope")
+        committed_results = tuple(
+            result
+            for step in context.completed_steps
+            for result in step.committed_results
+        )
+        # 申报字段的校验退化为对引擎真值的集合包含判断，不含任何词表。这不是
+        # “信任模型”：撒谎的成本从绕过一个动词表，变成必须写一个引擎当场查表
+        # 否掉的 id。
+        inventory_ids = {item.id for item in context.player_view.inventory}
+        if not set(output.claimed_inventory_ids).issubset(inventory_ids):
+            raise ActionPlanNarrationValidationError("inventory_claim_scope")
+        authoritative_states = {
+            (result.target_id, result.state_key, result.state_value)
+            for result in committed_results
+            if result.state_key is not None
+        } | {
+            (entity.id, state.key, state.value)
+            for entity in context.player_view.scene.visible_entities
+            for state in entity.observable_state
+        }
+        if not {
+            (claim.entity_id, claim.key, claim.value)
+            for claim in output.claimed_state_changes
+        }.issubset(authoritative_states):
+            raise ActionPlanNarrationValidationError("state_claim_scope")
         # 先检查整段文本再判断语气；“可能/或许/据说”同样会把答案送到玩家端。
         # 禁止词索引由服务端构造且不会进入模型 payload。
         for term in context.forbidden_disclosure_terms:
             if term and term.casefold() in output.text.casefold():
-                raise ActionPlanNarrationValidationError("hidden_disclosure")
+                raise ActionPlanNarrationValidationError(
+                    "hidden_disclosure",
+                    output=output,
+                    offending_spans=_term_sentence_spans(output.text, term),
+                )
         required = tuple(
             item for item in context.narration_evidence if item.required_in_narration
         )
@@ -103,11 +160,6 @@ class ActionPlanNarrator:
         )
         if atmosphere_rejection is not None:
             raise ActionPlanNarrationValidationError(atmosphere_rejection)
-        committed_results = tuple(
-            result
-            for step in context.completed_steps
-            for result in step.committed_results
-        )
         persistent_rejection = unsupported_persistent_claim(
             output.text,
             committed_results,
@@ -115,7 +167,11 @@ class ActionPlanNarrator:
         )
         if persistent_rejection is not None:
             raise ActionPlanNarrationValidationError(
-                f"persistent_claim_without_evidence:{persistent_rejection}"
+                f"persistent_claim_without_evidence:{persistent_rejection.reason}",
+                output=output,
+                offending_spans=(
+                    (persistent_rejection.start, persistent_rejection.end),
+                ),
             )
         inventory_rejection = unsupported_inventory_acquisition_claim(
             output.text,
@@ -124,7 +180,9 @@ class ActionPlanNarrator:
         )
         if inventory_rejection is not None:
             raise ActionPlanNarrationValidationError(
-                f"persistent_claim_without_evidence:{inventory_rejection}"
+                f"persistent_claim_without_evidence:{inventory_rejection.reason}",
+                output=output,
+                offending_spans=((inventory_rejection.start, inventory_rejection.end),),
             )
         visible_dead = tuple(
             entity
@@ -148,3 +206,22 @@ class ActionPlanNarrator:
         ):
             raise ActionPlanNarrationValidationError("clarification_kind")
         return output
+
+
+def _term_sentence_spans(text: str, term: str) -> tuple[tuple[int, int], ...]:
+    """Locate the sentences that leaked a forbidden term, for sentence-level repair."""
+
+    folded_text = text.casefold()
+    folded_term = term.casefold()
+    if len(folded_text) != len(text):
+        # casefold 可能改变长度（如 ß→ss），下标就对不上了。宁可放弃句级定位，
+        # 让调用方走原有的整段兜底，也不能剔错句子。
+        return ()
+    spans: list[tuple[int, int]] = []
+    start = folded_text.find(folded_term)
+    while start != -1:
+        span = sentence_span_at(text, start)
+        if span not in spans:
+            spans.append(span)
+        start = folded_text.find(folded_term, start + 1)
+    return tuple(spans)

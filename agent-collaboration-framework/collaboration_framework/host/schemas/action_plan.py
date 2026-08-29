@@ -523,12 +523,32 @@ class ActionPlanNpcReply(ContractModel):
     text: str = Field(min_length=1, max_length=1000)
 
 
+class NarrationStateClaim(ContractModel):
+    """叙事自报的一条持久状态断言，供服务端做集合包含校验。
+
+    ``value`` 不用 ``JsonValue``：``CommittedResult.state_value`` 实际只出现字符串
+    与布尔两种（``"unconscious"`` / ``True``），而 ``JsonValue`` 会在结构化输出的
+    JSON Schema 里展开成一大片 anyOf，拖低模型对整个 schema 的遵从度。
+    """
+
+    entity_id: str = Field(min_length=1)
+    key: str = Field(min_length=1)
+    value: str | bool
+
+
 class ActionPlanNarrationOutput(ContractModel):
     """守秘人叙事输出：主 narration 可附带少量结构化 NPC 跟进发言。"""
 
     kind: Literal["narration", "clarification"] = "narration"
     text: str = Field(min_length=1)
     claimed_evidence_refs: tuple[str, ...] = ()
+    # 写下正文的模型知道自己有没有在声称取得物品或改写持久状态，校验器不知道。
+    # 这两个字段沿用 claimed_evidence_refs 的范式，把语义判断交还给模型，让服务端
+    # 只做对引擎真值的集合包含判断，而不是在开集的中文表达上维护动词词表。
+    # 结构化输出的遵从度随 schema 增大而下降：申报字段以这两个为预算上限，
+    # 不要演变成一条检查一个字段。
+    claimed_inventory_ids: tuple[str, ...] = ()
+    claimed_state_changes: tuple[NarrationStateClaim, ...] = ()
     suggested_actions: tuple[str, ...] = Field(default=(), max_length=3)
     # 同回合最多跟进 3 条 NPC 发言；超出部分由 schema 直接拒绝，避免前后端排序复杂化。
     npc_replies: tuple[ActionPlanNpcReply, ...] = Field(default=(), max_length=3)

@@ -2,15 +2,36 @@
 
 该模块只消费 Engine 已生成的 ``CommittedResult``，把 Narrator 文本中的确定性
 持久声明限制在已有证据范围内；权威效果匹配仍由 engine/persistent_results.py 负责。
+
+这里的判据分两层。主力是 ``ActionPlanNarrationOutput`` 的结构化申报字段——写下
+正文的模型自报它声称了什么，服务端只做对引擎真值的集合包含判断（见
+``action_plan_narrator``）。本模块承担的是申报不足时的守门补丁：模型漏填字段却在
+正文里写了断言时，用**权威数据界定的窄窗口**兜住，命中后由调用方做句级降级而不是
+丢弃整段正文。窄窗口的意思是——判定必须绑定到闭集（最终 inventory、场景散落物、
+可见实体）上的具体对象，不能只凭一张中文动词表。
 """
 
 from __future__ import annotations
 
 import re
+from typing import NamedTuple
 
 from pydantic import JsonValue
 
 from collaboration_framework.contracts import CommittedResult, PlayerView
+
+
+class ClaimRejection(NamedTuple):
+    """一条被拒的持久声明：类别，以及它在原文中的句子区间。
+
+    ``start`` / ``end`` 是**原始 text** 的下标，调用方据此剔除违规小句后保留其余
+    正文。为此屏蔽引语时按等长空白替换而不是删除，下标才不会错位。
+    """
+
+    reason: str
+    start: int
+    end: int
+
 
 _PERSISTENT_CLAIMS: tuple[tuple[str, str, JsonValue], ...] = (
     # 中文叙事经常不用“昏迷”这个词，以下同义表达也必须受同一证据约束。
@@ -29,6 +50,10 @@ _PERSISTENT_CLAIMS: tuple[tuple[str, str, JsonValue], ...] = (
     (r"已经损坏|被破坏|已经破碎|碎裂", "broken", True),
 )
 _QUOTED_TEXT = re.compile(r"[“\"『「][^”\"』」]*[”\"』」]")
+# 句子区间要连着句末标点一起给出，剔除违规小句时才不会留下孤零零的句号。
+_SENTENCE_SPAN = re.compile(r"[^。！？!?\n]+[。！？!?\n]*")
+# 小句边界：动词的论元只可能落在同一个小句里。
+_CLAUSE_DELIMITERS = "，,、；;：:"
 _NON_ASSERTIVE_PREFIX = re.compile(
     r"(?:未|没有|并未|尚未|不会|不能|无法|如果|假如|倘若|是否|能否|想要|试图|准备|打算)$"
 )
@@ -37,34 +62,80 @@ _PLAYER_PRESENCE = re.compile(r"你(?:们)?(?:正|仍|还)?(?:站在|站着|坐�
 _ABSENT_PRESENCE = re.compile(
     r"人(?:却|已经|却已经)?不见|不在(?:这里|现场)|找不到(?:他|她)"
 )
-_INVENTORY_ACQUISITION = re.compile(
-    r"捡起|拾起|拿起|拿走|取走|收好|收下|带走|收入囊中|"
-    r"(?:放|装|塞|收)(?:入|进|到).{0,10}(?:背包|行囊|口袋|物品栏)|"
+# 明确的入包声明：目的地本身就是“玩家背包”这个权威概念，不依赖任何语义猜测。
+# 中间的填充不得跨小句，否则“把照片放进相框，然后打开背包”会被并成一次入包声明。
+_INVENTORY_DEPOSIT = re.compile(
+    rf"(?:放|装|塞|收)(?:入|进|到)[^{_CLAUSE_DELIMITERS}。！？!?]{{0,10}}"
+    r"(?:背包|行囊|口袋|物品栏)|"
     r"(?:背包|行囊|口袋|物品栏)(?:里|中)?(?:多了|有了|装着|放着|收着)"
 )
-_TRANSIENT_HANDLING = re.compile(
-    r"查看|察看|翻看|阅读|端详|观察|检查|展开|翻阅|仔细看|研究"
-)
+# 取得类动词但没有显式容器。“收好”既可以是收进背包，也可以是把书放回架上；
+# 这一层只有绑定到权威物品名时才判定，不能单凭动词。
+# 注意这里没有“拿起/拾起/捡起”：它们在中文里表示瞬时持握（拿起电话拨号、拿起
+# 茶杯抿一口），本就不承载“取得”语义，是 #512 全部误杀的来源。
+_INVENTORY_TAKEAWAY = re.compile(r"拿走|取走|收好|收下|带走|收入囊中")
 _NON_ASSERTIVE_ACQUISITION = re.compile(
     r"未|没有|没能|并未|不能|无法|不曾|试图|尝试|打算|准备|想要|却没"
 )
 _ITEM_PRONOUN = re.compile(r"它们?|该物品|此物")
 
 
+def _mask_quoted(text: str) -> str:
+    """按等长空白屏蔽引语，保持后续下标与原文一致。"""
+
+    return _QUOTED_TEXT.sub(lambda match: " " * len(match.group(0)), text)
+
+
+def sentence_span_at(text: str, index: int) -> tuple[int, int]:
+    """返回包含 ``index`` 的句子区间；没有命中时退回整段。"""
+
+    for match in _SENTENCE_SPAN.finditer(text):
+        if match.start() <= index < match.end():
+            return match.start(), match.end()
+    return 0, len(text)
+
+
+def _clause_at(sentence: str, start: int, end: int) -> str:
+    """返回 ``[start, end)`` 所在的小句，用于把物品名绑定到动词的论元位。"""
+
+    left = start
+    while left > 0 and sentence[left - 1] not in _CLAUSE_DELIMITERS:
+        left -= 1
+    right = end
+    while right < len(sentence) and sentence[right] not in _CLAUSE_DELIMITERS:
+        right += 1
+    return sentence[left:right]
+
+
+def _labels_of(entity: object) -> tuple[str, ...]:
+    return tuple(
+        label
+        for label in (getattr(entity, "name", ""), *getattr(entity, "aliases", ()))
+        if label
+    )
+
+
 def unsupported_persistent_claim(
     text: str,
     committed_results: tuple[CommittedResult, ...],
     player_view: PlayerView | None = None,
-) -> str | None:
-    """返回首个缺少证据或与当前状态冲突的持久声明类别。
+) -> ClaimRejection | None:
+    """返回首个缺少证据或与当前状态冲突的持久声明及其所在句子。
 
     ``committed_results`` 只覆盖本回合事件；``player_view`` 则覆盖之前回合
     已经写入并重新投影的公开状态，避免 NPC 状态跨回合丢失。
+
+    这里仍然保留状态动词表。状态断言的闭集锚点是可见实体名，而
+    ``visible_entities`` 并不是“可被合法提及的角色”的全集（随行者、运行时对话
+    人物都可能不在其中，见下方注释），把词表收窄到“必须点名可见实体”会放行
+    “守墓人昏迷了”这类点名场外实体的无证据断言。词表因此留作兜底，其误判代价
+    由调用方的句级降级阶梯承担——被拒的是一小句，不再是整段正文。
     """
 
-    asserted_text = _QUOTED_TEXT.sub("", text)
+    asserted_text = _mask_quoted(text)
     entities = () if player_view is None else player_view.scene.visible_entities
-    for sentence in re.split(r"[。！？]", asserted_text):
+    for span in _SENTENCE_SPAN.finditer(asserted_text):
+        sentence = span.group(0)
         active_claim = _ACTIVE_PRESENCE.search(sentence)
         absent_claim = _ABSENT_PRESENCE.search(sentence)
         if (not active_claim and not absent_claim) or _PLAYER_PRESENCE.search(sentence):
@@ -72,19 +143,13 @@ def unsupported_persistent_claim(
         mentioned = tuple(
             entity
             for entity in entities
-            if any(
-                label and label in sentence
-                for label in (
-                    getattr(entity, "name", ""),
-                    *getattr(entity, "aliases", ()),
-                )
-            )
+            if any(label in sentence for label in _labels_of(entity))
         )
         # 当前 PlayerView 只投影标准场景实体，随行者或运行时对话人物可能暂未
         # 出现在 visible_entities。不能仅凭“未投影”判定叙事越权，否则会把正常
         # 的同行、交谈全部拒绝；这里只否决已有明确权威状态冲突的可见实体。
         if absent_claim and mentioned:
-            return "entity_presence"
+            return ClaimRejection("entity_presence", span.start(), span.end())
         for entity in mentioned:
             consciousness = next(
                 (
@@ -95,7 +160,7 @@ def unsupported_persistent_claim(
                 None,
             )
             if active_claim and consciousness in {"dead", "unconscious"}:
-                return "entity_presence"
+                return ClaimRejection("entity_presence", span.start(), span.end())
     for pattern, key, value in _PERSISTENT_CLAIMS:
         for match in re.finditer(pattern, asserted_text):
             prefix = asserted_text[max(0, match.start() - 8) : match.start()]
@@ -114,13 +179,7 @@ def unsupported_persistent_claim(
             mentioned_entities = tuple(
                 entity
                 for entity in entities
-                if any(
-                    name and name in sentence
-                    for name in (
-                        getattr(entity, "name", ""),
-                        *getattr(entity, "aliases", ()),
-                    )
-                )
+                if any(name in sentence for name in _labels_of(entity))
             )
             mentioned_ids = {entity.id for entity in mentioned_entities}
             if key == "posture":
@@ -185,7 +244,8 @@ def unsupported_persistent_claim(
                     for state in entity.observable_state
                 )
             if not has_evidence:
-                return key
+                start, end = sentence_span_at(asserted_text, match.start())
+                return ClaimRejection(key, start, end)
     return None
 
 
@@ -193,41 +253,67 @@ def unsupported_inventory_acquisition_claim(
     text: str,
     committed_results: tuple[CommittedResult, ...],
     player_view: PlayerView,
-) -> str | None:
-    """Reject prose that claims an acquisition absent from final inventory.
+) -> ClaimRejection | None:
+    """Reject prose that claims an acquisition absent from the final inventory.
 
-    An ``entity.moved`` event by itself is insufficient: older behavior could
-    attach ``holder_actor_id`` to a generic entity while inventory projection
-    ignored it.  A truthful acquisition therefore needs both a current-turn
-    inventory result and the same id in the final PlayerView inventory.
+    主力判据是 ``ActionPlanNarrationOutput.claimed_inventory_ids`` 的集合包含校验；
+    本函数只兜“正文声称了却没有申报”的那一半，并按声明的强弱分两级：
+
+    * **明确入包声明**（“放进背包 / 收进口袋 / 背包里多了……”）——目的地本身就是
+      玩家背包这个权威概念，无需任何语义猜测，因此无条件要求正文点名一件确实在
+      最终 ``player_view.inventory`` 里的物品。判据是最终 inventory 而不是“本回合
+      inventory 结果 ∩ 最终 inventory”：承重的一直是前者（只有移动事件而最终背包
+      没有该 id，正是它挡下的），而后者会把“传单上一回合就已入包”的正常复述也拒掉。
+    * **无容器的取得类动词**（“带走 / 取走 / 收好”）——中文里它们既可能是取得，也
+      可能只是收拾归位，单凭动词无法判别。只有当动词所在**小句**里出现了权威物品名
+      （场景散落物 ∪ 可见实体 ∪ 最终背包），且该物品不在最终背包时才判定。小句这一
+      层不能省：“你拿起电话，拨打了传单上的号码”整句里确实有权威物品名“传单”，但
+      它不是该动词的论元。
     """
 
-    result_ids = {
-        result.target_id for result in committed_results if result.kind == "inventory"
-    }
-    confirmed_items = tuple(
-        item for item in player_view.inventory if item.id in result_ids
+    inventory = tuple(getattr(player_view, "inventory", ()) or ())
+    held_ids = {item.id for item in inventory}
+    scene = getattr(player_view, "scene", None)
+    entities = tuple(getattr(scene, "visible_entities", ()) or ())
+    # 权威物品名闭集：场景散落物、可见实体与最终背包，全部来自 PlayerView 投影。
+    known_objects = (
+        *(getattr(scene, "loose_items", ()) or ()),
+        *entities,
+        *inventory,
     )
-    asserted_text = _QUOTED_TEXT.sub("", text)
-    for sentence in re.split(r"[。！？!?]", asserted_text):
-        match = _INVENTORY_ACQUISITION.search(sentence)
+    asserted_text = _mask_quoted(text)
+    for span in _SENTENCE_SPAN.finditer(asserted_text):
+        sentence = span.group(0)
+        deposit = _INVENTORY_DEPOSIT.search(sentence)
+        takeaway = _INVENTORY_TAKEAWAY.search(sentence)
+        match = deposit or takeaway
         if match is None:
-            continue
-        # “拿起传单仔细查看”只描述本次检查时的临时持握，并不声明物品已经
-        # 进入背包或由玩家持续保管。持久取得仍由“拿走/收好/放进背包”等措辞
-        # 以及最终 inventory 交叉确认；不要让常见的检查叙事触发误报。
-        if match.group(0) in {"拿起", "拾起"} and _TRANSIENT_HANDLING.search(sentence):
             continue
         prefix = sentence[max(0, match.start() - 12) : match.start()]
         if _NON_ASSERTIVE_ACQUISITION.search(prefix):
             continue
-        if not confirmed_items:
-            return "inventory_acquisition"
-        if any(_mentions_inventory_item(sentence, item.name) for item in confirmed_items):
+        clause = _clause_at(sentence, match.start(), match.end())
+        # 主语是在场 NPC 时，这句描述的是别人的动作，与玩家背包无关。
+        # 与 #425 对 posture 的实体类型判别同一形状：闭集、按 kind 判别。
+        if any(
+            getattr(entity, "kind", "npc") == "npc"
+            and any(label in clause for label in _labels_of(entity))
+            for entity in entities
+        ):
             continue
-        if len(confirmed_items) == 1 and _ITEM_PRONOUN.search(sentence):
-            continue
-        return "inventory_acquisition"
+        if deposit is not None:
+            if any(_mentions_inventory_item(sentence, item.name) for item in inventory):
+                continue
+            if len(inventory) == 1 and _ITEM_PRONOUN.search(sentence):
+                continue
+            return ClaimRejection("inventory_acquisition", span.start(), span.end())
+        named = tuple(
+            item
+            for item in known_objects
+            if any(_mentions_inventory_item(clause, label) for label in _labels_of(item))
+        )
+        if named and all(getattr(item, "id", None) not in held_ids for item in named):
+            return ClaimRejection("inventory_acquisition", span.start(), span.end())
     return None
 
 

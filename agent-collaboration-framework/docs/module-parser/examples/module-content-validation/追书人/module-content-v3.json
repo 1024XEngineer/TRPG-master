@@ -218,6 +218,11 @@
         "委托人"
       ],
       "description": "道格拉斯·金博尔的侄子，现住在叔叔的旧居。他希望找回五本失窃藏书，并确认叔叔的下落。",
+      "voice": {
+        "provider": "doubao",
+        "resource_id": "seed-tts-2.0",
+        "voice_type": "zh_male_dongfanghaoran_uranus_bigtts"
+      },
       "located_in": "thomas_office",
       "state": {
         "case_open": true,
@@ -236,6 +241,11 @@
         "夜行者"
       ],
       "description": "夜色中一条瘦削的人影，怀里似乎夹着一本书。",
+      "voice": {
+        "provider": "doubao",
+        "resource_id": "seed-tts-2.0",
+        "voice_type": "zh_male_xuanyijieshuo_uranus_bigtts"
+      },
       "located_in": "crypt",
       "state": {
         "alive": true,
@@ -306,6 +316,11 @@
         "邻居"
       ],
       "description": "道格拉斯旧居附近的一名邻居，记得他失踪前的一些生活习惯。",
+      "voice": {
+        "provider": "doubao",
+        "resource_id": "seed-tts-2.0",
+        "voice_type": "zh_female_vv_uranus_bigtts"
+      },
       "located_in": "neighborhood",
       "state": {
         "interviewed": false
@@ -325,6 +340,11 @@
         "看守"
       ],
       "description": "公共墓地的看守，穿着一件旧外套，看起来有些紧张。",
+      "voice": {
+        "provider": "doubao",
+        "resource_id": "seed-tts-2.0",
+        "voice_type": "zh_male_ruyayichen_saturn_bigtts"
+      },
       "located_in": "cemetery",
       "state": {
         "impressed": false,
@@ -344,6 +364,11 @@
         "失眠症邻居"
       ],
       "description": "一位已经搬去底特律的老妇人，曾向报社留下关于墓地的陈述。",
+      "voice": {
+        "provider": "doubao",
+        "resource_id": "seed-tts-2.0",
+        "voice_type": "zh_female_santongyongns_saturn_bigtts"
+      },
       "located_in": "newspaper_office",
       "state": {},
       "visibility": "public",

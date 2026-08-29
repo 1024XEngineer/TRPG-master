@@ -25,6 +25,9 @@ interface UseHostSpeechOptions {
   accountToken: string | null
 }
 
+type SpeechMessageKind = 'host' | 'npc'
+type SpeechQueueItem = { messageId: string; kind: SpeechMessageKind }
+
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
 function readSettings(): LocalSettings {
@@ -65,7 +68,7 @@ export function useHostSpeech({ roomId, reconnectToken, accountToken }: UseHostS
   const [error, setError] = useState('')
 
   const audioRef = useRef<HTMLAudioElement | null>(null)
-  const queueRef = useRef<string[]>([])
+  const queueRef = useRef<SpeechQueueItem[]>([])
   const seenRef = useRef(new Set<string>())
   const processingRef = useRef(false)
   const enabledRef = useRef(enabled)
@@ -116,11 +119,11 @@ export function useHostSpeech({ roomId, reconnectToken, accountToken }: UseHostS
     setStatus('idle')
   }, [clearCurrent])
 
-  const fetchSentence = useCallback(async (messageId: string, index: number, signal: AbortSignal) => {
+  const fetchSentence = useCallback(async (messageId: string, kind: SpeechMessageKind, index: number, signal: AbortSignal) => {
     if (!roomId || !accountToken || !reconnectToken) throw new Error('缺少房间语音身份凭证')
-    const blob = await sdk.rooms.getHostSpeechSentence(
-      roomId, messageId, index, accountToken, reconnectToken, signal,
-    )
+    const blob = kind === 'npc'
+      ? await sdk.rooms.getNpcSpeechSentence(roomId, messageId, index, accountToken, reconnectToken, signal)
+      : await sdk.rooms.getHostSpeechSentence(roomId, messageId, index, accountToken, reconnectToken, signal)
     // stop() 可能发生在 fetch 已完成、continuation 尚未恢复的间隙；此处再检查
     // 一次，防止取消后才创建的 Object URL 躲过 stop() 的集中回收。
     if (signal.aborted) throw new DOMException('主持人语音请求已取消', 'AbortError')
@@ -157,7 +160,8 @@ export function useHostSpeech({ roomId, reconnectToken, accountToken }: UseHostS
     const generation = generationRef.current
     try {
       while (queueRef.current.length > 0 && generation === generationRef.current) {
-        const messageId = queueRef.current.shift()!
+        const item = queueRef.current.shift()!
+        const messageId = item.messageId
         setQueueLength(queueRef.current.length)
         setCurrentMessageId(messageId)
         setStatus('synthesizing')
@@ -165,21 +169,21 @@ export function useHostSpeech({ roomId, reconnectToken, accountToken }: UseHostS
         const controller = new AbortController()
         abortRef.current = controller
         if (!roomId || !accountToken || !reconnectToken) throw new Error('缺少房间语音身份凭证')
-        const manifest = await sdk.rooms.getHostSpeechManifest(
-          roomId, messageId, accountToken, reconnectToken, controller.signal,
-        )
+        const manifest = item.kind === 'npc'
+          ? await sdk.rooms.getNpcSpeechManifest(roomId, messageId, accountToken, reconnectToken, controller.signal)
+          : await sdk.rooms.getHostSpeechManifest(roomId, messageId, accountToken, reconnectToken, controller.signal)
         setCurrentSentences(manifest.sentences)
         // 最多保留当前句和下一句：当前句开始播放前触发下一句请求，减少句间停顿，
         // 又不会把整段叙事提前合成、在用户停止或切换音色时浪费 Provider 费用。
         let nextUrl: Promise<string> | null = manifest.sentences.length
-          ? fetchSentence(messageId, 0, controller.signal)
+          ? fetchSentence(messageId, item.kind, 0, controller.signal)
           : null
         try {
           for (let index = 0; index < manifest.sentences.length; index += 1) {
             setCurrentSentenceIndex(index)
             const currentUrl = await nextUrl!
             nextUrl = index + 1 < manifest.sentences.length
-              ? fetchSentence(messageId, index + 1, controller.signal)
+              ? fetchSentence(messageId, item.kind, index + 1, controller.signal)
               : null
             await playUrl(currentUrl, generation)
             revokeUrl(currentUrl)
@@ -213,24 +217,26 @@ export function useHostSpeech({ roomId, reconnectToken, accountToken }: UseHostS
 
   processQueueRef.current = () => { void processQueue() }
 
-  const markSeen = useCallback((messageIds: readonly string[]) => {
-    for (const id of messageIds) if (id.trim()) seenRef.current.add(id.trim())
+  const markSeen = useCallback((messageIds: readonly string[], kind: SpeechMessageKind = 'host') => {
+    for (const id of messageIds) if (id.trim()) seenRef.current.add(`${kind}:${id.trim()}`)
   }, [])
 
-  const enqueue = useCallback((messageId: string | undefined) => {
-    if (!enabledRef.current || !messageId || seenRef.current.has(messageId)) return
-    seenRef.current.add(messageId)
+  const enqueue = useCallback((messageId: string | undefined, kind: SpeechMessageKind = 'host') => {
+    if (!enabledRef.current || !messageId) return
+    const seenKey = `${kind}:${messageId}`
+    if (seenRef.current.has(seenKey)) return
+    seenRef.current.add(seenKey)
     // 设置 GET 尚未返回时先保留权威 ID，避免进入页面后第一句因竞态被吞掉；
     // 已明确 disabled 时则保持纯文本，不积压一个永远无法消费的队列。
     if (!credentialsReady || settings?.available === false) return
-    queueRef.current.push(messageId)
+    queueRef.current.push({ messageId, kind })
     setQueueLength(queueRef.current.length)
     processQueueRef.current()
   }, [credentialsReady, settings?.available])
 
-  const replay = useCallback((messageId: string | undefined) => {
+  const replay = useCallback((messageId: string | undefined, kind: SpeechMessageKind = 'host') => {
     if (!available || !messageId) return
-    queueRef.current.push(messageId)
+    queueRef.current.push({ messageId, kind })
     setQueueLength(queueRef.current.length)
     processQueueRef.current()
   }, [available])
@@ -331,6 +337,7 @@ export function useHostSpeech({ roomId, reconnectToken, accountToken }: UseHostS
     error,
     markSeen,
     enqueue,
+    enqueueNpc: (messageId: string | undefined) => enqueue(messageId, 'npc'),
     replay,
     pause,
     resume,

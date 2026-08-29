@@ -211,6 +211,14 @@ class InitialCustodySpec(ContractModel):
     kind: Literal["location", "starting_actor"]
 
 
+class EntityVoiceProfile(ContractModel):
+    """NPC 的模组级语音配置；只保存可发布的稳定音色标识。"""
+
+    provider: Literal["doubao"]
+    resource_id: str = Field(min_length=1, max_length=200)
+    voice_type: str = Field(min_length=1, max_length=200)
+
+
 class EntitySpecV3(ContractModel):
     """一个 Canon 人物或物体。
 
@@ -231,12 +239,22 @@ class EntitySpecV3(ContractModel):
     initial_custody: InitialCustodySpec | None = None
     state: dict[str, JsonValue] = Field(default_factory=dict)
     item_component: ItemComponent | None = None
+    # 音色是模组公开展示元数据，只允许 NPC 配置，运行时仍由服务端校验资源和白名单。
+    voice: EntityVoiceProfile | None = None
     visibility: Literal["public", "party", "actor", "keeper"] = "public"
     # 受众与发现是两个独立概念。即使实体是 public，在已注册的确定性谓词确认其
     # 被发现之前，也可以不出现在任何玩家投影中。
     visibility_conditions: tuple[ConditionExpr, ...] = ()
     plot_relevance: bool = True
     lifecycle: Literal["campaign", "session"] = "campaign"
+
+    @model_validator(mode="after")
+    def validate_voice_kind(self) -> "EntitySpecV3":
+        """阻止物品等非 NPC 实体携带 NPC 专属音色。"""
+
+        if self.voice is not None and self.kind != "npc":
+            raise ValueError("只有 NPC 实体可以配置 voice")
+        return self
 
 
 # --------------------------------------------------------------------------- #
@@ -1057,6 +1075,7 @@ __all__ = [
     "EndingPolicySpec",
     "EntityRelationKind",
     "EntityRelationSpec",
+    "EntityVoiceProfile",
     "EntitySpecV3",
     "EventTriggerSpec",
     "ExecutionBranchSpec",

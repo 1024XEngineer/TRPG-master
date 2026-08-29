@@ -8,6 +8,7 @@ import time
 from collections import OrderedDict, defaultdict, deque
 from dataclasses import dataclass
 
+from collaboration_framework.contracts import ModuleContentV3
 from collaboration_framework.host.application import split_narration_chunks
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +19,9 @@ from app.adapters.host_speech import (
     HostSpeechResult,
 )
 from app.core.config import HostSpeechVoiceConfig, Settings, secret_value
-from app.models.event import Event
+from app.models.content import Scenario
+from app.models.engine import ModuleVersion
+from app.models.event import Event, EventAudience
 from app.models.room import Player, Room
 
 
@@ -109,6 +112,7 @@ class HostSpeechService:
         player_requests_per_minute: int,
         room_misses_per_minute: int,
         max_concurrency: int,
+        resource_id: str = "",
     ) -> None:
         self.provider = provider
         self.voices = voices
@@ -125,6 +129,8 @@ class HostSpeechService:
         self._room_limiter = _WindowRateLimiter()
         self._player_limit = player_requests_per_minute
         self._room_limit = room_misses_per_minute
+        # 资源包属于部署配置；NPC profile 只有与此值一致时才允许使用。
+        self.resource_id = resource_id
 
     @property
     def available(self) -> bool:
@@ -142,7 +148,7 @@ class HostSpeechService:
 
     def _cache_key(self, text: str, voice_type: str) -> str:
         digest = hashlib.sha256(text.encode()).hexdigest()
-        return f"{self.provider.version}:mp3:{voice_type}:{digest}"
+        return f"{self.provider.version}:{self.resource_id}:mp3:{voice_type}:{digest}"
 
     def _evict_expired(self, now: float) -> None:
         expired = [key for key, entry in self._cache.items() if entry.expires_at <= now]
@@ -249,6 +255,7 @@ def build_host_speech_service(settings: Settings) -> HostSpeechService:
         player_requests_per_minute=settings.host_speech_player_requests_per_minute,
         room_misses_per_minute=settings.host_speech_room_misses_per_minute,
         max_concurrency=settings.host_speech_max_concurrency,
+        resource_id=settings.doubao_tts_resource_id,
     )
 
 
@@ -291,6 +298,82 @@ async def find_visible_narration(
     if not isinstance(event.payload.get("text"), str) or not event.payload["text"]:
         raise HostSpeechInvalidRequestError("主持人消息没有可朗读文本")
     return event
+
+
+async def find_visible_dialogue(
+    db: AsyncSession,
+    *,
+    room_id: str,
+    message_id: str,
+    player_id: str,
+) -> Event:
+    """按冻结 audience 查找 NPC 对话，避免后来进场的玩家读取历史语音。"""
+
+    event = await db.scalar(
+        select(Event)
+        .join(EventAudience, EventAudience.event_id == Event.id)
+        .where(
+            Event.room_id == room_id,
+            Event.event_type == "dialogue.npc",
+            or_(Event.id == message_id, Event.correlation_id == message_id),
+            EventAudience.player_id == player_id,
+        )
+    )
+    if event is None:
+        raise HostSpeechNotFoundError("NPC 对话不存在或当前玩家无权读取")
+    if not isinstance(event.payload.get("text"), str) or not event.payload["text"]:
+        raise HostSpeechInvalidRequestError("NPC 对话没有可朗读文本")
+    return event
+
+
+async def get_npc_voice(
+    db: AsyncSession,
+    *,
+    room_id: str,
+    event: Event,
+    service: HostSpeechService,
+) -> str:
+    """从不可变 ModuleContent 按 speaker_id 解析 NPC 音色；失败时安全回退。"""
+
+    fallback = service.default_voice_type
+    room = await db.get(Room, room_id)
+    if room is None or room.scenario_id is None:
+        if fallback is None:
+            raise HostSpeechUnavailableError("主持人语音服务未配置")
+        return fallback
+    scenario = await db.get(Scenario, room.scenario_id)
+    version = room.module_version or (scenario.version if scenario else None)
+    if scenario is None or version is None:
+        if fallback is None:
+            raise HostSpeechUnavailableError("主持人语音服务未配置")
+        return fallback
+    module_version = await db.get(ModuleVersion, (scenario.module_id, version))
+    # 事件规范使用 camelCase；兼容早期测试/历史行的 snake_case 载荷。
+    speaker_id = event.payload.get("speakerId") or event.payload.get("speaker_id") or event.actor_id
+    if not isinstance(speaker_id, str) or not speaker_id.strip() or module_version is None:
+        raise HostSpeechNotFoundError("NPC 音色对应的实体不存在")
+    try:
+        content = ModuleContentV3.model_validate(module_version.content_json)
+    except (TypeError, ValueError) as exc:
+        raise HostSpeechUnavailableError("模组音色配置无法读取") from exc
+    entity = next(
+        (item for item in content.entities if item.kind == "npc" and item.id == speaker_id),
+        None,
+    )
+    if entity is None:
+        raise HostSpeechNotFoundError("NPC 音色对应的实体不存在")
+    profile = entity.voice
+    if (
+        profile is not None
+        and profile.provider == service.provider.name
+        and profile.resource_id == service.resource_id
+        and profile.voice_type in service.allowed_voice_types
+    ):
+        return profile.voice_type
+    # 合法 NPC 但 profile 与当前部署不匹配时安全回退，不影响文字对话。
+    if fallback is None or fallback not in service.allowed_voice_types:
+        raise HostSpeechUnavailableError("NPC 音色不可用，但文字对话仍可继续")
+    return fallback
 
 
 async def get_room_voice(db: AsyncSession, room_id: str, service: HostSpeechService) -> str:

@@ -26,7 +26,9 @@ from app.service.host_speech import (
     HostSpeechRateLimitedError,
     HostSpeechService,
     HostSpeechUnavailableError,
+    find_visible_dialogue,
     find_visible_narration,
+    get_npc_voice,
     get_room_voice,
     require_account_room_member,
 )
@@ -186,6 +188,76 @@ async def get_host_speech_sentence(
         if sentence_index < 0 or sentence_index >= len(sentences):
             raise HostSpeechNotFoundError("主持人语音分句不存在")
         voice_type = await get_room_voice(db, room_id, service)
+        result = await service.synthesize(
+            room_id=room_id,
+            player_id=player.id,
+            text=sentences[sentence_index],
+            voice_type=voice_type,
+        )
+    except Exception as exc:
+        _raise_public_error(exc)
+    return Response(
+        content=result.audio,
+        media_type=result.content_type,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.get(
+    "/{room_id}/dialogues/{message_id}/speech",
+    response_model=ApiResponse[HostSpeechManifestRead],
+)
+async def get_npc_speech_manifest(
+    room_id: str,
+    message_id: str,
+    request: Request,
+    reconnect_token: str | None = Header(default=None, alias="X-Reconnect-Token"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ApiResponse[HostSpeechManifestRead]:
+    """读取有 audience 权限的 NPC 对话分句清单。"""
+
+    player = await _member(db, room_id, reconnect_token, user)
+    try:
+        event = await find_visible_dialogue(
+            db, room_id=room_id, message_id=message_id, player_id=player.id
+        )
+        sentences = _service(request).sentences(event.payload["text"])
+    except Exception as exc:
+        _raise_public_error(exc)
+    return ApiResponse.ok(
+        HostSpeechManifestRead(
+            message_id=message_id,
+            sentences=[
+                HostSpeechSentenceRead(index=index, text=text)
+                for index, text in enumerate(sentences)
+            ],
+        )
+    )
+
+
+@router.get("/{room_id}/dialogues/{message_id}/speech/sentences/{sentence_index}")
+async def get_npc_speech_sentence(
+    room_id: str,
+    message_id: str,
+    sentence_index: int,
+    request: Request,
+    reconnect_token: str | None = Header(default=None, alias="X-Reconnect-Token"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    """按对话 speaker_id 解析专属音色并返回一条 MP3；失败不修改事件。"""
+
+    player = await _member(db, room_id, reconnect_token, user)
+    service = _service(request)
+    try:
+        event = await find_visible_dialogue(
+            db, room_id=room_id, message_id=message_id, player_id=player.id
+        )
+        sentences = service.sentences(event.payload["text"])
+        if sentence_index < 0 or sentence_index >= len(sentences):
+            raise HostSpeechNotFoundError("NPC 语音分句不存在")
+        voice_type = await get_npc_voice(db, room_id=room_id, event=event, service=service)
         result = await service.synthesize(
             room_id=room_id,
             player_id=player.id,

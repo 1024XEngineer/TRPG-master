@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import Field, model_validator
+from pydantic import BeforeValidator, Field, model_validator
 
 from collaboration_framework.contracts import (
     ActionAdjudication,
@@ -536,6 +536,68 @@ class NarrationStateClaim(ContractModel):
     value: str | bool
 
 
+# committed_results 用的是 target_id / state_key / state_value。模型在输入 payload
+# 里天天见到这套键名，混用非常常见；接受它是安全的——三元组照样要通过对引擎真值
+# 的集合包含判断才算数。
+_STATE_CLAIM_ALIASES = (
+    ("entity_id", "target_id"),
+    ("key", "state_key"),
+    ("value", "state_value"),
+)
+
+
+def _coerce_claimed_inventory_ids(value: object) -> object:
+    """把畸形的背包申报降级成「没有申报」，而不是毙掉整段正文。
+
+    并非所有 client 都能强制 schema：DeepSeek 一路只用
+    ``response_format={"type": "json_object"}``，schema 仅作为提示词文字下发。
+    写成 null、裸字符串、混进非字符串元素都会发生，而这些形状偏差原本会让
+    ``model_validate`` 抛错、整段叙事被判 ``outer_schema`` 丢掉。
+
+    丢弃畸形申报只可能让正文多受一次守门补丁检查，不可能放过任何虚假声明：
+    过度申报仍由集合校验当场挡掉，申报不足本就由守门补丁与「前端背包只跟权威
+    PlayerView 走」两道覆盖。
+    """
+
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        return (value,)
+    if isinstance(value, (list, tuple)):
+        return tuple(item for item in value if isinstance(item, str) and item)
+    return ()
+
+
+def _coerce_claimed_state_changes(value: object) -> object:
+    """同上，逐条丢弃畸形的状态申报，保留能读懂的部分。"""
+
+    if value is None:
+        return ()
+    if isinstance(value, (dict, NarrationStateClaim)):
+        value = (value,)
+    if not isinstance(value, (list, tuple)):
+        return ()
+    claims: list[object] = []
+    for item in value:
+        if isinstance(item, NarrationStateClaim):
+            claims.append(item)
+            continue
+        if not isinstance(item, dict):
+            continue
+        fields = {
+            canonical: item.get(canonical, item.get(alias))
+            for canonical, alias in _STATE_CLAIM_ALIASES
+        }
+        if not isinstance(fields["entity_id"], str) or not fields["entity_id"]:
+            continue
+        if not isinstance(fields["key"], str) or not fields["key"]:
+            continue
+        if not isinstance(fields["value"], (str, bool)):
+            continue
+        claims.append(fields)
+    return tuple(claims)
+
+
 class ActionPlanNarrationOutput(ContractModel):
     """守秘人叙事输出：主 narration 可附带少量结构化 NPC 跟进发言。"""
 
@@ -547,8 +609,13 @@ class ActionPlanNarrationOutput(ContractModel):
     # 只做对引擎真值的集合包含判断，而不是在开集的中文表达上维护动词词表。
     # 结构化输出的遵从度随 schema 增大而下降：申报字段以这两个为预算上限，
     # 不要演变成一条检查一个字段。
-    claimed_inventory_ids: tuple[str, ...] = ()
-    claimed_state_changes: tuple[NarrationStateClaim, ...] = ()
+    claimed_inventory_ids: Annotated[
+        tuple[str, ...], BeforeValidator(_coerce_claimed_inventory_ids)
+    ] = ()
+    claimed_state_changes: Annotated[
+        tuple[NarrationStateClaim, ...],
+        BeforeValidator(_coerce_claimed_state_changes),
+    ] = ()
     suggested_actions: tuple[str, ...] = Field(default=(), max_length=3)
     # 同回合最多跟进 3 条 NPC 发言；超出部分由 schema 直接拒绝，避免前后端排序复杂化。
     npc_replies: tuple[ActionPlanNpcReply, ...] = Field(default=(), max_length=3)

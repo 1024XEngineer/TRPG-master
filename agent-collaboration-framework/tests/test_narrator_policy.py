@@ -277,6 +277,16 @@ class _DeclaringNarrationModel:
         }
 
 
+class _RawNarrationModel:
+    """直接回传一份原始 dict，用来模拟没有强制 schema 的 client 输出。"""
+
+    def __init__(self, raw: dict) -> None:
+        self.raw = raw
+
+    async def generate(self, context):
+        return dict(self.raw)
+
+
 class _PersistentNarrationWithNpcRepliesModel:
     def __init__(self, text: str) -> None:
         self.text = text
@@ -835,6 +845,104 @@ class InventoryClaimDeclarationTests(unittest.IsolatedAsyncioTestCase):
                     raised.exception.reason,
                     "persistent_claim_without_evidence:inventory_acquisition",
                 )
+
+    async def test_malformed_declarations_degrade_instead_of_killing_the_prose(self):
+        """并非所有 client 都能强制 schema，畸形申报不能连累整段有效正文。
+
+        DeepSeek 一路只用 response_format=json_object，schema 仅作为提示词文字下发。
+        这些形状偏差原先会让 model_validate 抛错、整段叙事按 outer_schema 丢掉。
+        降级成「没有申报」只会让正文多受一次守门补丁检查，不会放过虚假声明。
+        """
+        # 背包里确实有这件物品，好让被读懂的那部分申报能通过集合校验——本用例
+        # 要证明的是「畸形形状不再毙掉正文」，不是放宽越权判定。
+        context = self._context(
+            inventory=(SimpleNamespace(id="resort_flyer", name="蛙蛙度假村传单"),)
+        )
+        malformed = {
+            "整个字段写成 null": ({"claimed_inventory_ids": None}, (), 0),
+            "写成裸字符串": ({"claimed_inventory_ids": "resort_flyer"}, ("resort_flyer",), 0),
+            "数组里混进非字符串": (
+                {"claimed_inventory_ids": ["resort_flyer", 7, None]},
+                ("resort_flyer",),
+                0,
+            ),
+            "状态字段写成 null": ({"claimed_state_changes": None}, (), 0),
+            "状态写成字符串数组": (
+                {"claimed_state_changes": ["ezra:consciousness:unconscious"]},
+                (),
+                0,
+            ),
+            "状态的 value 是数字": (
+                {"claimed_state_changes": [{"entity_id": "ezra", "key": "hp", "value": 3}]},
+                (),
+                0,
+            ),
+        }
+        for label, (extra, expected_ids, expected_states) in malformed.items():
+            with self.subTest(label=label):
+                output = await ActionPlanNarrator(
+                    _RawNarrationModel({"text": "你推开门。", **extra})
+                ).narrate(context)
+                self.assertEqual(output.text, "你推开门。")
+                self.assertEqual(output.claimed_inventory_ids, expected_ids)
+                self.assertEqual(len(output.claimed_state_changes), expected_states)
+
+    async def test_accepts_committed_result_key_names_in_state_claims(self):
+        """模型在输入里天天见到 target_id / state_key / state_value，混用很常见。
+
+        接受这套别名是安全的：三元组照样要通过对引擎真值的集合包含判断。
+        """
+        result = CommittedResult(
+            kind="character_state",
+            target_id="butler",
+            state_key="consciousness",
+            state_value="unconscious",
+            event_ref="event-1",
+        )
+        output = await ActionPlanNarrator(
+            _RawNarrationModel(
+                {
+                    "text": "守墓人昏迷了。",
+                    "claimed_state_changes": [
+                        {
+                            "target_id": "butler",
+                            "state_key": "consciousness",
+                            "state_value": "unconscious",
+                        }
+                    ],
+                }
+            )
+        ).narrate(self._context(results=(result,)))
+        self.assertEqual(len(output.claimed_state_changes), 1)
+
+    async def test_outer_schema_rejection_reports_the_failing_field_path(self):
+        """outer_schema 此前只记类别，无法判断是哪个字段的形状出了问题。"""
+        with self.assertRaises(ActionPlanNarrationValidationError) as raised:
+            await ActionPlanNarrator(_RawNarrationModel({"kind": "narration"})).narrate(
+                self._context()
+            )
+        self.assertEqual(raised.exception.reason, "outer_schema")
+        self.assertIn("text", raised.exception.schema_error_fields)
+
+    async def test_embedded_npc_dialogue_offers_the_whole_quoted_region(self):
+        """句级剔除必须整段拿掉引语。
+
+        只剔含引号字符的句子时，``“我是詹姆斯。你们别担心。”`` 中间那句不含引号，
+        会原样留下——引号没了，NPC 台词就被悄悄改写成守秘人正文。
+        """
+        text = "詹姆斯抬起头。他说：“我是詹姆斯。你们别担心。”窗外传来蛙鸣。"
+        with self.assertRaises(ActionPlanNarrationValidationError) as raised:
+            await ActionPlanNarrator(
+                _PersistentNarrationWithNpcRepliesModel(text)
+            ).narrate(self._context())
+        error = raised.exception
+        self.assertEqual(error.reason, "npc_dialogue_embedded_in_text")
+        kept, cursor = "", 0
+        for start, end in error.offending_spans:
+            kept += text[cursor : max(start, cursor)]
+            cursor = max(cursor, end)
+        kept += text[cursor:]
+        self.assertEqual(kept, "詹姆斯抬起头。窗外传来蛙鸣。")
 
     async def test_loose_scene_items_also_bind_takeaway_verbs(self):
         """权威物品名闭集必须覆盖场景散落物，不只是可见实体。"""

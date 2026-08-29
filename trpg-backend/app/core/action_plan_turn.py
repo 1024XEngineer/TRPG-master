@@ -1884,30 +1884,7 @@ class ActionPlanTurnApplication:
                     path="model",
                     duration_ms=int((time.monotonic() - started_at) * 1000),
                 )
-                if context.player_input.interlocutor_id and not narration.npc_replies:
-                    # 结构化 @NPC 必须至少产生一条独立 NPC 气泡；模型只返回守秘人正文
-                    # 时使用安全的最小兜底，不改变 Engine 裁决结果，也不伪造 NPC 事实。
-                    npc = next(
-                        (
-                            entity
-                            for entity in context.player_view.scene.visible_entities
-                            if entity.id == context.player_input.interlocutor_id
-                            and entity.kind == "npc"
-                        ),
-                        None,
-                    )
-                    if npc is not None:
-                        narration = narration.model_copy(
-                            update={
-                                "npc_replies": (
-                                    ActionPlanNpcReply(
-                                        speaker_id=npc.id,
-                                        text="我听见了你的话。",
-                                    ),
-                                )
-                            }
-                        )
-                return narration
+                return self._ensure_interlocutor_reply(context, narration)
             except ActionPlanNarrationValidationError as exc:
                 # 只记录校验类别和权威结果，不记录模型正文或其他敏感上下文。
                 logger.warning(
@@ -1915,6 +1892,8 @@ class ActionPlanTurnApplication:
                     action=context.player_input.client_action_id[:12],
                     attempt=attempt + 1,
                     reason=exc.reason,
+                    # 只有字段路径，不含模型正文；outer_schema 此前无法定位到字段。
+                    schema_error_fields=exc.schema_error_fields or None,
                     outcomes=tuple(step.outcome for step in context.completed_steps),
                     termination_status=context.termination_status,
                 )
@@ -1988,6 +1967,19 @@ class ActionPlanTurnApplication:
                             )
                         }
                     )
+                elif attempt == 0 and exc.reason == "npc_dialogue_embedded_in_text":
+                    # 通用提示只说“没通过校验”，模型无从知道错在引号上，于是原样
+                    # 再写一遍、再被同一关拒掉——重试对这一类必然空转。
+                    context = context.model_copy(
+                        update={
+                            "narration_retry_hint": (
+                                "本回合已经单独发出 NPC 气泡，守秘人正文里不得再出现"
+                                "任何引号或 NPC 的直接引语。请把台词全部放进 npc_replies，"
+                                "正文只写动作、神情、语气和现场变化，例如"
+                                "“他沉默片刻才开口”而不是把他说的话抄进正文。"
+                            )
+                        }
+                    )
                 elif attempt == 0:
                     context = context.model_copy(
                         update={
@@ -2007,7 +1999,7 @@ class ActionPlanTurnApplication:
                             path="sentence_degraded",
                             duration_ms=int((time.monotonic() - started_at) * 1000),
                         )
-                        return degraded
+                        return self._ensure_interlocutor_reply(context, degraded)
                     if (
                         exc.reason == "required_evidence_missing"
                         and context.termination_status != "needs_clarification"
@@ -2030,7 +2022,7 @@ class ActionPlanTurnApplication:
                         path="deterministic_fallback",
                         duration_ms=int((time.monotonic() - started_at) * 1000),
                     )
-                    return narration
+                    return self._ensure_interlocutor_reply(context, narration)
             except StructuredOutputError:
                 # A 200 response with unreadable structured content is safe to retry
                 # once. Exhaustion falls back to the same deterministic, evidence-only
@@ -2051,7 +2043,7 @@ class ActionPlanTurnApplication:
                         path="deterministic_fallback",
                         duration_ms=int((time.monotonic() - started_at) * 1000),
                     )
-                    return narration
+                    return self._ensure_interlocutor_reply(context, narration)
             except Exception as exc:
                 # 传输层的瞬态失败已经由 StructuredJsonClient 自己重试过了
                 # （见 adapters/structured_http.py）。在这里再整体重试一轮，两层
@@ -2063,6 +2055,41 @@ class ActionPlanTurnApplication:
                     retryable=True,
                 ) from exc
         raise AssertionError("unreachable")
+
+    @staticmethod
+    def _ensure_interlocutor_reply(
+        context: ActionPlanNarrationContext,
+        narration: ActionPlanNarrationOutput,
+    ) -> ActionPlanNarrationOutput:
+        """结构化 @NPC 至少要产生一条独立 NPC 气泡。
+
+        这层安全网原先只写在成功路径上，兜底路径全部从 except 直接返回、绕过了
+        它——玩家 @ 了某个 NPC，叙事连拒两次后拿到的是一句状态播报**且该 NPC 一言
+        不发**，是 @NPC 场景下最糟的落点。改成所有返回路径共用。
+
+        它不改变 Engine 裁决结果，也不伪造 NPC 事实。
+        """
+
+        if not context.player_input.interlocutor_id or narration.npc_replies:
+            return narration
+        npc = next(
+            (
+                entity
+                for entity in context.player_view.scene.visible_entities
+                if entity.id == context.player_input.interlocutor_id
+                and entity.kind == "npc"
+            ),
+            None,
+        )
+        if npc is None:
+            return narration
+        return narration.model_copy(
+            update={
+                "npc_replies": (
+                    ActionPlanNpcReply(speaker_id=npc.id, text="我听见了你的话。"),
+                )
+            }
+        )
 
     def _sentence_degraded_narration(
         self,

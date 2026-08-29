@@ -93,17 +93,26 @@ class _Orchestrator:
 
 
 class _NarrationContextStub:
-    def __init__(self, evidence: NarrationEvidence, termination_status: str) -> None:
+    def __init__(
+        self,
+        evidence: NarrationEvidence,
+        termination_status: str,
+        *,
+        interlocutor_id: str | None = None,
+        visible_entities: tuple[object, ...] = (),
+    ) -> None:
         self.narration_evidence = (evidence,)
         self.termination_status = termination_status
         self.narration_retry_hint: str | None = None
+        self.interlocutor_id = interlocutor_id
+        self.visible_entities = visible_entities
         self.player_input = SimpleNamespace(
             client_action_id="action-narration-test",
             utterance="",
-            interlocutor_id=None,
+            interlocutor_id=interlocutor_id,
         )
         self.player_view = SimpleNamespace(
-            scene=SimpleNamespace(visible_entities=()),
+            scene=SimpleNamespace(visible_entities=visible_entities),
         )
         self.completed_steps: tuple[object, ...] = ()
 
@@ -111,6 +120,8 @@ class _NarrationContextStub:
         copied = _NarrationContextStub(
             self.narration_evidence[0],
             self.termination_status,
+            interlocutor_id=self.interlocutor_id,
+            visible_entities=self.visible_entities,
         )
         copied.narration_retry_hint = cast(str | None, update["narration_retry_hint"])
         return copied
@@ -579,6 +590,90 @@ async def test_narration_retry_hint_points_at_the_declaration_field(
     assert narration is success
     retry_hint = narrate.await_args_list[1].args[0].narration_retry_hint
     assert expected in retry_hint
+
+
+def _evidence() -> NarrationEvidence:
+    return NarrationEvidence(
+        ref="evt-1",
+        kind="entity_discovered",
+        subject_id="x",
+        subject_name="公开结果",
+        description="环境恢复正常。",
+        required_in_narration=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_npc_dialogue_rejection_retries_with_an_actionable_hint() -> None:
+    """第 6 关此前只拿到通用提示，模型不知道错在引号上，重试必然空转。"""
+    application = object.__new__(ActionPlanTurnApplication)
+    success = SimpleNamespace(kind="narration", text="他沉默片刻才开口。", npc_replies=())
+    narrate = AsyncMock(
+        side_effect=[
+            ActionPlanNarrationValidationError("npc_dialogue_embedded_in_text"),
+            success,
+        ]
+    )
+    application._narrator = SimpleNamespace(narrate=narrate)
+    context = cast(ActionPlanNarrationContext, _NarrationContextStub(_evidence(), "resolved"))
+
+    narration = await application._narrate(context)
+
+    assert narration is success
+    retry_hint = narrate.await_args_list[1].args[0].narration_retry_hint
+    assert "引号" in retry_hint
+    assert "npc_replies" in retry_hint
+
+
+@pytest.mark.asyncio
+async def test_at_npc_fallback_still_produces_a_reply_bubble() -> None:
+    """玩家 @ 了 NPC 却连拒两次时，兜底也必须让那个 NPC 开口。"""
+    application = object.__new__(ActionPlanTurnApplication)
+    narrate = AsyncMock(
+        side_effect=[
+            ActionPlanNarrationValidationError("subject_ownership"),
+            ActionPlanNarrationValidationError("subject_ownership"),
+        ]
+    )
+    application._narrator = SimpleNamespace(narrate=narrate)
+    james = SimpleNamespace(id="james", kind="npc", name="詹姆斯·莱恩")
+    context = cast(
+        ActionPlanNarrationContext,
+        _NarrationContextStub(
+            _evidence(),
+            "resolved",
+            interlocutor_id="james",
+            visible_entities=(james,),
+        ),
+    )
+
+    narration = await application._narrate(context)
+
+    assert narration.text == "这次行动已经按当前可确认的结果完成。"
+    assert [reply.speaker_id for reply in narration.npc_replies] == ["james"]
+
+
+@pytest.mark.asyncio
+async def test_quoted_npc_line_is_dropped_sentence_wise_instead_of_the_whole_prose() -> None:
+    """守秘人正文里的引语被整段引区间剔除，其余叙事保留。"""
+    application = object.__new__(ActionPlanTurnApplication)
+    text = "詹姆斯抬起头。他说：“我是詹姆斯。你们别担心。”窗外传来蛙鸣。"
+    quoted_start = text.index("他说")
+    quoted_end = text.index("窗外")
+    narrator = _ValidatingNarrator(
+        ActionPlanNarrationValidationError(
+            "npc_dialogue_embedded_in_text",
+            output=ActionPlanNarrationOutput(text=text),
+            offending_spans=((quoted_start, quoted_end),),
+        )
+    )
+    application._narrator = narrator
+    context = cast(ActionPlanNarrationContext, _NarrationContextStub(_evidence(), "resolved"))
+
+    narration = await application._narrate(context)
+
+    assert narration.text == "詹姆斯抬起头。窗外传来蛙鸣。"
+    assert "你们别担心" not in narration.text
 
 
 def test_required_evidence_fallback_omits_second_person_description_in_named_actor() -> None:

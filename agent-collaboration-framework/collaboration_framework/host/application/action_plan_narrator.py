@@ -38,11 +38,15 @@ class ActionPlanNarrationValidationError(ContractError):
         *,
         output: ActionPlanNarrationOutput | None = None,
         offending_spans: tuple[tuple[int, int], ...] = (),
+        schema_error_fields: tuple[str, ...] = (),
     ) -> None:
         super().__init__("ActionPlanNarrationOutput 未通过玩家可见输出安全校验")
         self.reason = reason
         self.output = output
         self.offending_spans = offending_spans
+        # 只有字段路径，不含模型正文或被拒的值——outer_schema 此前只记类别，
+        # 无法判断是哪个字段的形状出了问题。
+        self.schema_error_fields = schema_error_fields
 
 
 _CORPSE_SEARCH_QUESTION = re.compile(
@@ -52,6 +56,8 @@ _CORPSE_SEARCH_QUESTION = re.compile(
 # 只要本回合已经要单独发 NPC 回复，守秘人正文里就别再塞 NPC 的直接引语了；
 # 否则前端还是会像一整段守秘人口吻那样显示，分气泡就失去意义。
 _EMBEDDED_DIALOGUE_RE = re.compile(r"[“”「」『』‘’\"']")
+# 配对区间：句级剔除必须整段拿掉引语，不能只掐头去尾。
+_QUOTED_SPAN_RE = re.compile(r"[“「『‘\"'][^”」』’\"']*[”」』’\"']")
 
 
 class ActionPlanNarrator:
@@ -80,7 +86,10 @@ class ActionPlanNarrator:
         try:
             output = ActionPlanNarrationOutput.model_validate(raw)
         except (TypeError, ValueError) as exc:
-            raise ActionPlanNarrationValidationError("outer_schema") from exc
+            raise ActionPlanNarrationValidationError(
+                "outer_schema",
+                schema_error_fields=_schema_error_fields(exc),
+            ) from exc
         if not set(output.claimed_evidence_refs).issubset(
             context.allowed_evidence_refs
         ):
@@ -147,7 +156,11 @@ class ActionPlanNarrator:
         if rejection is not None:
             raise ActionPlanNarrationValidationError(rejection)
         if output.npc_replies and _EMBEDDED_DIALOGUE_RE.search(output.text):
-            raise ActionPlanNarrationValidationError("npc_dialogue_embedded_in_text")
+            raise ActionPlanNarrationValidationError(
+                "npc_dialogue_embedded_in_text",
+                output=output,
+                offending_spans=_quoted_sentence_spans(output.text),
+            )
         subject_rejection = narration_subject_rejection_reason(
             output.text,
             addressing_mode=getattr(context, "addressing_mode", "second_person"),
@@ -206,6 +219,75 @@ class ActionPlanNarrator:
         ):
             raise ActionPlanNarrationValidationError("clarification_kind")
         return output
+
+
+def _schema_error_fields(exc: Exception) -> tuple[str, ...]:
+    """Extract only the failing field paths from a schema rejection.
+
+    ``ValidationError.errors()`` 里还带着 ``input`` 与 ``msg``，那可能包含模型
+    正文；这里只取 ``loc``，与 action_plan_narration_rejected 的脱敏口径一致。
+    """
+
+    errors = getattr(exc, "errors", None)
+    if not callable(errors):
+        return ()
+    try:
+        entries = errors()
+    except Exception:  # pragma: no cover - defensive; errors() 不该抛
+        return ()
+    paths: list[str] = []
+    for entry in entries:
+        location = entry.get("loc") if isinstance(entry, dict) else None
+        if not location:
+            continue
+        path = ".".join(str(part) for part in location)
+        if path not in paths:
+            paths.append(path)
+    return tuple(paths)
+
+
+# 引语后面紧跟的这些标点要一起剔掉，否则剩下的正文会以“，”开头。
+_TRAILING_CLAUSE_MARKS = "，,、；;：: \t"
+# 引语前紧挨着冒号，说明前面那截是引出语而不是叙事本身。
+_ATTRIBUTION_TAIL = re.compile(r"[：:]\s*$")
+
+
+def _quoted_sentence_spans(text: str) -> tuple[tuple[int, int], ...]:
+    """Locate the quoted-speech regions to excise, for sentence-level repair.
+
+    引语前紧挨着冒号时左边界取到整句开头，把“他说：”这类引出语一并带走；没有冒号
+    则只摘掉引语本身，句子的其余部分留着。右边界只到引语结束（再吃掉紧随的小句
+    标点），不扩到句末——否则 ``他说：“我不去。”窗外传来蛙鸣。`` 会把闭引号后面那
+    半句正常叙事一起连坐。
+
+    必须按**配对**区间取，不能只取「含引号字符的句子」：一段
+    ``“我是詹姆斯。你们别担心。”`` 内部就有句号，按句切分后中间那句不含任何引号，
+    只剔首尾会把它原样留下——引号没了，NPC 的台词就被悄悄改写成守秘人正文，比整段
+    落兜底更糟。落单的引号字符没有可靠的配对信息，仍按它自己所在的整句处理。
+    """
+
+    spans: list[tuple[int, int]] = []
+    covered: set[int] = set()
+    for quoted in _QUOTED_SPAN_RE.finditer(text):
+        covered.update(range(quoted.start(), quoted.end()))
+        start = quoted.start()
+        if _ATTRIBUTION_TAIL.search(text[: quoted.start()]):
+            # “他说：”这类引出语得跟着台词一起走，否则会留下半截的“他说：”。
+            # 没有冒号时引语多半嵌在正常句子里（柜台上写着“蛙蛙度假村”几个字），
+            # 这时只摘掉引语本身，句子的其余部分仍是合法叙事。
+            start = sentence_span_at(text, quoted.start())[0]
+        end = quoted.end()
+        while end < len(text) and text[end] in _TRAILING_CLAUSE_MARKS:
+            end += 1
+        if (start, end) not in spans:
+            spans.append((start, end))
+    for match in _EMBEDDED_DIALOGUE_RE.finditer(text):
+        if match.start() in covered:
+            continue
+        span = sentence_span_at(text, match.start())
+        if span not in spans:
+            spans.append(span)
+    return tuple(sorted(spans))
 
 
 def _term_sentence_spans(text: str, term: str) -> tuple[tuple[int, int], ...]:

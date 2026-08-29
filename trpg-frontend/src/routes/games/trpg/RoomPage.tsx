@@ -229,6 +229,8 @@ interface Message {
   type: 'system' | 'narr' | 'player' | 'npc' | 'dice'
   channel?: 'action' | 'discussion'
   messageId?: string
+  /** 语音接口使用的权威事件 ID；与 UI 去重用的 messageId 分开保存。 */
+  speechMessageId?: string
   narrationId?: string
   sender?: string
   content: string
@@ -443,6 +445,12 @@ function conversationMessageId(type: RoomConversationEvent['type'], id: string):
   return `history:${type}:${id}`
 }
 
+function speechEventId(message: Message): string | undefined {
+  if (message.speechMessageId?.trim()) return message.speechMessageId
+  // 兼容热更新或旧客户端已经放入内存的消息；新消息会直接保存权威事件 ID。
+  return message.messageId?.replace(/^history:dialogue\.npc:/, '').replace(/^dialogue\.npc:/, '')
+}
+
 /**
  * 一条主持叙事正在渐进到达时的临时拼装状态（issue #203）。
  *
@@ -635,6 +643,7 @@ function conversationEventToMessage(
       type: 'npc',
       channel: 'action',
       messageId: conversationMessageId(event.type, payload.messageId),
+      speechMessageId: payload.messageId,
       sender: payload.speakerName,
       speakerId: payload.speakerId,
       avatarUrl: payload.avatarUrl ?? undefined,
@@ -1801,8 +1810,8 @@ export default function RoomPage() {
       )
       markHostSpeechSeen(
         restored.flatMap((item) =>
-          item.type === 'npc' && item.messageId
-            ? [item.messageId.replace(/^dialogue\.npc:/, '')]
+          item.type === 'npc' && speechEventId(item)
+            ? [speechEventId(item)!]
             : [],
         ),
         'npc',
@@ -2035,6 +2044,7 @@ export default function RoomPage() {
           type: 'npc',
           channel: 'action',
           messageId: conversationMessageId('dialogue.npc', envelope.payload.messageId),
+          speechMessageId: envelope.payload.messageId,
           sender: envelope.payload.speakerName,
           speakerId: envelope.payload.speakerId,
           avatarUrl: envelope.payload.avatarUrl ?? undefined,
@@ -2592,6 +2602,8 @@ export default function RoomPage() {
           const isPlayer = msg.type === 'player' && msg.isSelf
           const isNarr = msg.type === 'narr'
           const isNpc = msg.type === 'npc'
+          const speechId = isNpc ? speechEventId(msg) : msg.narrationId
+          const isCurrentSpeechMessage = speechId === hostSpeech.currentMessageId
           const portraitUrl = msg.playerId ? portraitUrls[msg.playerId] : undefined
 
           return (
@@ -2627,7 +2639,7 @@ export default function RoomPage() {
                 </div>
                 <div className={`room-play__message-card ${isNarr ? 'room-play__narration-card' : ''} ${isNpc ? 'room-play__npc-card' : ''}`}>
                   <div className="room-play__narration-text whitespace-pre-wrap">
-                    {isNarr && msg.narrationId === hostSpeech.currentMessageId && hostSpeech.currentSentences.length > 0
+                    {isCurrentSpeechMessage && hostSpeech.currentSentences.length > 0
                       ? hostSpeech.currentSentences.map((sentence) => (
                           <span
                             key={sentence.index}
@@ -2649,7 +2661,7 @@ export default function RoomPage() {
                       disabled={!hostSpeech.available || (!msg.narrationId && !isNpc)}
                       onClick={() => {
                         if (isNarr) hostSpeech.replay(msg.narrationId)
-                        else hostSpeech.replay(msg.messageId?.replace(/^dialogue\.npc:/, ''), 'npc')
+                        else hostSpeech.replay(speechEventId(msg), 'npc')
                       }}
                     >
                       <RotateCcw aria-hidden="true" />

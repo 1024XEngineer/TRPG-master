@@ -7,12 +7,16 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
+import httpx
 import pytest
 from httpx import AsyncClient
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.host_speech import (
+    DOUBAO_LIST_SPEAKERS_ENDPOINT,
+    DoubaoHostSpeechProvider,
+    HostSpeechCatalogItem,
     HostSpeechRequest,
     HostSpeechResult,
     _build_doubao_headers,
@@ -78,6 +82,109 @@ async def test_cache_and_single_flight_share_one_provider_call() -> None:
     cached = await service.synthesize(**kwargs)
     assert first.audio == second.audio == cached.audio
     assert provider.calls == 1
+
+
+async def test_doubao_list_speakers_filters_chinese() -> None:
+    """ListSpeakers 只把当前资源包返回的中文音色交给业务层。"""
+
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "Result": {
+                    "Speakers": [
+                        {"VoiceType": "zh_female_b", "Name": "女声 B"},
+                        {"VoiceType": "en_male_a", "Name": "英文 A"},
+                        {"VoiceType": "zh_female_b", "Name": "重复 B"},
+                        {"VoiceType": "zh_male_a", "Name": "男声 A"},
+                    ]
+                }
+            },
+        )
+
+    provider = DoubaoHostSpeechProvider(
+        api_key="api-key",
+        resource_id="seed-tts-2.0",
+        timeout_seconds=5,
+        transport=httpx.MockTransport(handler),
+    )
+    items = await provider.list_speakers("seed-tts-2.0")
+    assert items == (
+        HostSpeechCatalogItem("zh_female_b", "女声 B"),
+        HostSpeechCatalogItem("zh_male_a", "男声 A"),
+    )
+    assert requests[0].url == httpx.URL(DOUBAO_LIST_SPEAKERS_ENDPOINT)
+    assert requests[0].headers["X-Api-Key"] == "api-key"
+    assert json.loads(requests[0].content)["ResourceIDs"] == ["seed-tts-2.0"]
+
+
+async def test_dynamic_catalog_merges_explicit_voices_and_is_resource_scoped() -> None:
+    """动态目录成功时扩展显式配置，资源切换后必须重新读取。"""
+
+    class CatalogProvider(_CountingProvider):
+        name = "doubao"
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.resources: list[str] = []
+
+        async def list_speakers(self, resource_id: str) -> tuple[HostSpeechCatalogItem, ...]:
+            self.resources.append(resource_id)
+            return (
+                HostSpeechCatalogItem("zh_dynamic", "动态音色"),
+                HostSpeechCatalogItem("en_dynamic", "英文音色"),
+            )
+
+    provider = CatalogProvider()
+    service = _service(provider)
+    service.resource_id = "seed-tts-2.0"
+    await service.refresh_voice_catalog()
+    assert service.allowed_voice_types == {"voice-a", "zh_dynamic"}
+    assert [voice.voice_type for voice in service.voices] == ["voice-a", "zh_dynamic"]
+    await service.refresh_voice_catalog()
+    assert provider.resources == ["seed-tts-2.0"]
+
+    service.resource_id = "seed-tts-1.0"
+    await service.refresh_voice_catalog()
+    assert provider.resources == ["seed-tts-2.0", "seed-tts-1.0"]
+
+
+async def test_dynamic_catalog_failure_keeps_explicit_voice_allowlist() -> None:
+    """豆包目录暂时不可用时，显式配置仍可合成语音。"""
+
+    class FailingCatalogProvider(_CountingProvider):
+        name = "doubao"
+
+        async def list_speakers(self, resource_id: str) -> tuple[HostSpeechCatalogItem, ...]:
+            del resource_id
+            raise RuntimeError("catalog unavailable")
+
+    service = _service(FailingCatalogProvider())
+    service.resource_id = "seed-tts-2.0"
+    await service.refresh_voice_catalog()
+    assert service.allowed_voice_types == {"voice-a"}
+    assert service.effective_voice_type("missing") == "voice-a"
+
+
+def test_invalid_default_voice_makes_audio_unavailable_without_affecting_text() -> None:
+    """默认音色失效时不向 Provider 发起请求，但调用方仍可保留文字事件。"""
+
+    service = HostSpeechService(
+        _CountingProvider(),
+        voices=[HostSpeechVoiceConfig(voiceType="voice-a", label="音色 A")],
+        default_voice_type="missing",
+        max_sentence_bytes=12,
+        cache_ttl_seconds=3600,
+        cache_max_bytes=1024,
+        player_requests_per_minute=60,
+        room_misses_per_minute=30,
+        max_concurrency=8,
+    )
+    assert service.available is False
+    assert service.effective_voice_type("missing") is None
 
 
 async def test_npc_voice_resolves_profile_and_falls_back_on_resource_mismatch() -> None:

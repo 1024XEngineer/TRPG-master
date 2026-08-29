@@ -109,6 +109,32 @@ def initial_state():
 
 
 class HappyFrogContentGateTests(unittest.TestCase):
+    def test_all_npcs_have_stable_doubao_voice_profiles(self) -> None:
+        """幸福蛙蛙村的 7 个 NPC 均配置同一资源包下的专属音色。"""
+
+        content = load_module()
+        profiles = {
+            entity.id: entity.voice
+            for entity in content.entities
+            if entity.kind == "npc"
+        }
+        expected_ids = {
+            "villager_accounts",
+            "ezra",
+            "messenger",
+            "emily",
+            "james",
+            "frog_head_guest",
+            "dream_frogs",
+        }
+        self.assertEqual(set(profiles), expected_ids)
+        self.assertTrue(all(profile is not None for profile in profiles.values()))
+        self.assertEqual({profile.provider for profile in profiles.values() if profile}, {"doubao"})
+        self.assertEqual(
+            {profile.resource_id for profile in profiles.values() if profile},
+            {"seed-tts-2.0"},
+        )
+
     """覆盖第三个预设发布前的静态门禁。"""
 
     @classmethod

@@ -117,6 +117,7 @@ def entity(
     visible_when: list[dict[str, Any]] | None = None,
     portable: bool = False,
     visibility: str = "public",
+    voice_type: str | None = None,
 ) -> dict[str, Any]:
     """构造不会在运行时任意生成的 Canon Entity。"""
 
@@ -139,6 +140,16 @@ def entity(
             "portable": True,
             "unique": True,
             "quantity": 1,
+        }
+    # 音色属于模组公开元数据；只把稳定 voice_type 写入 NPC，运行时仍由后端
+    # 按当前豆包资源包和白名单重新校验，失效时安全回退到默认音色。
+    if voice_type is not None:
+        if kind != "npc":
+            raise ValueError("只有 NPC 实体可以配置 voice")
+        payload["voice"] = {
+            "provider": "doubao",
+            "resource_id": "seed-tts-2.0",
+            "voice_type": voice_type,
         }
     return payload
 
@@ -589,6 +600,7 @@ def build_entities() -> list[dict[str, Any]]:
             "对林地与共同梦境讳莫如深的居民。",
             location="pretrip_investigation",
             kind="npc",
+            voice_type="zh_male_ruyayichen_saturn_bigtts",
         ),
         entity(
             "ezra",
@@ -596,6 +608,7 @@ def build_entities() -> list[dict[str, Any]]:
             "从度假村逃出的推销员，手指间仍有淡绿色蹼膜。",
             location="forest_road",
             kind="npc",
+            voice_type="zh_male_dongfanghaoran_uranus_bigtts",
         ),
         entity(
             "messenger",
@@ -604,6 +617,7 @@ def build_entities() -> list[dict[str, Any]]:
             location="resort_reception",
             kind="npc",
             state={"convinced": False},
+            voice_type="zh_female_vv_uranus_bigtts",
         ),
         entity(
             "emily",
@@ -611,6 +625,7 @@ def build_entities() -> list[dict[str, Any]]:
             "笑容完美无瑕的接待女仆。",
             location="resort_reception",
             kind="npc",
+            voice_type="zh_female_santongyongns_saturn_bigtts",
         ),
         entity(
             "james",
@@ -618,6 +633,7 @@ def build_entities() -> list[dict[str, Any]]:
             "调查员寻找的失踪青年。",
             location="resort_reception",
             kind="npc",
+            voice_type="zh_male_dayi_saturn_bigtts",
             state={
                 "released": False,
                 "under_forced_custody": False,
@@ -644,6 +660,7 @@ def build_entities() -> list[dict[str, Any]]:
             "用宽大衣物遮挡身体异样的游客。",
             location="guest_room",
             kind="npc",
+            voice_type="zh_male_xuanyijieshuo_uranus_bigtts",
         ),
         entity(
             "contaminated_water",
@@ -669,6 +686,7 @@ def build_entities() -> list[dict[str, Any]]:
             "几乎不躲避来人的鲜艳青蛙。",
             location="frog_pond",
             kind="npc",
+            voice_type="zh_female_mizai_saturn_bigtts",
         ),
         entity(
             "night_ritual",
@@ -1855,7 +1873,13 @@ def main() -> None:
     if capability_issues:
         raise ValueError(f"运行能力审计失败: {capability_issues!r}")
 
+    # 生成 fixture 时只省略本次新增的空音色字段，保持既有可选字段格式稳定，避免
+    # 仅因契约新增字段就给所有实体制造无关 diff。
     normalized = content.to_json_dict()
+    for entity_payload in normalized.get("entities", []):
+        for optional_key in ("initial_custody", "voice"):
+            if entity_payload.get(optional_key) is None:
+                entity_payload.pop(optional_key, None)
     source_map = provenance(normalized)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     (OUTPUT_DIR / "module-content-v3.json").write_text(

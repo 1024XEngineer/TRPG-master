@@ -49,6 +49,11 @@ function installRoomSpeechApi() {
     }],
   }))
   mockGetHostSpeechSentence.mockResolvedValue(new Blob(['mp3'], { type: 'audio/mpeg' }))
+  mockGetNpcSpeechManifest.mockImplementation(async (_roomId: string, messageId: string) => ({
+    messageId,
+    sentences: [{ index: 0, text: '历史 NPC 语音' }],
+  }))
+  mockGetNpcSpeechSentence.mockResolvedValue(new Blob(['mp3'], { type: 'audio/mpeg' }))
   return { audio }
 }
 
@@ -99,6 +104,8 @@ const {
   mockGetHostSpeechSettings,
   mockGetHostSpeechManifest,
   mockGetHostSpeechSentence,
+  mockGetNpcSpeechManifest,
+  mockGetNpcSpeechSentence,
   mockUpdateHostSpeechSettings,
   mockOnWsMessage,
   mockRollCheck,
@@ -143,6 +150,8 @@ const {
     mockGetHostSpeechSettings: vi.fn(),
     mockGetHostSpeechManifest: vi.fn(),
     mockGetHostSpeechSentence: vi.fn(),
+    mockGetNpcSpeechManifest: vi.fn(),
+    mockGetNpcSpeechSentence: vi.fn(),
     mockUpdateHostSpeechSettings: vi.fn(),
     mockRollCheck: vi.fn(),
     mockSendChat: vi.fn(),
@@ -178,6 +187,8 @@ vi.mock('@/services/api-client', () => ({
       getHostSpeechSettings: mockGetHostSpeechSettings,
       getHostSpeechManifest: mockGetHostSpeechManifest,
       getHostSpeechSentence: mockGetHostSpeechSentence,
+      getNpcSpeechManifest: mockGetNpcSpeechManifest,
+      getNpcSpeechSentence: mockGetNpcSpeechSentence,
       updateHostSpeechSettings: mockUpdateHostSpeechSettings,
     },
     roomSocket: {
@@ -1604,6 +1615,39 @@ describe('RoomPage conversation history', () => {
     await waitFor(() => expect(mockGetHostSpeechManifest).toHaveBeenCalledTimes(1))
   })
 
+  it('highlights the NPC sentence currently being spoken', async () => {
+    installRoomSpeechApi()
+    localStorage.setItem('aidm-host-speech-settings', JSON.stringify({ enabled: true }))
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    emitWsMessage({
+      type: 'dialogue.npc',
+      payload: {
+        messageId: 'npc-live-1',
+        speakerId: 'caretaker',
+        speakerName: '守墓人',
+        avatarUrl: null,
+        listenerIds: ['actor-1'],
+        participantIds: ['caretaker', 'actor-1'],
+        text: '历史 NPC 语音',
+        sceneId: 'scene-1',
+        sourceDialogueId: 'dialogue-player-1',
+        sourceActionId: 'action-dialogue-1',
+        ordinal: 0,
+        sourceRevision: 'revision-1',
+        sentAt: '2026-07-28T10:03:00Z',
+        audiencePlayerIds: ['player-1'],
+      },
+    })
+
+    expect(await screen.findByText('历史 NPC 语音')).toBeInTheDocument()
+    await waitFor(() => expect(mockGetNpcSpeechManifest).toHaveBeenCalledWith(
+      'room-1', 'npc-live-1', 'token-1', 'reconnect-1', expect.any(AbortSignal),
+    ))
+    expect(screen.getByText('历史 NPC 语音')).toHaveClass('bg-brass/20', 'rounded-sm')
+  })
+
   it('does not auto-speak restored history but supports manual replay', async () => {
     installRoomSpeechApi()
     localStorage.setItem('aidm-host-speech-settings', JSON.stringify({ enabled: true, voiceURI: null }))
@@ -1633,6 +1677,34 @@ describe('RoomPage conversation history', () => {
     fireEvent.click(screen.getByRole('button', { name: '重新朗读' }))
     await waitFor(() => expect(mockGetHostSpeechManifest).toHaveBeenCalledTimes(1))
     expect(mockGetHostSpeechManifest.mock.calls[0]?.[1]).toBe('history-narration')
+  })
+
+  it('uses the authoritative NPC event id for historical replay', async () => {
+    installRoomSpeechApi()
+    localStorage.setItem('aidm-host-speech-settings', JSON.stringify({ enabled: true }))
+    mockListConversation.mockResolvedValue([
+      {
+        id: 'event-npc-1',
+        type: 'dialogue.npc',
+        channel: 'action',
+        payload: {
+          messageId: 'event-npc-1',
+          speakerId: 'caretaker',
+          speakerName: '守墓人',
+          text: '历史 NPC 语音',
+          sentAt: '2026-07-28T10:03:00Z',
+        },
+        createdAt: '2026-07-28T10:03:00Z',
+      },
+    ])
+
+    renderRoomPage()
+    expect(await screen.findByText('历史 NPC 语音')).toBeInTheDocument()
+    expect(mockGetNpcSpeechManifest).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: '重新朗读' }))
+    await waitFor(() => expect(mockGetNpcSpeechManifest).toHaveBeenCalledTimes(1))
+    expect(mockGetNpcSpeechManifest.mock.calls[0]?.[1]).toBe('event-npc-1')
   })
 
   it('exposes speech controls and stops the queue when disabled', async () => {

@@ -109,7 +109,9 @@ async def get_host_speech_settings(
     room = await db.get(Room, room_id)
     if room is None:
         _raise_public_error(HostSpeechNotFoundError("房间不存在"))
-    return ApiResponse.ok(_settings(room, _service(request)))
+    service = _service(request)
+    await service.refresh_voice_catalog()
+    return ApiResponse.ok(_settings(room, service))
 
 
 @router.patch("/{room_id}/host-speech", response_model=ApiResponse[HostSpeechSettingsRead])
@@ -128,6 +130,7 @@ async def update_host_speech_settings(
     if player.id != room.host_player_id:
         _raise_public_error(HostSpeechForbiddenError("仅房主可以更换主持人音色"))
     service = _service(request)
+    await service.refresh_voice_catalog()
     if payload.voice_type not in service.allowed_voice_types:
         _raise_public_error(HostSpeechInvalidRequestError("主持人音色不在允许列表中"))
     room.host_speech_voice_type = payload.voice_type

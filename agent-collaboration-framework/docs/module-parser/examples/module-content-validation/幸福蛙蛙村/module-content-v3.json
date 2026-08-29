@@ -997,6 +997,11 @@
       "relations": [],
       "state": {},
       "item_component": null,
+      "voice": {
+        "provider": "doubao",
+        "resource_id": "seed-tts-2.0",
+        "voice_type": "zh_male_ruyayichen_saturn_bigtts"
+      },
       "visibility": "public",
       "visibility_conditions": [],
       "plot_relevance": true,
@@ -1014,6 +1019,11 @@
       "relations": [],
       "state": {},
       "item_component": null,
+      "voice": {
+        "provider": "doubao",
+        "resource_id": "seed-tts-2.0",
+        "voice_type": "zh_male_dongfanghaoran_uranus_bigtts"
+      },
       "visibility": "public",
       "visibility_conditions": [],
       "plot_relevance": true,
@@ -1033,6 +1043,11 @@
         "convinced": false
       },
       "item_component": null,
+      "voice": {
+        "provider": "doubao",
+        "resource_id": "seed-tts-2.0",
+        "voice_type": "zh_female_vv_uranus_bigtts"
+      },
       "visibility": "public",
       "visibility_conditions": [],
       "plot_relevance": true,
@@ -1050,6 +1065,11 @@
       "relations": [],
       "state": {},
       "item_component": null,
+      "voice": {
+        "provider": "doubao",
+        "resource_id": "seed-tts-2.0",
+        "voice_type": "zh_female_santongyongns_saturn_bigtts"
+      },
       "visibility": "public",
       "visibility_conditions": [],
       "plot_relevance": true,
@@ -1072,6 +1092,11 @@
         "alive": true
       },
       "item_component": null,
+      "voice": {
+        "provider": "doubao",
+        "resource_id": "seed-tts-2.0",
+        "voice_type": "zh_male_dayi_saturn_bigtts"
+      },
       "visibility": "public",
       "visibility_conditions": [],
       "plot_relevance": true,
@@ -1125,6 +1150,11 @@
       "relations": [],
       "state": {},
       "item_component": null,
+      "voice": {
+        "provider": "doubao",
+        "resource_id": "seed-tts-2.0",
+        "voice_type": "zh_male_xuanyijieshuo_uranus_bigtts"
+      },
       "visibility": "public",
       "visibility_conditions": [],
       "plot_relevance": true,
@@ -1193,6 +1223,11 @@
       "relations": [],
       "state": {},
       "item_component": null,
+      "voice": {
+        "provider": "doubao",
+        "resource_id": "seed-tts-2.0",
+        "voice_type": "zh_female_mizai_saturn_bigtts"
+      },
       "visibility": "public",
       "visibility_conditions": [],
       "plot_relevance": true,

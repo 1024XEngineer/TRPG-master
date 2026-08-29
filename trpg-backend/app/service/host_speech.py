@@ -350,26 +350,27 @@ async def get_npc_voice(
     module_version = await db.get(ModuleVersion, (scenario.module_id, version))
     # 事件规范使用 camelCase；兼容早期测试/历史行的 snake_case 载荷。
     speaker_id = event.payload.get("speakerId") or event.payload.get("speaker_id") or event.actor_id
+    if not isinstance(speaker_id, str) or not speaker_id.strip() or module_version is None:
+        raise HostSpeechNotFoundError("NPC 音色对应的实体不存在")
     try:
-        content = (
-            ModuleContentV3.model_validate(module_version.content_json) if module_version else None
-        )
-        entity = next(
-            item
-            for item in (content.entities if content else ())
-            if item.kind == "npc" and item.id == speaker_id
-        )
-        profile = entity.voice
-        if (
-            profile is not None
-            and profile.provider == service.provider.name
-            and profile.resource_id == service.resource_id
-            and profile.voice_type in service.allowed_voice_types
-        ):
-            return profile.voice_type
-    except (StopIteration, TypeError, ValueError):
-        # 内容缺失、旧版本或非法 profile 都只能回退，不影响文字对话。
-        pass
+        content = ModuleContentV3.model_validate(module_version.content_json)
+    except (TypeError, ValueError) as exc:
+        raise HostSpeechUnavailableError("模组音色配置无法读取") from exc
+    entity = next(
+        (item for item in content.entities if item.kind == "npc" and item.id == speaker_id),
+        None,
+    )
+    if entity is None:
+        raise HostSpeechNotFoundError("NPC 音色对应的实体不存在")
+    profile = entity.voice
+    if (
+        profile is not None
+        and profile.provider == service.provider.name
+        and profile.resource_id == service.resource_id
+        and profile.voice_type in service.allowed_voice_types
+    ):
+        return profile.voice_type
+    # 合法 NPC 但 profile 与当前部署不匹配时安全回退，不影响文字对话。
     if fallback is None or fallback not in service.allowed_voice_types:
         raise HostSpeechUnavailableError("NPC 音色不可用，但文字对话仍可继续")
     return fallback

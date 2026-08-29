@@ -43,6 +43,7 @@ from app.adapters.structured_http import (
     decode_structured_json,
     is_transient_model_error,
     log_structured_output_failure,
+    model_http_timeout,
     post_structured_json,
     read_structured_payload,
 )
@@ -494,7 +495,7 @@ class OpenAIResponsesJsonClient:
                 "Authorization": f"Bearer {self._api_key}",
                 "Content-Type": "application/json",
             },
-            timeout=self._timeout_seconds,
+            timeout=model_http_timeout(self._timeout_seconds),
             transport=self._transport,
         ) as client:
             transport_result = await post_structured_json(

@@ -109,7 +109,13 @@ class Settings(BaseSettings):
     # 撞上超时、退回确定性模板——玩家看到的就是"开场变死板了"，而日志里是
     # opening_narration_completed result=fallback failure_category=timeout。
     # 开场期间前端已经收到 opening.started 并显示生成中，等待是可见的。
-    opening_narration_timeout_seconds: float = Field(default=30.0, gt=0, le=60)
+    #
+    # 这个值必须**严格大于** provider 自己的 HTTP 超时（qwen_timeout_seconds /
+    # deepseek_timeout_seconds / openai_timeout_seconds），否则 provider 侧的超时与
+    # 重试永远轮不到——外层守卫总是先一步取消整个调用（issue #505）。预览服务器上
+    # 两边都是 30，实测 6 小时内 4 次开场有 3 次精确停在 30001 ms 上。
+    # 这里同时还要装下一次校验失败后的重试（见 TurnApplication._narrate_opening_with_retry）。
+    opening_narration_timeout_seconds: float = Field(default=45.0, gt=0, le=90)
     recent_history_enabled: bool = True
     recent_history_max_turns: int = Field(default=6, ge=1, le=24)
     recent_history_max_chars: int = Field(default=6000, ge=2)

@@ -5,8 +5,35 @@
 """
 
 import contextlib
+from weakref import WeakKeyDictionary
 
+import anyio
 from fastapi import WebSocket
+
+# 每条连接一把发送锁（issue #505）。
+#
+# 心跳的 pong 由独立的 reader 任务发出（见 controller/ws.py：回合是在收消息循环里
+# 内联跑完的，ping 不能排在长流程后面），于是同一个 WebSocket 会有两个任务并发
+# 调用 send。`websockets` 的 send() 不保证协程并发安全，交错写入可能损坏帧。
+#
+# 锁按连接维度加在唯一的发送出口上：房间广播、玩家单播和 controller 的
+# `_send_to_player` 全部走这里。锁只覆盖一次 send，不跨越业务逻辑，不会串行化回合。
+_send_locks: WeakKeyDictionary[WebSocket, anyio.Lock] = WeakKeyDictionary()
+
+
+def send_lock(websocket: WebSocket) -> anyio.Lock:
+    lock = _send_locks.get(websocket)
+    if lock is None:
+        lock = anyio.Lock()
+        _send_locks[websocket] = lock
+    return lock
+
+
+async def send_json_locked(websocket: WebSocket, message: dict) -> None:
+    """同一连接上的所有发送都必须经由这里，才谈得上互斥。"""
+
+    async with send_lock(websocket):
+        await websocket.send_json(message)
 
 
 class ConnectionManager:
@@ -57,7 +84,7 @@ class ConnectionManager:
 
         for websocket in self.player_connections(room_id, player_id):
             with contextlib.suppress(Exception):
-                await websocket.send_json(message)
+                await send_json_locked(websocket, message)
 
     async def broadcast(self, room_id: str, message: dict) -> None:
         # 复制一份快照再遍历：广播过程中某个连接掉线触发 remove() 会改动
@@ -66,7 +93,7 @@ class ConnectionManager:
             # 发送失败（连接已经断了但还没走到 disconnect 清理）忽略，
             # 交给该连接自己的 receive 循环去 remove()。
             with contextlib.suppress(Exception):
-                await websocket.send_json(message)
+                await send_json_locked(websocket, message)
 
 
 manager = ConnectionManager()

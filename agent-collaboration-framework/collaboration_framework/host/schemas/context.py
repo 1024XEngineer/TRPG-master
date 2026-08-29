@@ -42,6 +42,9 @@ class OpeningNarrationContext(ContractModel):
     participants: tuple[OpeningParticipant, ...] = Field(min_length=1)
     solo_background_summary: str = ""
     addressing_mode: Literal["second_person", "named_actor"] = "second_person"
+    # 上一版开场被玩家可见输出安全校验拒绝后，重试时告诉模型问题出在哪
+    # （issue #505）。与回合叙事的 ActionPlanNarrationContext 用法一致。
+    narration_retry_hint: str | None = Field(default=None, max_length=500)
 
     @model_validator(mode="after")
     def validate_public_scope(self) -> OpeningNarrationContext:

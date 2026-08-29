@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 
+import anyio
 import pytest
 from collaboration_framework.contracts import (
     ActionAdjudication,
@@ -1981,3 +1982,111 @@ def test_keeper_turn_ignores_invalid_followup_npc_speaker(
         if event["type"] == "dialogue.npc"
         and event["payload"].get("sourceActionId") == "keeper-followup-invalid-412"
     ]
+
+
+def test_ping_is_answered_before_room_join(sync_client: TestClient) -> None:
+    """心跳必须在绑定之前就能用（issue #505）。
+
+    连接建立到 room.join 之间同样会被预览链路上的网关按空闲切断，这段窗口也要
+    保活；而且这一帧不该要求任何房间身份。
+    """
+
+    token = register_and_login(sync_client)
+    room = create_room(sync_client, token)
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json({"type": "ping", "payload": {}})
+        assert ws.receive_json() == {"type": "pong", "payload": {}}
+
+
+def test_ping_does_not_disturb_bound_session(sync_client: TestClient) -> None:
+    """心跳不改变房间状态，绑定之后仍然只回 pong。"""
+
+    token = register_and_login(sync_client)
+    room = create_room(sync_client, token)
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {
+                    "reconnectToken": room["reconnectToken"],
+                    "roomCode": room["roomCode"],
+                    "nickname": "房主",
+                },
+            }
+        )
+        assert ws.receive_json()["type"] == "session.bound"
+
+        ws.send_json({"type": "ping", "playerId": room["playerId"], "payload": {}})
+        assert ws.receive_json() == {"type": "pong", "payload": {}}
+
+
+def test_ping_is_answered_while_a_long_turn_is_running(
+    sync_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """心跳不能被同一个接收循环里的长流程挡住（issue #505 / PR review）。
+
+    `game.start` 会在收消息循环内直接 await 开场生成，最长可占满
+    opening_narration_timeout_seconds（当前默认 45 秒）。如果 ping 要排在这条
+    消息后面才被读到，客户端在 20 秒发出的 ping 拿不到 pong，10 秒后就会关掉一条
+    其实完全正常的连接，反而制造出这个 PR 想消除的断线。
+
+    断言方式是顺序而不是计时：pong 必须先于开场的 narration.push 到达，说明它没有
+    在队列里等那条长流程。
+    """
+
+    started = anyio.Event()
+
+    class _SlowOpeningModel:
+        async def generate(self, context) -> dict:
+            started.set()
+            await anyio.sleep(1.0)
+            names = "、".join(participant.name for participant in context.participants)
+            return {
+                "kind": "narration",
+                "text": f"{names}站在莱恩庄园的会客厅里。",
+                "claimed_fact_ids": [],
+                "suggested_actions": [],
+            }
+
+    # SessionViewApplication 是 frozen dataclass，换整个实例而不是改字段。
+    monkeypatch.setattr(
+        ws_controller,
+        "session_view_application",
+        replace(
+            ws_controller.session_view_application,
+            opening_narration_model=_SlowOpeningModel(),
+        ),
+    )
+
+    token = register_and_login(sync_client)
+    room = create_room(sync_client, token)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        ws.receive_json()  # session.bound
+        ws.send_json({"type": "game.start", "playerId": room["playerId"], "payload": {}})
+        ws.send_json({"type": "ping", "playerId": room["playerId"], "payload": {}})
+
+        seen: list[str] = []
+        while True:
+            message = ws.receive_json()
+            seen.append(message["type"])
+            if message["type"] in {"pong", "narration.push"}:
+                break
+
+    assert seen[-1] == "pong", (
+        "长流程执行期间 ping 必须立刻得到 pong；实际收到的顺序是 "
+        f"{seen}，说明心跳被接收循环里的开场生成挡住了"
+    )

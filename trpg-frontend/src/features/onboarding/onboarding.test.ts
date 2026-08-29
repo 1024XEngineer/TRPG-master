@@ -56,6 +56,27 @@ describe('onboarding geometry', () => {
 
     expect(rect).toEqual({ left: 20, top: 100, width: 350, height: 720 })
   })
+
+  it('converts viewport coordinates back into a scaled preview frame', () => {
+    const rect = calculateSpotlightRect(
+      { left: 799.6, top: 216.8, width: 400.8, height: 525.6 },
+      {
+        left: 766,
+        top: 20,
+        width: 468,
+        height: 984,
+        borderLeft: 8,
+        borderTop: 8,
+        clientWidth: 374,
+        clientHeight: 804,
+      },
+    )
+
+    expect(rect?.left).toBeCloseTo(20)
+    expect(rect?.top).toBeCloseTo(156)
+    expect(rect?.width).toBeCloseTo(334)
+    expect(rect?.height).toBeCloseTo(438)
+  })
 })
 
 describe('onboarding steps', () => {

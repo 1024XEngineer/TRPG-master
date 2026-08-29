@@ -348,6 +348,7 @@ describe('CharacterPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '掷幸运骰' }))
     await waitFor(() => expect(mockCharacterApi.createCharacterDraft).toHaveBeenCalledWith('room-1'))
     await waitFor(() => expect(mockCharacterApi.rollLuckCharacter).toHaveBeenCalledWith('room-1', 'draft-1'))
+    expect(screen.queryByRole('button', { name: '下一步' })).not.toBeInTheDocument()
 
     // 首次掷骰创建的草稿尚未保存姓名和职业，回读不能把向导中的内容清空。
     fireEvent.click(screen.getByRole('tab', { name: '基础信息' }))

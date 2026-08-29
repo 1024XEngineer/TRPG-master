@@ -676,6 +676,23 @@ async def test_quoted_npc_line_is_dropped_sentence_wise_instead_of_the_whole_pro
     assert "你们别担心" not in narration.text
 
 
+def test_disclosure_source_maps_index_without_leaking_the_term() -> None:
+    """命中禁词只还原成来源 id；禁词字面值是未公开剧情，绝不能落盘。"""
+    from app.core.action_plan_turn import _disclosure_source
+
+    sources = ("information:frog_resort_flyer:title", "entity:messenger:name")
+    hit = ActionPlanNarrationValidationError("hidden_disclosure", disclosure_term_index=1)
+    assert _disclosure_source(hit, sources) == "entity:messenger:name"
+
+    # 越界或缺失时安静返回 None，不能让诊断字段本身把日志写崩。
+    for index in (None, -1, 2):
+        exc = ActionPlanNarrationValidationError(
+            "hidden_disclosure", disclosure_term_index=index
+        )
+        assert _disclosure_source(exc, sources) is None
+    assert _disclosure_source(hit, ()) is None
+
+
 def test_required_evidence_fallback_omits_second_person_description_in_named_actor() -> None:
     context = SimpleNamespace(
         addressing_mode="named_actor",

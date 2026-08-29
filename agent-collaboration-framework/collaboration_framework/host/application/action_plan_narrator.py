@@ -39,6 +39,7 @@ class ActionPlanNarrationValidationError(ContractError):
         output: ActionPlanNarrationOutput | None = None,
         offending_spans: tuple[tuple[int, int], ...] = (),
         schema_error_fields: tuple[str, ...] = (),
+        disclosure_term_index: int | None = None,
     ) -> None:
         super().__init__("ActionPlanNarrationOutput 未通过玩家可见输出安全校验")
         self.reason = reason
@@ -47,6 +48,9 @@ class ActionPlanNarrationValidationError(ContractError):
         # 只有字段路径，不含模型正文或被拒的值——outer_schema 此前只记类别，
         # 无法判断是哪个字段的形状出了问题。
         self.schema_error_fields = schema_error_fields
+        # 命中禁词的**下标**，不是词本身。禁词取自尚未公开的剧情内容，落盘等于把
+        # 秘密写进日志；调用方持有与索引同序的来源表，据此还原成 id 再记录。
+        self.disclosure_term_index = disclosure_term_index
 
 
 _CORPSE_SEARCH_QUESTION = re.compile(
@@ -121,12 +125,13 @@ class ActionPlanNarrator:
             raise ActionPlanNarrationValidationError("state_claim_scope")
         # 先检查整段文本再判断语气；“可能/或许/据说”同样会把答案送到玩家端。
         # 禁止词索引由服务端构造且不会进入模型 payload。
-        for term in context.forbidden_disclosure_terms:
+        for index, term in enumerate(context.forbidden_disclosure_terms):
             if term and term.casefold() in output.text.casefold():
                 raise ActionPlanNarrationValidationError(
                     "hidden_disclosure",
                     output=output,
                     offending_spans=_term_sentence_spans(output.text, term),
+                    disclosure_term_index=index,
                 )
         required = tuple(
             item for item in context.narration_evidence if item.required_in_narration

@@ -902,6 +902,23 @@ def _latest_previous_narration(recent_history: RecentTurnContext) -> str | None:
     return None
 
 
+def _disclosure_source(
+    exc: ActionPlanNarrationValidationError,
+    forbidden_sources: tuple[str, ...],
+) -> str | None:
+    """把命中禁词的下标还原成来源标识，绝不记录禁词本身。
+
+    禁词索引由未公开 information 的 id/title/summary/content 与不在场 entity 的
+    id/name 构成——那些字面值就是尚未公开的剧情内容，写进日志等于把秘密落盘。
+    这里只输出 `information:<id>:<field>` 这类内部标识。
+    """
+
+    index = exc.disclosure_term_index
+    if index is None or not 0 <= index < len(forbidden_sources):
+        return None
+    return forbidden_sources[index]
+
+
 def _acting_address(context: ActionPlanNarrationContext) -> str:
     if getattr(context, "addressing_mode", "second_person") == "named_actor":
         name = getattr(context, "acting_character_name", "") or ""
@@ -1813,6 +1830,7 @@ class ActionPlanTurnApplication:
         addressing_mode, acting_character_name = await self._narration_addressing(context)
         # Narrator 只拿到公开视图；隐藏词索引留在服务端校验器，不序列化给模型。
         forbidden_terms: tuple[str, ...] = ()
+        forbidden_sources: tuple[str, ...] = ()
         if isinstance(context, ActionPlanNarrationContext):
             capabilities = await self._keeper_capabilities(
                 context.player_input, context.player_view
@@ -1820,16 +1838,28 @@ class ActionPlanTurnApplication:
             if capabilities is not None:
                 public_info_ids = {item.id for item in context.player_view.known_information}
                 public_entity_ids = {item.id for item in context.player_view.scene.visible_entities}
-                terms: set[str] = set()
+                # 用有序映射而不是 set：命中禁词时只能记来源 id，不能记词本身
+                # （禁词取自尚未公开的剧情内容），所以索引必须与来源表严格同序。
+                term_sources: dict[str, str] = {}
                 for info in capabilities.information:
                     if info.id not in public_info_ids and not (
                         info.known_by_party or info.known_by_actor
                     ):
-                        terms.update((info.id, info.title, info.summary, info.content))
+                        for field, value in (
+                            ("id", info.id),
+                            ("title", info.title),
+                            ("summary", info.summary),
+                            ("content", info.content),
+                        ):
+                            if value:
+                                term_sources.setdefault(value, f"information:{info.id}:{field}")
                 for entity in capabilities.entities:
                     if entity.id not in public_entity_ids:
-                        terms.update((entity.id, entity.name))
-                forbidden_terms = tuple(term for term in terms if term)
+                        for field, value in (("id", entity.id), ("name", entity.name)):
+                            if value:
+                                term_sources.setdefault(value, f"entity:{entity.id}:{field}")
+                forbidden_terms = tuple(term_sources)
+                forbidden_sources = tuple(term_sources.values())
         if isinstance(context, ActionPlanNarrationContext) and hasattr(
             context.player_view, "revision"
         ):
@@ -1892,8 +1922,11 @@ class ActionPlanTurnApplication:
                     action=context.player_input.client_action_id[:12],
                     attempt=attempt + 1,
                     reason=exc.reason,
-                    # 只有字段路径，不含模型正文；outer_schema 此前无法定位到字段。
+                    # 只有字段路径与来源 id，不含模型正文，也不含禁词字面值——
+                    # 此前 outer_schema 无法定位到字段、hidden_disclosure 无法
+                    # 定位到命中项，被剔除的正文按脱敏口径又不落盘，两头都断。
                     schema_error_fields=exc.schema_error_fields or None,
+                    disclosure_source=_disclosure_source(exc, forbidden_sources),
                     outcomes=tuple(step.outcome for step in context.completed_steps),
                     termination_status=context.termination_status,
                 )
@@ -2135,6 +2168,8 @@ class ActionPlanTurnApplication:
             action=context.player_input.client_action_id[:12],
             reason=exc.reason,
             removed_sentences=len(spans),
+            # 偏移量而非文本：足以定位被剔的是哪一段，又不落盘任何模型正文。
+            removed_spans=tuple(spans),
         )
         return degraded
 

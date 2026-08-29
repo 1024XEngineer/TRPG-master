@@ -36,6 +36,36 @@ class StructuredOutputError(ValueError):
     """
 
 
+# TCP + TLS 握手的上限。与"等模型生成"是两件事：能连上的调用实测 3–5 秒就回来了，
+# 一个 5 秒还没握手成功的连接，给它 30 秒也一样握不上。
+#
+# 这个值存在的理由是 httpx 的 `timeout=<float>` 会把同一个标量套到 connect / read /
+# write / pool 四个阶段上。预览环境实测因此出现过整份预算全部烧在建连上的情况：
+# `trpg_opening_narration` 的失败记录是 duration_ms=30215、transport_attempts=1、
+# error_type=ConnectTimeout——30 秒耗尽、请求根本没发出去、也没剩下时间重试。
+# 把建连单独收紧之后，连不上会快速失败，预算留给生成和重试。
+_CONNECT_TIMEOUT_SECONDS = 5.0
+# 写请求体和从连接池取连接都应该很快；慢在这两处同样说明链路有问题。
+_WRITE_TIMEOUT_SECONDS = 10.0
+_POOL_TIMEOUT_SECONDS = 5.0
+
+
+def model_http_timeout(timeout_seconds: float) -> httpx.Timeout:
+    """把"单次调用预算"翻译成分阶段超时。
+
+    `timeout_seconds` 是调用方为**等模型出结果**准备的预算，因此它只落在 read 上；
+    握手、写入、取连接各有自己更短的上限。传入值比建连上限还小时以传入值为准，
+    免得反而把调用方显式收紧的预算放宽。
+    """
+
+    return httpx.Timeout(
+        connect=min(_CONNECT_TIMEOUT_SECONDS, timeout_seconds),
+        read=timeout_seconds,
+        write=min(_WRITE_TIMEOUT_SECONDS, timeout_seconds),
+        pool=min(_POOL_TIMEOUT_SECONDS, timeout_seconds),
+    )
+
+
 @dataclass(frozen=True)
 class ModelClientRetryPolicy:
     """有限次数的指数退避。默认值保守：一次重试、0.5 秒退避。"""

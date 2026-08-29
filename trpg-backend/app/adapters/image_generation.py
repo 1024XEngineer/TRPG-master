@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 import httpx
 from PIL import Image, ImageDraw
 
+from app.adapters.structured_http import model_http_timeout
 from app.service.portrait_generation import (
     ImageGenerationControl,
     ImageGenerationOutput,
@@ -248,7 +249,7 @@ class SufyImageProvider:
         try:
             async with httpx.AsyncClient(
                 headers=headers,
-                timeout=self._timeout_seconds,
+                timeout=model_http_timeout(self._timeout_seconds),
                 transport=self._transport,
             ) as client:
                 response = await client.post(

@@ -305,19 +305,22 @@ def _configured_opening_models(
             FakeOpeningNarrationModel(),
             HostModelMetadata(provider="fake", model="deterministic"),
         )
-    # 开场叙事显式不重试，与回合链的策略不同。
+    # 开场叙事按传输层错误重试一次。
     #
-    # 开场整段被 `anyio.fail_after(opening_narration_timeout_seconds)` 包住，那是
-    # 一个**总**预算（超时即退回确定性模板），而单次请求预算是
-    # `<provider>_timeout_seconds`。两者默认都是 30 秒，于是第一次请求耗尽预算的
-    # 同时外层 deadline 到期，退避与第二次尝试直接被取消——重试在这条路径上
-    # 从来不会发生，配了也是假的。
+    # 这里原来是 `max_attempts=1`，理由是"外层总预算与单次请求预算都是 30 秒，第一次
+    # 请求耗尽预算的同时外层 deadline 到期，第二次尝试必然被取消，配了也是假的"。
+    # 那个前提已经不成立，两处都变了：
     #
-    # 让总预算容纳两次尝试需要放宽到 60 秒以上（config 的上限也只有 60），玩家
-    # 开局要多等一分钟；压缩单次预算又会让每一次生成都更容易超时（#267 才因为
-    # 10 秒太紧把它提到 30 秒）。开场本来就有确定性模板兜底，失败代价远低于让
-    # 玩家干等，所以这里选择如实地不重试，而不是配一个永远不生效的策略。
-    retry_policy = ModelClientRetryPolicy(max_attempts=1)
+    # - 外层 `opening_narration_timeout_seconds` 现在是 45 秒（#505）。
+    # - 更关键的是失败根本不是"生成太慢"。预览环境实测到的是
+    #   error_type=ConnectTimeout、duration_ms=30215、transport_attempts=1——TCP/TLS
+    #   握手就没成功，请求没发出去，整份预算全烧在建连上。原因是 httpx 的
+    #   `timeout=<float>` 会把同一个标量套到 connect 上，于是建连也被允许等 30 秒。
+    #
+    # `model_http_timeout()` 把建连收紧到 5 秒之后，一次连不上的尝试只花 5 秒，
+    # 45 秒的总预算装得下"快速失败 + 退避 + 一次完整生成"。上游是间歇性连不上
+    # （同一 provider 同期有 3.8–5.2 秒成功的调用），这正是重试能救回来的形态。
+    retry_policy = ModelClientRetryPolicy(max_attempts=2, backoff_seconds=0.5)
     if settings.host_model_provider == "deepseek":
         if settings.deepseek_api_key is None:
             raise ValueError("DeepSeek Host 模型缺少 API key")

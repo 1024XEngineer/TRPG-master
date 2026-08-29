@@ -221,7 +221,7 @@
       "voice": {
         "provider": "doubao",
         "resource_id": "seed-tts-2.0",
-        "voice_type": "zh_male_dongfanghaoran_uranus_bigtts"
+        "voice_type": "zh_male_dayi_saturn_bigtts"
       },
       "located_in": "thomas_office",
       "state": {

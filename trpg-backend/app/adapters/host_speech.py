@@ -13,6 +13,8 @@ import httpx
 import structlog
 from websockets.asyncio.client import connect
 
+from app.adapters.structured_http import model_http_timeout
+
 logger = structlog.get_logger()
 
 DOUBAO_TTS_ENDPOINT = "wss://openspeech.bytedance.com/api/v3/tts/unidirectional/stream"
@@ -211,7 +213,9 @@ class DoubaoHostSpeechProvider:
             "Content-Type": "application/json",
         }
         async with httpx.AsyncClient(
-            timeout=self._timeout_seconds,
+            # `_timeout_seconds` 就是这一次请求的预算，直接交给 model_http_timeout
+            # 即可——不同于 DashScope 那两处，那里的预算还要覆盖轮询，所以先 min 再包。
+            timeout=model_http_timeout(self._timeout_seconds),
             transport=self._transport,
         ) as client:
             response = await client.post(

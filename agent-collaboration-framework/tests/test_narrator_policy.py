@@ -802,6 +802,40 @@ class InventoryClaimDeclarationTests(unittest.IsolatedAsyncioTestCase):
         ).narrate(self._context(entities=_LANE_MANOR))
         self.assertIn("收进口袋", output.text)
 
+    async def test_acquisition_guard_survives_the_narrowed_verb_set(self):
+        """收窄动词与论元位之后，原有防护的边界仍必须钉死在这里。
+
+        左列是收窄可能开出的洞（代词入包、背包侧的措辞、跨小句的 NPC 主语），
+        右列是收窄本该修好的误杀（否定式、非背包容器、放回原处）。
+        """
+        cases = (
+            # 明确入包声明：即使用代词或从背包一侧落笔，也必须有最终 inventory 背书。
+            ("reject", "你从莱恩夫人手里接过传单，把它收进背包。"),
+            ("reject", "你把它塞进了行囊。"),
+            ("reject", "你的背包里多了一张传单。"),
+            ("reject", "你取走了那张蛙蛙度假村传单。"),
+            # 主语是在场 NPC，与玩家背包无关。
+            ("pass", "莱恩夫人把信塞进口袋。"),
+            # 否定式、非背包容器、放回原处都不是取得。
+            ("pass", "你没能把传单带走。"),
+            ("pass", "你把照片放进相框，然后走向背包旁的椅子。"),
+            ("pass", "你翻看传单，又把手册放回书架。"),
+        )
+        context = self._context(entities=_LANE_MANOR)
+        for expectation, text in cases:
+            with self.subTest(text=text):
+                narrator = ActionPlanNarrator(_PersistentNarrationModel(text))
+                if expectation == "pass":
+                    output = await narrator.narrate(context)
+                    self.assertEqual(output.text, text)
+                    continue
+                with self.assertRaises(ActionPlanNarrationValidationError) as raised:
+                    await narrator.narrate(context)
+                self.assertEqual(
+                    raised.exception.reason,
+                    "persistent_claim_without_evidence:inventory_acquisition",
+                )
+
     async def test_loose_scene_items_also_bind_takeaway_verbs(self):
         """权威物品名闭集必须覆盖场景散落物，不只是可见实体。"""
         loose = (SimpleNamespace(id="brass_key", name="一枚黄铜钥匙"),)

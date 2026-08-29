@@ -223,16 +223,16 @@ export function useHostSpeech({ roomId, reconnectToken, accountToken }: UseHostS
 
   const enqueue = useCallback((messageId: string | undefined, kind: SpeechMessageKind = 'host') => {
     if (!enabledRef.current || !messageId) return
+    // 只有明确确认语音不可用时才丢弃；设置仍在加载时先排队，等待 available
+    // effect 继续处理，避免实时消息在设置请求完成前被永久标记为已读。
+    if (settings?.available === false) return
     const seenKey = `${kind}:${messageId}`
     if (seenRef.current.has(seenKey)) return
     seenRef.current.add(seenKey)
-    // 设置 GET 尚未返回时先保留权威 ID，避免进入页面后第一句因竞态被吞掉；
-    // 已明确 disabled 时则保持纯文本，不积压一个永远无法消费的队列。
-    if (!credentialsReady || settings?.available === false) return
     queueRef.current.push({ messageId, kind })
     setQueueLength(queueRef.current.length)
     processQueueRef.current()
-  }, [credentialsReady, settings?.available])
+  }, [settings?.available])
 
   const replay = useCallback((messageId: string | undefined, kind: SpeechMessageKind = 'host') => {
     if (!available || !messageId) return
@@ -317,6 +317,8 @@ export function useHostSpeech({ roomId, reconnectToken, accountToken }: UseHostS
 
   useEffect(() => () => stop(), [stop])
 
+  const enqueueNpc = useCallback((messageId: string | undefined) => enqueue(messageId, 'npc'), [enqueue])
+
   return {
     available,
     provider: settings?.provider ?? 'disabled',
@@ -337,7 +339,7 @@ export function useHostSpeech({ roomId, reconnectToken, accountToken }: UseHostS
     error,
     markSeen,
     enqueue,
-    enqueueNpc: (messageId: string | undefined) => enqueue(messageId, 'npc'),
+    enqueueNpc,
     replay,
     pause,
     resume,

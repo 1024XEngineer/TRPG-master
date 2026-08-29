@@ -2,10 +2,12 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useHostSpeech } from './useHostSpeech'
 
-const { getSettings, getManifest, getSentence, updateSettings } = vi.hoisted(() => ({
+const { getSettings, getManifest, getNpcManifest, getSentence, getNpcSentence, updateSettings } = vi.hoisted(() => ({
   getSettings: vi.fn(),
   getManifest: vi.fn(),
+  getNpcManifest: vi.fn(),
   getSentence: vi.fn(),
+  getNpcSentence: vi.fn(),
   updateSettings: vi.fn(),
 }))
 
@@ -16,6 +18,8 @@ vi.mock('@/services/api-client', () => ({
     getHostSpeechSettings: getSettings,
     getHostSpeechManifest: getManifest,
     getHostSpeechSentence: getSentence,
+    getNpcSpeechManifest: getNpcManifest,
+    getNpcSpeechSentence: getNpcSentence,
     updateHostSpeechSettings: updateSettings,
   } },
 }))
@@ -66,7 +70,12 @@ describe('useHostSpeech', () => {
       messageId: 'message-1',
       sentences: [{ index: 0, text: '第一句。' }, { index: 1, text: '第二句。' }],
     })
+    getNpcManifest.mockResolvedValue({
+      messageId: 'npc-message-1',
+      sentences: [{ index: 0, text: 'NPC 第一句。' }],
+    })
     getSentence.mockResolvedValue(new Blob(['mp3'], { type: 'audio/mpeg' }))
+    getNpcSentence.mockResolvedValue(new Blob(['mp3'], { type: 'audio/mpeg' }))
   })
 
   it('迁移旧设置时保留 enabled，并丢弃 voiceURI', async () => {
@@ -91,6 +100,31 @@ describe('useHostSpeech', () => {
     expect(getManifest).not.toHaveBeenCalled()
     act(() => result.current.replay('message-1'))
     await waitFor(() => expect(getManifest).toHaveBeenCalledTimes(1))
+  })
+
+  it('语音设置仍在加载时保留实时消息，设置完成后自动入队', async () => {
+    let resolveSettings: ((value: typeof settings) => void) | undefined
+    getSettings.mockImplementationOnce(() => new Promise<typeof settings>((resolve) => {
+      resolveSettings = resolve
+    }))
+    const { result } = renderHook(() => useHostSpeech(options))
+    await waitFor(() => expect(getSettings).toHaveBeenCalled())
+    act(() => {
+      result.current.setEnabled(true)
+      result.current.enqueueNpc('npc-message-1')
+    })
+    expect(result.current.queueLength).toBe(1)
+    expect(getNpcManifest).not.toHaveBeenCalled()
+    await act(async () => resolveSettings?.(settings))
+    await waitFor(() => expect(result.current.available).toBe(true))
+    await waitFor(() => expect(getNpcManifest).toHaveBeenCalledTimes(1))
+  })
+
+  it('enqueueNpc 在重渲染后保持稳定引用', () => {
+    const { result, rerender } = renderHook(() => useHostSpeech(options))
+    const first = result.current.enqueueNpc
+    rerender()
+    expect(result.current.enqueueNpc).toBe(first)
   })
 
   it('逐句播放，并在当前句播放时只预取下一句', async () => {

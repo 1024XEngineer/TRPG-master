@@ -1132,15 +1132,32 @@ async def test_semantic_malformed_plan_returns_clarification_without_run() -> No
     assert await application.get_plan("semantic-room", "semantic-invalid") is None
 
 
-async def test_clear_single_step_uses_legacy_fast_producer_when_semantic_is_enabled() -> None:
+async def test_clear_single_step_uses_safe_semantic_planner_when_available() -> None:
     application = await _semantic_application()
 
-    class InvalidSemanticClient:
-        async def generate(self, **kwargs):
-            del kwargs
-            raise AssertionError("clear single-step input must not enter semantic Planner")
+    class RecordingSemanticPlanner:
+        calls = 0
 
-    application._semantic_planner = PromptTurnPlanner(InvalidSemanticClient())
+        async def generate(self, context):
+            self.calls += 1
+            return ActionPlan(
+                goal=context.player_input.utterance,
+                steps=(
+                    ActionPlanStep(
+                        kind="action",
+                        semantic_goal=context.player_input.utterance,
+                    ),
+                ),
+            )
+
+    class ForbiddenLegacyPlanner:
+        async def generate(self, context):
+            del context
+            raise AssertionError("生产单步输入不得回退到融合 Planner")
+
+    semantic_planner = RecordingSemanticPlanner()
+    application._semantic_planner = semantic_planner
+    application._planner = ForbiddenLegacyPlanner()
 
     result = await application.start(
         room_id="semantic-room",
@@ -1153,6 +1170,80 @@ async def test_clear_single_step_uses_legacy_fast_producer_when_semantic_is_enab
     run = await application.get_plan("semantic-room", "semantic-fast-path")
     assert run is not None
     assert len(run.steps) == 1
+    assert semantic_planner.calls == 1
+
+
+async def test_npc_single_intent_reaches_rule_match_after_safe_planning() -> None:
+    """#507：NPC 单意图也必须在当前步拿到规则候选，且 Planner 不见 Keeper 数据。"""
+
+    content = _content()
+    state = create_initial_game_state(
+        content,
+        room_id="issue-507-room",
+        actors={
+            "issue-507-actor": ActorState(
+                player_id="issue-507-player",
+                name="调查员",
+                source_character_id="issue-507-character",
+                source_character_version=1,
+                state={"skills": {"intimidate": 60}},
+            )
+        },
+    ).model_copy(update={"scene_id": "cemetery"}, deep=True)
+    store = InMemoryEngineStore()
+    store.register_room(module_content=content, initial_state=state)
+
+    class RecordingClient:
+        def __init__(self) -> None:
+            self.schemas: list[str] = []
+
+        async def generate(self, *, schema_name, schema, instructions, input_payload):
+            del schema, instructions
+            self.schemas.append(schema_name)
+            if schema_name == "trpg_turn_plan":
+                assert input_payload["player_input"]["interlocutor_id"] == "melodias"
+                assert "keeper_capabilities" not in input_payload
+                assert "melodias_night_sighting" not in str(input_payload)
+                return {
+                    "kind": "action_plan",
+                    "goal": "威胁守墓人交代道格拉斯的去向",
+                    "steps": [
+                        {
+                            "kind": "dialogue",
+                            "semantic_goal": "威胁守墓人交代道格拉斯的去向",
+                        }
+                    ],
+                }
+            raise AssertionError(f"单意图不应调用 {schema_name}")
+
+    client = RecordingClient()
+    application = build_action_plan_turn_application(
+        store=store,
+        engine=RuleEngineService(store),
+        adjudication_engine=AdjudicationEngineService(store),
+        settings=Settings(host_model_provider="deepseek", deepseek_api_key="test-key"),
+        client=client,
+        planner_client=client,
+        memory_source=_EmptyMemorySource(),
+    )
+
+    result = await application.start(
+        room_id="issue-507-room",
+        player_id="issue-507-player",
+        client_action_id="issue-507-single-threat",
+        utterance="告诉我道格拉斯藏在哪里，否则我就告发你",
+        interlocutor_id="melodias",
+        interlocutor_name="梅洛迪亚斯·杰弗逊",
+    )
+
+    assert result.status == "waiting_for_player"
+    assert client.schemas == ["trpg_turn_plan"]
+    run = await application.get_plan("issue-507-room", "issue-507-single-threat")
+    assert run is not None
+    adjudication = run.steps[0].adjudication
+    assert adjudication is not None
+    assert adjudication.rule_decision is not None
+    assert adjudication.rule_decision.rule_id == "intimidate_caretaker"
 
 
 @pytest.mark.asyncio

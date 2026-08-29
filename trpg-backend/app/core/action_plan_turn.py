@@ -212,11 +212,13 @@ _SEMANTIC_UNCERTAIN_ACTION_MARKERS = (
 
 
 def semantic_planner_required(utterance: str) -> tuple[bool, str]:
-    """Select semantic planning only where a fast single-step producer is unsafe.
+    """Classify why an input may need semantic planning for route observability.
 
-    This is deliberately a conservative, player-input-only gate. It does not infer
-    targets, rules, checks, effects, or hidden facts. Those remain the responsibility
-    of the current-step adjudicator after the plan is created.
+    Production no longer uses this classification as a security boundary: every
+    input goes through the player-safe Turn Planner when it is configured.  The
+    classification is deliberately player-input-only and remains useful in logs;
+    targets, rules, checks, effects, and hidden facts are still resolved only by the
+    current-step adjudicator after the plan is created.
     """
 
     text = utterance.strip()
@@ -1103,7 +1105,14 @@ class ActionPlanTurnApplication:
         semantic_required, semantic_reason = semantic_planner_required(utterance)
         # 普通玩家输入统一走安全规划器；Keeper 能力只在后续当前步骤裁决时读取。
         # semantic_planner_required 仍保留用于多步语义判断和日志，不再是边界开关。
-        use_semantic_planner = self._semantic_planner is not None and semantic_required
+        # Presence of the safe Planner is the route boundary.  `semantic_required`
+        # only labels why an input was interesting; using it as a gate sent clear
+        # single intents back through the legacy fused Planner, where #469 had
+        # intentionally removed Keeper capabilities.  Those inputs then had no
+        # Rule Match candidates at all.  A one-step ActionPlan is cheap and lets the
+        # current-step adjudicator read the scoped capabilities without exposing
+        # them to the player-safe planning model.
+        use_semantic_planner = self._semantic_planner is not None
         keeper_capabilities = await self._keeper_capabilities(player_input, view)
         try:
             if use_semantic_planner:
@@ -2606,11 +2615,18 @@ def _log_step_adjudicator_path(
 ) -> None:
     """Record only route metadata, never semantic text or adjudication payloads."""
 
+    candidate_count = (
+        len(context.keeper_capabilities.rule_candidates)
+        if context.keeper_capabilities is not None
+        else 0
+    )
     logger.info(
         "action_plan_step_adjudicator_completed",
         action=context.player_input.client_action_id[:12],
         step_index=context.step_index,
         path=path,
+        candidate_count=candidate_count,
+        selected_rule=adjudication.rule_decision is not None,
         has_check=not isinstance(adjudication.check, NoAdjudicationCheck),
     )
 
@@ -2627,6 +2643,11 @@ def _log_deterministic_adjudication_miss(
         action=context.player_input.client_action_id[:12],
         step_index=context.step_index,
         step_kind=context.step.kind,
+        candidate_count=(
+            len(context.keeper_capabilities.rule_candidates)
+            if context.keeper_capabilities is not None
+            else 0
+        ),
         reason=reason,
     )
 
@@ -3354,7 +3375,7 @@ _ACTION_FAMILY_HINTS: dict[str, tuple[str, ...]] = {
     "search": ("搜索", "搜查", "查找", "找线索", "寻找"),
     "research": ("研究", "查阅", "检索", "翻阅", "查旧报"),
     "social": ("留下好印象", "博取信任", "说服"),
-    "intimidate": ("恐吓", "威吓"),
+    "intimidate": ("恐吓", "威吓", "威胁", "要挟"),
     "bribe": ("贿赂", "收买"),
 }
 

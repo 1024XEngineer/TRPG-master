@@ -1941,12 +1941,50 @@ class ActionPlanTurnApplication:
                             )
                         }
                     )
+                elif attempt == 0 and exc.reason == (
+                    "persistent_claim_without_evidence:inventory_acquisition"
+                ):
+                    # 通用提示（“只描述已提交的公开结果”）在 narrative_only 步骤上
+                    # 无从执行——那类步骤的 committed_results 恒为空。这里必须给出
+                    # 可操作的两条出路：申报，或者改掉取得措辞。
+                    context = context.model_copy(
+                        update={
+                            "narration_retry_hint": (
+                                "上一版叙事声称物品进入了背包，但没有申报。"
+                                "若物品确实已在最终 player_view.inventory 中，"
+                                "请把它的 id 写入 claimed_inventory_ids；"
+                                "若只是临时拿起、翻看或使用，请改写为不含"
+                                "“收进背包 / 放进口袋 / 带走 / 取走”的措辞。"
+                            )
+                        }
+                    )
+                elif attempt == 0 and exc.reason == "inventory_claim_scope":
+                    context = context.model_copy(
+                        update={
+                            "narration_retry_hint": (
+                                "claimed_inventory_ids 只能填最终 player_view.inventory "
+                                "中确实存在的 id；请删除多余申报或改写正文。"
+                            )
+                        }
+                    )
+                elif attempt == 0 and exc.reason == "state_claim_scope":
+                    context = context.model_copy(
+                        update={
+                            "narration_retry_hint": (
+                                "claimed_state_changes 只能申报 completed_steps[]."
+                                "committed_results 或可见实体 observable_state 中"
+                                "确实存在的 entity_id / key / value 三元组。"
+                            )
+                        }
+                    )
                 elif attempt == 0 and exc.reason.startswith("persistent_claim_without_evidence"):
                     context = context.model_copy(
                         update={
                             "narration_retry_hint": (
                                 "上一版叙事包含没有权威证据确认的状态断言。"
-                                "请删除该断言，只描述当前 PlayerView 与已提交的公开结果。"
+                                "请删除该断言，或在 claimed_state_changes 中申报对应的"
+                                "entity_id / key / value；"
+                                "只描述当前 PlayerView 与已提交的公开结果。"
                             )
                         }
                     )
@@ -1960,6 +1998,16 @@ class ActionPlanTurnApplication:
                         }
                     )
                 if attempt == 1:
+                    degraded = self._sentence_degraded_narration(context, exc)
+                    if degraded is not None:
+                        logger.info(
+                            "action_plan_narration_completed",
+                            action=context.player_input.client_action_id[:12],
+                            attempts=attempt + 1,
+                            path="sentence_degraded",
+                            duration_ms=int((time.monotonic() - started_at) * 1000),
+                        )
+                        return degraded
                     if (
                         exc.reason == "required_evidence_missing"
                         and context.termination_status != "needs_clarification"
@@ -2015,6 +2063,53 @@ class ActionPlanTurnApplication:
                     retryable=True,
                 ) from exc
         raise AssertionError("unreachable")
+
+    def _sentence_degraded_narration(
+        self,
+        context: ActionPlanNarrationContext,
+        exc: ActionPlanNarrationValidationError,
+    ) -> ActionPlanNarrationOutput | None:
+        """剔除违规小句后复校验剩余正文，不把整段替换成一句状态播报。
+
+        没有这一级时，兜底的素材只有 committed_results，而 narrative_only 步骤的
+        committed_results 恒为空——任何一次该类叙事被拒两次，玩家都必然只看到
+        “这次行动已经按当前可确认的结果完成。”。有了这一级，误判的代价从整段
+        变废话降到少一小句，前面几关才敢在边界情况上保守。
+
+        只在拒绝能定位到具体句子时启用；其余类别（主体人称、氛围重复、协议残留
+        等）无法靠删一句修好，返回 None 交回原有兜底。
+        """
+
+        output = exc.output
+        spans = exc.offending_spans
+        validate = getattr(self._narrator, "validate", None)
+        if output is None or not spans or validate is None:
+            return None
+        kept: list[str] = []
+        cursor = 0
+        for start, end in sorted(spans):
+            if end <= cursor:
+                continue
+            kept.append(output.text[cursor : max(start, cursor)])
+            cursor = end
+        kept.append(output.text[cursor:])
+        remaining = "".join(kept).strip()
+        if not remaining:
+            return None
+        try:
+            degraded = validate(context, output.model_copy(update={"text": remaining}))
+        except ActionPlanNarrationValidationError:
+            # 剩余正文仍不合规就不再逐句剥了：继续剥下去等于用未校验的碎片拼
+            # 输出，安全保证只对整段成立。
+            return None
+        # 与 action_plan_narration_rejected 同一脱敏口径：只记类别与剔除句数。
+        logger.info(
+            "action_plan_narration_sentence_degraded",
+            action=context.player_input.client_action_id[:12],
+            reason=exc.reason,
+            removed_sentences=len(spans),
+        )
+        return degraded
 
     @staticmethod
     def _required_evidence_fallback(

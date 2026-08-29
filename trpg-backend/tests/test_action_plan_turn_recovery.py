@@ -14,7 +14,10 @@ from collaboration_framework.contracts import (
 from collaboration_framework.host.application import (
     ActionPlanNarrationValidationError,
 )
-from collaboration_framework.host.schemas import ActionPlanNarrationContext
+from collaboration_framework.host.schemas import (
+    ActionPlanNarrationContext,
+    ActionPlanNarrationOutput,
+)
 
 from app.adapters.structured_http import StructuredOutputError
 from app.core.action_plan_turn import ActionPlanTurnApplication
@@ -414,6 +417,168 @@ async def test_narration_retries_unknown_validation_with_generic_hint() -> None:
     retry_hint = narrate.await_args_list[1].args[0].narration_retry_hint
     assert "未通过玩家可见输出安全校验" in retry_hint
     assert "输出协议" in retry_hint
+
+
+class _ValidatingNarrator:
+    """两次调用都被拒的 Narrator 桩，另带真实的 validate 供句级降级复校验。"""
+
+    def __init__(self, error: ActionPlanNarrationValidationError) -> None:
+        self._error = error
+        self.narrate_calls = 0
+        self.validate_calls: list[str] = []
+
+    async def narrate(self, context):
+        self.narrate_calls += 1
+        raise self._error
+
+    def validate(self, context, candidate):
+        self.validate_calls.append(candidate.text)
+        return candidate
+
+
+def _rejection_with_span(text: str, start: int, end: int):
+    return ActionPlanNarrationValidationError(
+        "persistent_claim_without_evidence:inventory_acquisition",
+        output=ActionPlanNarrationOutput(text=text),
+        offending_spans=((start, end),),
+    )
+
+
+@pytest.mark.asyncio
+async def test_narration_drops_the_offending_sentence_instead_of_the_whole_prose() -> None:
+    """narrative_only 步骤的兜底素材恒为空，所以先剔除违规小句再考虑状态播报。"""
+    application = object.__new__(ActionPlanTurnApplication)
+    text = "你在门厅站定，四下打量。你把传单收进外套口袋。远处传来钟声。"
+    offending = "你把传单收进外套口袋。"
+    start = text.index(offending)
+    narrator = _ValidatingNarrator(
+        _rejection_with_span(text, start, start + len(offending))
+    )
+    application._narrator = narrator
+    context = cast(
+        ActionPlanNarrationContext,
+        _NarrationContextStub(
+            NarrationEvidence(
+                ref="evt-1",
+                kind="entity_discovered",
+                subject_id="x",
+                subject_name="公开结果",
+                description="环境恢复正常。",
+                required_in_narration=False,
+            ),
+            "resolved",
+        ),
+    )
+
+    narration = await application._narrate(context)
+
+    assert narrator.narrate_calls == 2
+    assert narration.text == "你在门厅站定，四下打量。远处传来钟声。"
+    assert narrator.validate_calls == ["你在门厅站定，四下打量。远处传来钟声。"]
+
+
+@pytest.mark.asyncio
+async def test_narration_falls_back_to_status_only_when_nothing_survives() -> None:
+    """整段都是违规内容时仍旧落到确定性兜底，不能拼出未校验的碎片。"""
+    application = object.__new__(ActionPlanTurnApplication)
+    text = "你把传单收进外套口袋。"
+    narrator = _ValidatingNarrator(_rejection_with_span(text, 0, len(text)))
+    application._narrator = narrator
+    context = cast(
+        ActionPlanNarrationContext,
+        _NarrationContextStub(
+            NarrationEvidence(
+                ref="evt-1",
+                kind="entity_discovered",
+                subject_id="x",
+                subject_name="公开结果",
+                description="环境恢复正常。",
+                required_in_narration=False,
+            ),
+            "resolved",
+        ),
+    )
+
+    narration = await application._narrate(context)
+
+    assert narration.text == "这次行动已经按当前可确认的结果完成。"
+    assert narrator.validate_calls == []
+
+
+@pytest.mark.asyncio
+async def test_narration_keeps_whole_prose_fallback_when_rejection_has_no_span() -> None:
+    """无法定位到具体句子的拒绝类别行为不变，仍走原有兜底。"""
+    application = object.__new__(ActionPlanTurnApplication)
+    narrate = AsyncMock(
+        side_effect=[
+            ActionPlanNarrationValidationError("subject_ownership"),
+            ActionPlanNarrationValidationError("subject_ownership"),
+        ]
+    )
+    application._narrator = SimpleNamespace(narrate=narrate)
+    context = cast(
+        ActionPlanNarrationContext,
+        _NarrationContextStub(
+            NarrationEvidence(
+                ref="evt-1",
+                kind="entity_discovered",
+                subject_id="x",
+                subject_name="公开结果",
+                description="环境恢复正常。",
+                required_in_narration=False,
+            ),
+            "resolved",
+        ),
+    )
+
+    narration = await application._narrate(context)
+
+    assert narration.text == "这次行动已经按当前可确认的结果完成。"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("reason", "expected"),
+    [
+        (
+            "persistent_claim_without_evidence:inventory_acquisition",
+            "claimed_inventory_ids",
+        ),
+        ("inventory_claim_scope", "claimed_inventory_ids"),
+        ("state_claim_scope", "claimed_state_changes"),
+    ],
+)
+async def test_narration_retry_hint_points_at_the_declaration_field(
+    reason: str,
+    expected: str,
+) -> None:
+    """申报类拒绝必须给出可操作的出路；通用提示在 narrative_only 上无从执行。"""
+    application = object.__new__(ActionPlanTurnApplication)
+    success = SimpleNamespace(kind="narration", text="环境恢复正常。", npc_replies=())
+    narrate = AsyncMock(
+        side_effect=[ActionPlanNarrationValidationError(reason), success]
+    )
+    application._narrator = SimpleNamespace(narrate=narrate)
+    context = cast(
+        ActionPlanNarrationContext,
+        _NarrationContextStub(
+            NarrationEvidence(
+                ref="evt-1",
+                kind="entity_discovered",
+                subject_id="x",
+                subject_name="公开结果",
+                description="环境恢复正常。",
+                required_in_narration=False,
+            ),
+            "resolved",
+        ),
+    )
+
+    narration = await application._narrate(context)
+
+    assert narration is success
+    retry_hint = narrate.await_args_list[1].args[0].narration_retry_hint
+    assert expected in retry_hint
 
 
 def test_required_evidence_fallback_omits_second_person_description_in_named_actor() -> None:

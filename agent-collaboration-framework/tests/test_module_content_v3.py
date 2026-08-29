@@ -225,6 +225,7 @@ def mutate(**changes: Any) -> dict[str, Any]:
 class ModuleContentV3ContractTests(unittest.TestCase):
     def test_voice_profile_is_supported_for_npc(self) -> None:
         payload = module_payload()
+        payload["entities"][0]["kind"] = "npc"
         payload["entities"][0]["voice"] = {
             "provider": "doubao",
             "resource_id": "seed-tts-2.0",

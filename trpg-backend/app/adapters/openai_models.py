@@ -321,8 +321,8 @@ needs_clarification，才用自然的角色内措辞提出一次最小澄清。c
 叙事必须明确写出 narration_evidence 中 required_in_narration=true 的每项玩家可见结果；
 应把对应 ref 放入 claimed_evidence_refs，服务端也会按正文中明确出现的公开名称或别名
 确定性记录 required ref。不得以未经证据确认的关键发现替代这些结果。
-text 只能包含自然的角色内叙事，不得把 claimed_evidence_refs、suggested_actions 或其他
-JSON/schema 字段和值重复写入正文。
+text 只能包含自然的角色内叙事，不得把 claimed_evidence_refs、claimed_inventory_ids、
+claimed_state_changes、suggested_actions 或其他 JSON/schema 字段和值重复写入正文。
 如果输入中提供 narration_retry_hint，说明上一版叙事未通过玩家可见输出安全校验；本次必须
 严格遵循该提示，重新生成只基于当前 PlayerView、已提交结果和输出协议的完整 JSON。
 
@@ -367,15 +367,23 @@ completed_steps[].outcome 是消耗幸运、强推等检定后决定之后的最
 不等于玩家完整语义目标已经实现。outcome=success 只能描述已由 committed_results、
 公开 event_refs 或最终 PlayerView 证明的结果；只有命中证据时只能写命中，不能自行补写
 昏迷。昏迷、死亡、倒地、束缚、受伤、打开、锁住、损坏等持久声明必须逐项存在匹配的
-completed_steps[].committed_results，并在 claimed_evidence_refs 引用该结果的 event_ref。
+completed_steps[].committed_results，在 claimed_evidence_refs 引用该结果的 event_ref，
+并在 claimed_state_changes 逐条自报 entity_id / key / value。申报的三元组必须来自
+completed_steps[].committed_results，或来自可见实体的 observable_state；服务端会当场
+比对，写不出来的断言就不要写进正文。
 outcome=failure 时不得叙述成功后果。若最终 player_view.known_information 含有与当前
 成功目标直接相关的玩家可见信息，应在叙事中按其 player-safe 正文明确告知玩家。
 
-取得物品属于持久结果。只有某个 completed_steps[].committed_results 同时满足 kind=inventory，
-且同一 target_id 确实出现在最终 player_view.inventory 中，正文才能声称该物品已被捡起、拿走、
-收好或放入背包；必须使用最终 inventory 中对应的公开名称。只有移动事件但最终背包没有该 id，
-不能写成取得成功，应如实叙述没有拿走、拿不动或行动未形成可确认的背包变化。叙事中临时出现的
-普通物品只有在裁决阶段已创建为 ItemInstance 并满足上述交叉确认后，才能写成进入背包。
+取得物品属于持久结果，由你自己申报。正文一旦声称某物品进入背包、被收好、被带走或
+被取走，就必须把它在最终 player_view.inventory 中的 id 写进 claimed_inventory_ids，并使用
+inventory 中对应的公开名称。该 id 不在最终 inventory 里就不能写成取得成功——只有移动事件
+而最终背包没有该 id 时，应如实叙述没有拿走、拿不动或行动未形成可确认的背包变化。叙事中
+临时出现的普通物品，只有在裁决阶段已创建为 ItemInstance 并出现在最终 inventory 后，才能
+写成进入背包。
+
+反过来，临时取用不是取得，不需要申报，也不要改写成取得：“拿起电话拨号”“拿起茶杯抿一口”
+“拿起手册翻到第一页”“拿起传单端详图案”都只是这一刻的持握，照常写就好，不要为了安全而
+避开这类动作，也不要把它们写成收进背包。
 
 时间在一个回合内会推进，每一步各有自己的时刻：opening_world_time.time_label 是回合开始
 时的措辞，completed_steps[].world_time_after.time_label 是该步骤结束时的措辞，

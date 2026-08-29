@@ -902,6 +902,23 @@ def _latest_previous_narration(recent_history: RecentTurnContext) -> str | None:
     return None
 
 
+def _disclosure_source(
+    exc: ActionPlanNarrationValidationError,
+    forbidden_sources: tuple[str, ...],
+) -> str | None:
+    """把命中禁词的下标还原成来源标识，绝不记录禁词本身。
+
+    禁词索引由未公开 information 的 id/title/summary/content 与不在场 entity 的
+    id/name 构成——那些字面值就是尚未公开的剧情内容，写进日志等于把秘密落盘。
+    这里只输出 `information:<id>:<field>` 这类内部标识。
+    """
+
+    index = exc.disclosure_term_index
+    if index is None or not 0 <= index < len(forbidden_sources):
+        return None
+    return forbidden_sources[index]
+
+
 def _acting_address(context: ActionPlanNarrationContext) -> str:
     if getattr(context, "addressing_mode", "second_person") == "named_actor":
         name = getattr(context, "acting_character_name", "") or ""
@@ -1813,6 +1830,7 @@ class ActionPlanTurnApplication:
         addressing_mode, acting_character_name = await self._narration_addressing(context)
         # Narrator 只拿到公开视图；隐藏词索引留在服务端校验器，不序列化给模型。
         forbidden_terms: tuple[str, ...] = ()
+        forbidden_sources: tuple[str, ...] = ()
         if isinstance(context, ActionPlanNarrationContext):
             capabilities = await self._keeper_capabilities(
                 context.player_input, context.player_view
@@ -1820,16 +1838,28 @@ class ActionPlanTurnApplication:
             if capabilities is not None:
                 public_info_ids = {item.id for item in context.player_view.known_information}
                 public_entity_ids = {item.id for item in context.player_view.scene.visible_entities}
-                terms: set[str] = set()
+                # 用有序映射而不是 set：命中禁词时只能记来源 id，不能记词本身
+                # （禁词取自尚未公开的剧情内容），所以索引必须与来源表严格同序。
+                term_sources: dict[str, str] = {}
                 for info in capabilities.information:
                     if info.id not in public_info_ids and not (
                         info.known_by_party or info.known_by_actor
                     ):
-                        terms.update((info.id, info.title, info.summary, info.content))
+                        for field, value in (
+                            ("id", info.id),
+                            ("title", info.title),
+                            ("summary", info.summary),
+                            ("content", info.content),
+                        ):
+                            if value:
+                                term_sources.setdefault(value, f"information:{info.id}:{field}")
                 for entity in capabilities.entities:
                     if entity.id not in public_entity_ids:
-                        terms.update((entity.id, entity.name))
-                forbidden_terms = tuple(term for term in terms if term)
+                        for field, value in (("id", entity.id), ("name", entity.name)):
+                            if value:
+                                term_sources.setdefault(value, f"entity:{entity.id}:{field}")
+                forbidden_terms = tuple(term_sources)
+                forbidden_sources = tuple(term_sources.values())
         if isinstance(context, ActionPlanNarrationContext) and hasattr(
             context.player_view, "revision"
         ):
@@ -1884,30 +1914,7 @@ class ActionPlanTurnApplication:
                     path="model",
                     duration_ms=int((time.monotonic() - started_at) * 1000),
                 )
-                if context.player_input.interlocutor_id and not narration.npc_replies:
-                    # 结构化 @NPC 必须至少产生一条独立 NPC 气泡；模型只返回守秘人正文
-                    # 时使用安全的最小兜底，不改变 Engine 裁决结果，也不伪造 NPC 事实。
-                    npc = next(
-                        (
-                            entity
-                            for entity in context.player_view.scene.visible_entities
-                            if entity.id == context.player_input.interlocutor_id
-                            and entity.kind == "npc"
-                        ),
-                        None,
-                    )
-                    if npc is not None:
-                        narration = narration.model_copy(
-                            update={
-                                "npc_replies": (
-                                    ActionPlanNpcReply(
-                                        speaker_id=npc.id,
-                                        text="我听见了你的话。",
-                                    ),
-                                )
-                            }
-                        )
-                return narration
+                return self._ensure_interlocutor_reply(context, narration)
             except ActionPlanNarrationValidationError as exc:
                 # 只记录校验类别和权威结果，不记录模型正文或其他敏感上下文。
                 logger.warning(
@@ -1915,6 +1922,11 @@ class ActionPlanTurnApplication:
                     action=context.player_input.client_action_id[:12],
                     attempt=attempt + 1,
                     reason=exc.reason,
+                    # 只有字段路径与来源 id，不含模型正文，也不含禁词字面值——
+                    # 此前 outer_schema 无法定位到字段、hidden_disclosure 无法
+                    # 定位到命中项，被剔除的正文按脱敏口径又不落盘，两头都断。
+                    schema_error_fields=exc.schema_error_fields or None,
+                    disclosure_source=_disclosure_source(exc, forbidden_sources),
                     outcomes=tuple(step.outcome for step in context.completed_steps),
                     termination_status=context.termination_status,
                 )
@@ -1941,12 +1953,63 @@ class ActionPlanTurnApplication:
                             )
                         }
                     )
+                elif attempt == 0 and exc.reason == (
+                    "persistent_claim_without_evidence:inventory_acquisition"
+                ):
+                    # 通用提示（“只描述已提交的公开结果”）在 narrative_only 步骤上
+                    # 无从执行——那类步骤的 committed_results 恒为空。这里必须给出
+                    # 可操作的两条出路：申报，或者改掉取得措辞。
+                    context = context.model_copy(
+                        update={
+                            "narration_retry_hint": (
+                                "上一版叙事声称物品进入了背包，但没有申报。"
+                                "若物品确实已在最终 player_view.inventory 中，"
+                                "请把它的 id 写入 claimed_inventory_ids；"
+                                "若只是临时拿起、翻看或使用，请改写为不含"
+                                "“收进背包 / 放进口袋 / 带走 / 取走”的措辞。"
+                            )
+                        }
+                    )
+                elif attempt == 0 and exc.reason == "inventory_claim_scope":
+                    context = context.model_copy(
+                        update={
+                            "narration_retry_hint": (
+                                "claimed_inventory_ids 只能填最终 player_view.inventory "
+                                "中确实存在的 id；请删除多余申报或改写正文。"
+                            )
+                        }
+                    )
+                elif attempt == 0 and exc.reason == "state_claim_scope":
+                    context = context.model_copy(
+                        update={
+                            "narration_retry_hint": (
+                                "claimed_state_changes 只能申报 completed_steps[]."
+                                "committed_results 或可见实体 observable_state 中"
+                                "确实存在的 entity_id / key / value 三元组。"
+                            )
+                        }
+                    )
                 elif attempt == 0 and exc.reason.startswith("persistent_claim_without_evidence"):
                     context = context.model_copy(
                         update={
                             "narration_retry_hint": (
                                 "上一版叙事包含没有权威证据确认的状态断言。"
-                                "请删除该断言，只描述当前 PlayerView 与已提交的公开结果。"
+                                "请删除该断言，或在 claimed_state_changes 中申报对应的"
+                                "entity_id / key / value；"
+                                "只描述当前 PlayerView 与已提交的公开结果。"
+                            )
+                        }
+                    )
+                elif attempt == 0 and exc.reason == "npc_dialogue_embedded_in_text":
+                    # 通用提示只说“没通过校验”，模型无从知道错在引号上，于是原样
+                    # 再写一遍、再被同一关拒掉——重试对这一类必然空转。
+                    context = context.model_copy(
+                        update={
+                            "narration_retry_hint": (
+                                "本回合已经单独发出 NPC 气泡，守秘人正文里不得再出现"
+                                "任何引号或 NPC 的直接引语。请把台词全部放进 npc_replies，"
+                                "正文只写动作、神情、语气和现场变化，例如"
+                                "“他沉默片刻才开口”而不是把他说的话抄进正文。"
                             )
                         }
                     )
@@ -1960,6 +2023,16 @@ class ActionPlanTurnApplication:
                         }
                     )
                 if attempt == 1:
+                    degraded = self._sentence_degraded_narration(context, exc)
+                    if degraded is not None:
+                        logger.info(
+                            "action_plan_narration_completed",
+                            action=context.player_input.client_action_id[:12],
+                            attempts=attempt + 1,
+                            path="sentence_degraded",
+                            duration_ms=int((time.monotonic() - started_at) * 1000),
+                        )
+                        return self._ensure_interlocutor_reply(context, degraded)
                     if (
                         exc.reason == "required_evidence_missing"
                         and context.termination_status != "needs_clarification"
@@ -1982,7 +2055,7 @@ class ActionPlanTurnApplication:
                         path="deterministic_fallback",
                         duration_ms=int((time.monotonic() - started_at) * 1000),
                     )
-                    return narration
+                    return self._ensure_interlocutor_reply(context, narration)
             except StructuredOutputError:
                 # A 200 response with unreadable structured content is safe to retry
                 # once. Exhaustion falls back to the same deterministic, evidence-only
@@ -2003,7 +2076,7 @@ class ActionPlanTurnApplication:
                         path="deterministic_fallback",
                         duration_ms=int((time.monotonic() - started_at) * 1000),
                     )
-                    return narration
+                    return self._ensure_interlocutor_reply(context, narration)
             except Exception as exc:
                 # 传输层的瞬态失败已经由 StructuredJsonClient 自己重试过了
                 # （见 adapters/structured_http.py）。在这里再整体重试一轮，两层
@@ -2015,6 +2088,87 @@ class ActionPlanTurnApplication:
                     retryable=True,
                 ) from exc
         raise AssertionError("unreachable")
+
+    @staticmethod
+    def _ensure_interlocutor_reply(
+        context: ActionPlanNarrationContext,
+        narration: ActionPlanNarrationOutput,
+    ) -> ActionPlanNarrationOutput:
+        """结构化 @NPC 至少要产生一条独立 NPC 气泡。
+
+        这层安全网原先只写在成功路径上，兜底路径全部从 except 直接返回、绕过了
+        它——玩家 @ 了某个 NPC，叙事连拒两次后拿到的是一句状态播报**且该 NPC 一言
+        不发**，是 @NPC 场景下最糟的落点。改成所有返回路径共用。
+
+        它不改变 Engine 裁决结果，也不伪造 NPC 事实。
+        """
+
+        if not context.player_input.interlocutor_id or narration.npc_replies:
+            return narration
+        npc = next(
+            (
+                entity
+                for entity in context.player_view.scene.visible_entities
+                if entity.id == context.player_input.interlocutor_id and entity.kind == "npc"
+            ),
+            None,
+        )
+        if npc is None:
+            return narration
+        return narration.model_copy(
+            update={
+                "npc_replies": (ActionPlanNpcReply(speaker_id=npc.id, text="我听见了你的话。"),)
+            }
+        )
+
+    def _sentence_degraded_narration(
+        self,
+        context: ActionPlanNarrationContext,
+        exc: ActionPlanNarrationValidationError,
+    ) -> ActionPlanNarrationOutput | None:
+        """剔除违规小句后复校验剩余正文，不把整段替换成一句状态播报。
+
+        没有这一级时，兜底的素材只有 committed_results，而 narrative_only 步骤的
+        committed_results 恒为空——任何一次该类叙事被拒两次，玩家都必然只看到
+        “这次行动已经按当前可确认的结果完成。”。有了这一级，误判的代价从整段
+        变废话降到少一小句，前面几关才敢在边界情况上保守。
+
+        只在拒绝能定位到具体句子时启用；其余类别（主体人称、氛围重复、协议残留
+        等）无法靠删一句修好，返回 None 交回原有兜底。
+        """
+
+        output = exc.output
+        spans = exc.offending_spans
+        validate = getattr(self._narrator, "validate", None)
+        if output is None or not spans or validate is None:
+            return None
+        kept: list[str] = []
+        cursor = 0
+        for start, end in sorted(spans):
+            if end <= cursor:
+                continue
+            kept.append(output.text[cursor : max(start, cursor)])
+            cursor = end
+        kept.append(output.text[cursor:])
+        remaining = "".join(kept).strip()
+        if not remaining:
+            return None
+        try:
+            degraded = validate(context, output.model_copy(update={"text": remaining}))
+        except ActionPlanNarrationValidationError:
+            # 剩余正文仍不合规就不再逐句剥了：继续剥下去等于用未校验的碎片拼
+            # 输出，安全保证只对整段成立。
+            return None
+        # 与 action_plan_narration_rejected 同一脱敏口径：只记类别与剔除句数。
+        logger.info(
+            "action_plan_narration_sentence_degraded",
+            action=context.player_input.client_action_id[:12],
+            reason=exc.reason,
+            removed_sentences=len(spans),
+            # 偏移量而非文本：足以定位被剔的是哪一段，又不落盘任何模型正文。
+            removed_spans=tuple(spans),
+        )
+        return degraded
 
     @staticmethod
     def _required_evidence_fallback(

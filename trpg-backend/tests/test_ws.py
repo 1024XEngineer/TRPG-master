@@ -1981,3 +1981,42 @@ def test_keeper_turn_ignores_invalid_followup_npc_speaker(
         if event["type"] == "dialogue.npc"
         and event["payload"].get("sourceActionId") == "keeper-followup-invalid-412"
     ]
+
+
+def test_ping_is_answered_before_room_join(sync_client: TestClient) -> None:
+    """心跳必须在绑定之前就能用（issue #505）。
+
+    连接建立到 room.join 之间同样会被预览链路上的网关按空闲切断，这段窗口也要
+    保活；而且这一帧不该要求任何房间身份。
+    """
+
+    token = register_and_login(sync_client)
+    room = create_room(sync_client, token)
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json({"type": "ping", "payload": {}})
+        assert ws.receive_json() == {"type": "pong", "payload": {}}
+
+
+def test_ping_does_not_disturb_bound_session(sync_client: TestClient) -> None:
+    """心跳不改变房间状态，绑定之后仍然只回 pong。"""
+
+    token = register_and_login(sync_client)
+    room = create_room(sync_client, token)
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {
+                    "reconnectToken": room["reconnectToken"],
+                    "roomCode": room["roomCode"],
+                    "nickname": "房主",
+                },
+            }
+        )
+        assert ws.receive_json()["type"] == "session.bound"
+
+        ws.send_json({"type": "ping", "playerId": room["playerId"], "payload": {}})
+        assert ws.receive_json() == {"type": "pong", "payload": {}}

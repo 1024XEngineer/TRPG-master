@@ -756,3 +756,165 @@ test('未连接时 submitPlannedAction reject RoomSocketTransportError', async (
       error.message === 'WebSocket is not connected'
   );
 });
+
+/**
+ * 心跳与断线重连（issue #505）。
+ *
+ * 预览环境的链路是「浏览器 ↔ 网关 ↔ Caddy ↔ 后端」，网关会在空闲时静默切断，
+ * 两端都收不到 FIN——服务端 6 小时内记录了 20 次 connection open、0 次
+ * connection closed。所以既要主动发心跳把链路填满，也要在心跳失败时自己发现
+ * 并重连，不能干等 TCP。
+ */
+class HeartbeatFakeWebSocket {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static instances: HeartbeatFakeWebSocket[] = [];
+
+  readyState = HeartbeatFakeWebSocket.OPEN;
+  onmessage: ((event: { data: string }) => void) | null = null;
+  onclose: (() => void) | null = null;
+  onopen: (() => void) | null = null;
+  sent: string[] = [];
+  closed = false;
+
+  constructor(readonly url: string) {
+    HeartbeatFakeWebSocket.instances.push(this);
+  }
+
+  send(data: string) {
+    this.sent.push(data);
+  }
+
+  close() {
+    this.closed = true;
+    this.onclose?.();
+  }
+
+  addEventListener() {}
+
+  emit(value: unknown) {
+    this.onmessage?.({ data: JSON.stringify(value) });
+  }
+
+  sentTypes(): string[] {
+    return this.sent.map((raw) => (JSON.parse(raw) as { type: string }).type);
+  }
+}
+
+function withHeartbeatSocket(run: (socket: RoomSocket) => void): void {
+  const original = globalThis.WebSocket;
+  HeartbeatFakeWebSocket.instances = [];
+  Object.defineProperty(globalThis, 'WebSocket', {
+    configurable: true,
+    value: HeartbeatFakeWebSocket,
+  });
+  try {
+    const socket = new RoomSocket('ws://example.test');
+    run(socket);
+    socket.disconnect();
+  } finally {
+    Object.defineProperty(globalThis, 'WebSocket', {
+      configurable: true,
+      value: original,
+    });
+  }
+}
+
+test('心跳：连接打开后按间隔发出 ping，收到 pong 不判定掉线', (t) => {
+  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+  withHeartbeatSocket((socket) => {
+    const transport = socket.connect('room-1', 'token') as unknown as HeartbeatFakeWebSocket;
+    socket.joinRoom('player-1', { reconnectToken: 'rt' } as never);
+    transport.onopen?.();
+
+    t.mock.timers.tick(20_000);
+    assert.ok(transport.sentTypes().includes('ping'), '到间隔后应发出 ping');
+
+    transport.emit({ type: 'pong', payload: {} });
+    // pong 之后即使走过心跳超时点，也不该把连接关掉。
+    t.mock.timers.tick(10_000);
+    assert.equal(transport.closed, false, '收到 pong 后不应判定掉线');
+  });
+});
+
+test('心跳：ping 之后拿不到 pong，超时即关闭连接触发重连', (t) => {
+  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+  withHeartbeatSocket((socket) => {
+    const transport = socket.connect('room-1', 'token') as unknown as HeartbeatFakeWebSocket;
+    socket.joinRoom('player-1', { reconnectToken: 'rt' } as never);
+    transport.onopen?.();
+
+    t.mock.timers.tick(20_000);
+    assert.ok(transport.sentTypes().includes('ping'));
+    // 不回 pong，走过心跳超时。
+    t.mock.timers.tick(10_000);
+    assert.equal(transport.closed, true, '心跳超时后应主动关闭失效连接');
+  });
+});
+
+test('重连：掉线后按退避重建连接，并自动重发 room.join', (t) => {
+  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+  withHeartbeatSocket((socket) => {
+    const first = socket.connect('room-1', 'token') as unknown as HeartbeatFakeWebSocket;
+    socket.joinRoom('player-1', { reconnectToken: 'rt' } as never);
+    first.onopen?.();
+    assert.equal(HeartbeatFakeWebSocket.instances.length, 1);
+
+    first.onclose?.();
+    // 首次退避 1s。
+    t.mock.timers.tick(1_000);
+    assert.equal(HeartbeatFakeWebSocket.instances.length, 2, '掉线后应重建连接');
+
+    const second = HeartbeatFakeWebSocket.instances[1]!;
+    // 浏览器在连接就绪时触发 open；重发 room.join 挂在这个事件上。
+    second.onopen?.();
+    assert.ok(
+      second.sentTypes().includes('room.join'),
+      '重连后必须重新 room.join，否则服务端不会把广播发给这条连接'
+    );
+  });
+});
+
+test('重连：从未 room.join 的连接掉线后不重连', (t) => {
+  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+  withHeartbeatSocket((socket) => {
+    const only = socket.connect('room-1', 'token') as unknown as HeartbeatFakeWebSocket;
+    only.onopen?.();
+    only.onclose?.();
+    t.mock.timers.tick(60_000);
+    assert.equal(
+      HeartbeatFakeWebSocket.instances.length,
+      1,
+      '没有房间状态需要恢复时不应重连'
+    );
+  });
+});
+
+test('连接状态：掉线进入 reconnecting，主动断开进入 disconnected', (t) => {
+  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+  const original = globalThis.WebSocket;
+  HeartbeatFakeWebSocket.instances = [];
+  Object.defineProperty(globalThis, 'WebSocket', {
+    configurable: true,
+    value: HeartbeatFakeWebSocket,
+  });
+  try {
+    const socket = new RoomSocket('ws://example.test');
+    const states: string[] = [];
+    socket.onConnectionChange((state) => states.push(state));
+
+    const transport = socket.connect('room-1', 'token') as unknown as HeartbeatFakeWebSocket;
+    socket.joinRoom('player-1', { reconnectToken: 'rt' } as never);
+    transport.onopen?.();
+    transport.onclose?.();
+    assert.ok(states.includes('reconnecting'), '掉线后要让界面知道正在重连');
+
+    socket.disconnect();
+    assert.equal(states.at(-1), 'disconnected');
+  } finally {
+    Object.defineProperty(globalThis, 'WebSocket', {
+      configurable: true,
+      value: original,
+    });
+  }
+});

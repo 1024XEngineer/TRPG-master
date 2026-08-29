@@ -3089,6 +3089,25 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
             player_id = client_envelope.player_id
             raw_payload = client_envelope.payload
 
+            if event_type == "ping":
+                # 应用层心跳（issue #505）。刻意放在开 session 之前、也放在
+                # room.join 绑定检查之前：
+                #
+                # - 不开 session：心跳按固定间隔到达，每条都开一个短 session 会在
+                #   多人房间里凭空放大数据库连接压力，而这一帧根本不读写任何状态。
+                # - 不要求已绑定：连接建立到 room.join 之间的窗口同样会被中间网关
+                #   按空闲切断，这段也需要保活。
+                #
+                # 为什么不用 uvicorn 自带的协议级 ping 代替：那条 ping 只覆盖
+                # 「Caddy ↔ 后端」这一段 TCP，而浏览器与后端之间还隔着预览网关和
+                # Caddy 两跳；任意一跳静默失效，协议级 ping 都发现不了。这条心跳是
+                # 端到端的，客户端据此判断整条链路是否还活着。
+                await _send_to_player(
+                    websocket,
+                    ServerEnvelope(type="pong", payload={}).model_dump(by_alias=True),
+                )
+                continue
+
             # 每条消息各开一个短 session，处理完立刻释放——WebSocket 在两条消息
             # 之间等待（receive_json 阻塞）时不持有任何数据库连接。
             async with _short_db_session() as db:

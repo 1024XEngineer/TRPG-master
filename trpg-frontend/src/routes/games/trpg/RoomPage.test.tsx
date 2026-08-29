@@ -94,6 +94,7 @@ const {
   mockGetOpeningMessageId,
   mockGetPlayerView,
   mockJoinRoom,
+  mockOnConnectionChange,
   mockListConversation,
   mockGetHostSpeechSettings,
   mockGetHostSpeechManifest,
@@ -136,6 +137,8 @@ const {
     mockGetOpeningMessageId: vi.fn(),
     mockGetPlayerView: vi.fn(),
     mockJoinRoom: vi.fn(),
+    // 返回取消订阅函数；默认不推任何状态变化。
+    mockOnConnectionChange: vi.fn(() => () => {}),
     mockListConversation: vi.fn(),
     mockGetHostSpeechSettings: vi.fn(),
     mockGetHostSpeechManifest: vi.fn(),
@@ -178,6 +181,8 @@ vi.mock('@/services/api-client', () => ({
       updateHostSpeechSettings: mockUpdateHostSpeechSettings,
     },
     roomSocket: {
+      // issue #505：RoomPage 订阅连接状态以显示断线并在重连后重拉会话。
+      onConnectionChange: mockOnConnectionChange,
       getOpeningMessageId: mockGetOpeningMessageId,
       getPlayerView: mockGetPlayerView,
       joinRoom: mockJoinRoom,

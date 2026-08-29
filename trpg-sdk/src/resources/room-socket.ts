@@ -23,6 +23,33 @@ import type {
 
 export type RoomSocketHandler = (event: ServerToClientEvent) => void;
 
+/**
+ * 连接状态（issue #505）。`reconnecting` 是"已经断了、正在自动重连"，与
+ * `disconnected`（调用方主动断开，不会再自动恢复）必须分开——界面在前者要
+ * 提示"正在重连"，在后者应该安静。
+ */
+export type RoomSocketConnectionState = 'connecting' | 'open' | 'reconnecting' | 'disconnected';
+
+export type RoomSocketConnectionHandler = (state: RoomSocketConnectionState) => void;
+
+/**
+ * 心跳间隔。取值要短于链路上最激进的一跳的空闲超时——预览环境的
+ * PortForward 网关实测会在无流量时静默切断（服务端 6 小时内 20 次
+ * `connection open`、0 次 `connection closed`），且一次开场叙事就能制造
+ * 30 秒静默窗口。20 秒是常见网关超时（30/60 秒）的安全分母。
+ */
+const HEARTBEAT_INTERVAL_MS = 20_000;
+
+/** 发出 ping 后等 pong 的上限；超时即判定链路已死，不再等 TCP 自己发现。 */
+const HEARTBEAT_TIMEOUT_MS = 10_000;
+
+/** 重连退避：指数增长但封顶，避免服务端重启期间客户端把它打垮。 */
+const RECONNECT_BASE_DELAY_MS = 1_000;
+const RECONNECT_MAX_DELAY_MS = 15_000;
+
+/** 连续重连失败的上限；到顶后停在 disconnected，等调用方决定是否重新连接。 */
+const RECONNECT_MAX_ATTEMPTS = 8;
+
 interface PendingAction {
   promise: Promise<AgentTurnPayload>;
   resolve: (payload: AgentTurnPayload) => void;
@@ -556,6 +583,20 @@ export class RoomSocket {
   private playerView: AgentPlayerView | null = null;
   private openingMessageId: string | null = null;
 
+  // --- 断线恢复所需的状态（issue #505）---
+  /** 最近一次 connect() 的参数，重连时原样复用。 */
+  private connectArgs: { roomId: string; token: string } | null = null;
+  /** 最近一次 room.join 的参数：重连后必须重新绑定，否则服务端不认这条连接。 */
+  private lastJoin: { playerId: string; payload: RoomJoinPayload } | null = null;
+  /** 本次连接是重连产生的，onopen 后需要自动补一次 room.join。 */
+  private pendingRejoin = false;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private pongTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempts = 0;
+  private connectionState: RoomSocketConnectionState = 'disconnected';
+  private readonly connectionHandlers = new Set<RoomSocketConnectionHandler>();
+
   constructor(private readonly wsBaseUrl: string) {}
 
   /** 建立（或复用）到 roomId 的连接。token 是账号登录会话（issue #58），
@@ -571,8 +612,14 @@ export class RoomSocket {
     const previousSocket = this.ws;
     this.ws = null;
     this.rejectPendingActions(new RoomSocketTransportError('WebSocket connection replaced'));
+    this.clearTimers();
+    // 主动替换不会触发重连：下面 onclose 里的 `this.ws !== socket` 守卫会让旧
+    // socket 的关闭事件直接返回。disconnect() 同理（它先把 this.ws 置空）。
     previousSocket?.close();
 
+    this.connectArgs = { roomId, token };
+    this.reconnectAttempts = 0;
+    this.setConnectionState('connecting');
     this.roomId = roomId;
     this.playerView = null;
     this.openingMessageId = null;
@@ -586,11 +633,26 @@ export class RoomSocket {
         console.warn('[RoomSocket] received malformed JSON, dropped', event.data);
         return;
       }
+      // 心跳应答（issue #505）。放在事件校验之前：pong 不是房间事件，不进
+      // ServerToClientEvent 联合类型，也不需要分发给订阅者。
+      if (typeof (parsed as { type?: unknown }).type === 'string'
+        && (parsed as { type: string }).type === 'pong') {
+        this.clearPongTimer();
+        return;
+      }
       if (isValidTurnCompleted(parsed)) {
         this.playerView = parsed.payload.player_view;
         const pending = this.pendingActions.get(parsed.correlation_id);
         if (!pending) {
-          console.warn('[RoomSocket] received turn.completed without matching action, dropped', parsed);
+          // 这条事件不进 ServerToClientEvent 联合类型，前端也刻意不从它渲染
+          // 叙事（叙事只认 narration.push），所以这里没有可分发的下游——保持
+          // 丢弃，但它是连接已经断过的可靠信号：断线期间服务端的
+          // narration.push / view.updated 同样投递失败了，界面此刻是陈旧的。
+          // 真正的恢复由重连后的状态重拉负责（见 scheduleReconnect）。
+          console.warn(
+            '[RoomSocket] received turn.completed without matching action, dropped',
+            parsed,
+          );
           return;
         }
         this.pendingActions.delete(parsed.correlation_id);
@@ -647,12 +709,31 @@ export class RoomSocket {
       }
       this.handlers.forEach((handler) => handler(parsed));
     };
+    socket.onopen = () => {
+      if (this.ws !== socket) return;
+      this.reconnectAttempts = 0;
+      this.setConnectionState('open');
+      this.startHeartbeat();
+      // 重连出来的连接要自己补一次 room.join：服务端按连接登记房间成员，不重新
+      // 绑定就收不到任何广播。放在 onopen 里而不是挂在 waitForOpen 的 then 上，
+      // 是为了不依赖 promise 微任务时序——socket 建立时就已经 OPEN 的实现里，
+      // 那个 then 会晚于调用方的后续逻辑执行。
+      if (this.pendingRejoin) {
+        this.pendingRejoin = false;
+        const join = this.lastJoin;
+        if (join) this.send('room.join', join.playerId, join.payload);
+      }
+    };
     socket.onclose = () => {
       if (this.ws !== socket) return;
       this.ws = null;
       this.roomId = null;
       this.openingMessageId = null;
+      this.clearTimers();
       this.rejectPendingActions(new RoomSocketTransportError('WebSocket connection closed'));
+      // 走到这里说明不是调用方主动断开（那两条路径会先把 this.ws 置空/换掉，
+      // 上面的守卫就已经返回了），所以是掉线，需要自动恢复（issue #505）。
+      this.scheduleReconnect();
     };
     this.ws = socket;
     return socket;
@@ -698,7 +779,20 @@ export class RoomSocket {
   }
 
   joinRoom(playerId: string, payload: RoomJoinPayload): void {
+    // 记下来给重连用：新连接必须重新 room.join 才会被服务端登记进房间，
+    // 否则它收不到任何广播（issue #505）。
+    this.lastJoin = { playerId, payload };
     this.send('room.join', playerId, payload);
+  }
+
+  /**
+   * 订阅连接状态变化（issue #505）。断线与重连必须对玩家可见——旧实现连接
+   * 断了以后既不重连也不提示，界面停在"处理中"，用户只能猜要不要刷新。
+   */
+  onConnectionChange(handler: RoomSocketConnectionHandler): () => void {
+    this.connectionHandlers.add(handler);
+    handler(this.connectionState);
+    return () => this.connectionHandlers.delete(handler);
   }
 
   setReady(playerId: string, payload: PlayerReadyPayload): boolean {
@@ -800,8 +894,111 @@ export class RoomSocket {
     this.ws = null;
     this.roomId = null;
     this.openingMessageId = null;
+    // 主动断开：清掉重连意图，否则下面的 close 会被 onclose 当成掉线重连回来。
+    this.connectArgs = null;
+    this.lastJoin = null;
+    this.clearTimers();
     this.rejectPendingActions(new RoomSocketTransportError('WebSocket disconnected'));
     socket?.close();
+    this.setConnectionState('disconnected');
+  }
+
+  /**
+   * 心跳（issue #505）。固定间隔发一帧 ping 并等 pong；超时就主动把连接关掉，
+   * 交给 onclose 走重连，而不是干等 TCP 自己发现——预览链路上网关是静默切断
+   * 的，两端谁都收不到 FIN，不主动探测就永远发现不了。
+   */
+  private startHeartbeat(): void {
+    this.clearHeartbeat();
+    this.heartbeatTimer = setInterval(() => {
+      const socket = this.ws;
+      if (!socket || socket.readyState !== WebSocket.OPEN) return;
+      // 上一轮 ping 还没等到 pong 就不再叠加，等它自己超时。
+      if (this.pongTimer !== null) return;
+      try {
+        socket.send(JSON.stringify({ type: 'ping', payload: {} }));
+      } catch {
+        // 发不出去本身就说明链路已经不可用，直接按超时处理。
+        this.failHeartbeat();
+        return;
+      }
+      this.pongTimer = setTimeout(() => this.failHeartbeat(), HEARTBEAT_TIMEOUT_MS);
+    }, HEARTBEAT_INTERVAL_MS);
+  }
+
+  /** ping 没等到 pong：判定链路已死，关闭当前连接触发重连。 */
+  private failHeartbeat(): void {
+    this.clearPongTimer();
+    const socket = this.ws;
+    if (!socket) return;
+    console.warn('[RoomSocket] 心跳超时，判定连接已失效，准备重连');
+    // 不置空 this.ws——要让 onclose 的守卫通过，从而走进重连路径。
+    socket.close();
+  }
+
+  /**
+   * 断线重连（issue #505）。指数退避 + 封顶；重连成功后由 onopen 重置计数，
+   * 并在这里重新发一次 room.join——服务端按连接登记房间成员，不重新绑定的话
+   * 新连接收不到任何广播。
+   */
+  private scheduleReconnect(): void {
+    const args = this.connectArgs;
+    if (!args || this.reconnectTimer !== null) return;
+    // 没有 room.join 过的连接不重连：它没有任何房间状态需要恢复，重连也只是
+    // 建一条谁都不认识的连接。调用方总是 connect() 之后立刻 joinRoom()。
+    if (!this.lastJoin) return;
+    // 重连不能无限打下去。服务端真的下线时，无节制的重连会一直占着定时器、
+    // 反复发起网络请求，而界面其实早就该告诉玩家"连不上了"。到顶之后停在
+    // disconnected，由调用方决定要不要再 connect()。
+    if (this.reconnectAttempts >= RECONNECT_MAX_ATTEMPTS) {
+      console.warn('[RoomSocket] 重连次数已达上限，停止自动重连');
+      this.setConnectionState('disconnected');
+      return;
+    }
+    this.setConnectionState('reconnecting');
+    const delay = Math.min(
+      RECONNECT_BASE_DELAY_MS * 2 ** this.reconnectAttempts,
+      RECONNECT_MAX_DELAY_MS,
+    );
+    this.reconnectAttempts += 1;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      // connect() 会重置 reconnectAttempts，这里先存一份重连计数再调用它，
+      // 避免退避被自己的成功路径清零后又立刻从头开始。
+      const attempts = this.reconnectAttempts;
+      this.pendingRejoin = true;
+      this.connect(args.roomId, args.token);
+      this.reconnectAttempts = attempts;
+    }, delay);
+  }
+
+  private setConnectionState(state: RoomSocketConnectionState): void {
+    if (this.connectionState === state) return;
+    this.connectionState = state;
+    this.connectionHandlers.forEach((handler) => handler(state));
+  }
+
+  private clearPongTimer(): void {
+    if (this.pongTimer !== null) {
+      clearTimeout(this.pongTimer);
+      this.pongTimer = null;
+    }
+  }
+
+  private clearHeartbeat(): void {
+    if (this.heartbeatTimer !== null) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+    this.clearPongTimer();
+  }
+
+  private clearTimers(): void {
+    this.clearHeartbeat();
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
   }
 
   private send(type: string, playerId: string, payload: unknown): boolean {

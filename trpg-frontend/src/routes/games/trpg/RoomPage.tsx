@@ -1459,6 +1459,7 @@ export default function RoomPage() {
   }, [roomId, playerId, roomPlayers, portraitVersionOverride, clearPortraitVersion])
   const hostSpeech = useHostSpeech({ roomId, reconnectToken, accountToken: getAuthToken() })
   const enqueueHostSpeech = hostSpeech.enqueue
+  const enqueueNpcSpeech = hostSpeech.enqueueNpc
   const markHostSpeechSeen = hostSpeech.markSeen
   const handleHostSpeechSettingsUpdated = hostSpeech.handleSettingsUpdated
   const isHost = roomInfo?.players.find((p) => p.playerId === playerId)?.isHost ?? false
@@ -1768,6 +1769,14 @@ export default function RoomPage() {
           item.type === 'narr' && item.narrationId ? [item.narrationId] : [],
         ),
       )
+      markHostSpeechSeen(
+        restored.flatMap((item) =>
+          item.type === 'npc' && item.messageId
+            ? [item.messageId.replace(/^dialogue\.npc:/, '')]
+            : [],
+        ),
+        'npc',
+      )
       setMessages((current) => mergeHistoricalMessages(current, restored))
       if (
         restored.some(
@@ -1971,6 +1980,7 @@ export default function RoomPage() {
       } else if (envelope.type === 'dialogue.npc') {
         setTyping(false)
         clearBackendProgress()
+        enqueueNpcSpeech(envelope.payload.messageId)
         setMessages((prev) => appendLiveMessage(prev, {
           type: 'npc',
           channel: 'action',
@@ -2171,7 +2181,7 @@ export default function RoomPage() {
       setProgressLabel('守秘人正在生成开场叙事')
     }
     return off
-  }, [clearBackendProgress, clearSettledAction, enqueueHostSpeech, handleHostSpeechSettingsUpdated, openDiceForCheck, playerId, senderName, showBackendPhase])
+  }, [clearBackendProgress, clearSettledAction, enqueueHostSpeech, enqueueNpcSpeech, handleHostSpeechSettingsUpdated, openDiceForCheck, playerId, senderName, showBackendPhase])
 
   const submitPlayerAction = (action: {
     clientActionId: string
@@ -2581,13 +2591,16 @@ export default function RoomPage() {
                 </div>
                 <div className="room-play__message-meta">
                   <span>{msg.time}</span>
-                  {isNarr && (
+                  {(isNarr || isNpc) && (
                     <button
                       type="button"
                       aria-label="重新朗读"
                       title="重新朗读"
-                      disabled={!hostSpeech.available || !msg.narrationId}
-                      onClick={() => hostSpeech.replay(msg.narrationId)}
+                      disabled={!hostSpeech.available || (!msg.narrationId && !isNpc)}
+                      onClick={() => {
+                        if (isNarr) hostSpeech.replay(msg.narrationId)
+                        else hostSpeech.replay(msg.messageId?.replace(/^dialogue\.npc:/, ''), 'npc')
+                      }}
                     >
                       <RotateCcw aria-hidden="true" />
                       重播

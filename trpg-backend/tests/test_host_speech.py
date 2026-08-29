@@ -2,6 +2,8 @@
 
 import asyncio
 import struct
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from httpx import AsyncClient
@@ -20,6 +22,7 @@ from app.models.event import Event
 from app.service.host_speech import (
     HostSpeechService,
     build_host_speech_service,
+    get_npc_voice,
     split_narration_for_speech,
 )
 from tests.helpers import bearer, create_room, join_room, register
@@ -73,6 +76,78 @@ async def test_cache_and_single_flight_share_one_provider_call() -> None:
     cached = await service.synthesize(**kwargs)
     assert first.audio == second.audio == cached.audio
     assert provider.calls == 1
+
+
+async def test_npc_voice_resolves_profile_and_falls_back_on_resource_mismatch() -> None:
+    service = _service(_CountingProvider())
+    service.resource_id = "seed-tts-2.0"
+    module = SimpleNamespace(
+        content_json={
+            "module_id": "m",
+            "version": "1",
+            "world_ref": "coc-7e",
+            "background": "",
+            "information": [],
+            "knowledge_goals": [],
+            "entities": [
+                {
+                    "id": "thomas",
+                    "kind": "npc",
+                    "name": "托马斯",
+                    "voice": {
+                        "provider": "counting",
+                        "resource_id": "old-resource",
+                        "voice_type": "voice-a",
+                    },
+                }
+            ],
+            "locations": [],
+            "location_edges": [],
+            "rules": [],
+            "core_resolution": {"required_information_ids": []},
+            "ending_policy": {"mode": "open"},
+            "ending_anchors": [],
+            "presentation": {
+                "title": "测试",
+                "players_min": 1,
+                "players_max": 1,
+                "estimated_duration": "",
+                "difficulty": 1,
+                "authors": [],
+                "player_intro_pages": [],
+            },
+            "initial_state": {"actors": [], "entities": [], "locations": []},
+            "world_profile": {},
+        }
+    )
+    room = SimpleNamespace(scenario_id="scenario", module_version="1")
+    scenario = SimpleNamespace(module_id="m", version="1")
+
+    class FakeDb:
+        async def get(self, model, key):
+            from app.models.content import Scenario
+            from app.models.engine import ModuleVersion
+            from app.models.room import Room
+
+            if model is Room:
+                return room
+            if model is Scenario:
+                return scenario
+            if model is ModuleVersion:
+                return module
+            return None
+
+    event = SimpleNamespace(payload={"speakerId": "thomas"}, actor_id="thomas")
+    # provider 不匹配时必须回退，而不是把模组中的音色直接交给 Provider。
+    assert (
+        await get_npc_voice(
+            cast(AsyncSession, FakeDb()),
+            room_id="room",
+            event=cast(Event, event),
+            service=service,
+        )
+        == "voice-a"
+    )
 
 
 def test_doubao_configuration_fails_fast_without_credentials() -> None:

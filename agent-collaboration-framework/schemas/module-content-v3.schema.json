@@ -1111,6 +1111,17 @@
           ],
           "default": null
         },
+        "voice": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EntityVoiceProfile"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "visibility": {
           "default": "public",
           "enum": [
@@ -1173,6 +1184,36 @@
         "name"
       ],
       "title": "EntitySpecV3",
+      "type": "object"
+    },
+    "EntityVoiceProfile": {
+      "additionalProperties": false,
+      "description": "NPC 的模组级语音配置；只保存可发布的稳定音色标识。",
+      "properties": {
+        "provider": {
+          "const": "doubao",
+          "title": "Provider",
+          "type": "string"
+        },
+        "resource_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Resource Id",
+          "type": "string"
+        },
+        "voice_type": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Voice Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "resource_id",
+        "voice_type"
+      ],
+      "title": "EntityVoiceProfile",
       "type": "object"
     },
     "EventTriggerSpec": {

@@ -223,6 +223,27 @@ def mutate(**changes: Any) -> dict[str, Any]:
 
 
 class ModuleContentV3ContractTests(unittest.TestCase):
+    def test_voice_profile_is_supported_for_npc(self) -> None:
+        payload = module_payload()
+        payload["entities"][0]["voice"] = {
+            "provider": "doubao",
+            "resource_id": "seed-tts-2.0",
+            "voice_type": "voice-a",
+        }
+        content = ModuleContentV3.model_validate(payload)
+        self.assertEqual(content.entities[0].voice.voice_type, "voice-a")
+
+    def test_voice_profile_is_rejected_for_object(self) -> None:
+        payload = module_payload()
+        payload["entities"][0]["kind"] = "object"
+        payload["entities"][0]["voice"] = {
+            "provider": "doubao",
+            "resource_id": "seed-tts-2.0",
+            "voice_type": "voice-a",
+        }
+        with self.assertRaises(ValidationError):
+            ModuleContentV3.model_validate(payload)
+
     def test_reference_module_validates(self) -> None:
         report = validate_module_v3(module_payload())
         self.assertEqual(report.status, "pass", report.errors)

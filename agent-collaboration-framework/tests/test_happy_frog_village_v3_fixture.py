@@ -427,7 +427,7 @@ class HappyFrogRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(finished.entities["messenger"]["convinced"], True)
         self.assertIs(finished.entities["james"]["released"], True)
         self.assertIs(finished.entities["james"]["under_forced_custody"], False)
-        self.assertIs(finished.entities["james"]["accompanying_party"], False)
+        self.assertIs(finished.entities["james"]["accompanying"], False)
         await self.move("outside")
         self.assertIs(self.store.inspect_state(ROOM).entities["james"]["alive"], True)
 
@@ -559,7 +559,7 @@ class HappyFrogRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(finished.entities["dream_crystal"]["broken"], True)
         self.assertIs(finished.entities["james"]["released"], True)
         self.assertIs(finished.entities["james"]["under_forced_custody"], False)
-        self.assertIs(finished.entities["james"]["accompanying_party"], False)
+        self.assertIs(finished.entities["james"]["accompanying"], False)
 
     async def test_james_forced_custody_carry_and_drop_are_distinct_states(self) -> None:
         await self.reach_reception()
@@ -569,7 +569,7 @@ class HappyFrogRuntimeTests(unittest.IsolatedAsyncioTestCase):
             {
                 "released": False,
                 "under_forced_custody": False,
-                "accompanying_party": False,
+                "accompanying": False,
                 "alive": True,
             },
         )
@@ -583,7 +583,7 @@ class HappyFrogRuntimeTests(unittest.IsolatedAsyncioTestCase):
         )
         restrained = self.store.inspect_state(ROOM).entities["james"]
         self.assertIs(restrained["under_forced_custody"], True)
-        self.assertIs(restrained["accompanying_party"], False)
+        self.assertIs(restrained["accompanying"], False)
         self.assertIs(restrained["alive"], True)
         self.assertEqual(self.store.inspect_state(ROOM).scene_id, "resort_reception")
         self.assertFalse(self.store.inspect_state(ROOM).core_resolved)
@@ -598,7 +598,7 @@ class HappyFrogRuntimeTests(unittest.IsolatedAsyncioTestCase):
         )
         carried = self.store.inspect_state(ROOM).entities["james"]
         self.assertIs(carried["under_forced_custody"], True)
-        self.assertIs(carried["accompanying_party"], True)
+        self.assertIs(carried["accompanying"], True)
 
         await self.choose(
             "stop_carrying_james",
@@ -609,7 +609,7 @@ class HappyFrogRuntimeTests(unittest.IsolatedAsyncioTestCase):
         )
         dropped = self.store.inspect_state(ROOM).entities["james"]
         self.assertIs(dropped["under_forced_custody"], True)
-        self.assertIs(dropped["accompanying_party"], False)
+        self.assertIs(dropped["accompanying"], False)
 
         await self.choose(
             "release_james_from_forced_custody",
@@ -620,7 +620,58 @@ class HappyFrogRuntimeTests(unittest.IsolatedAsyncioTestCase):
         )
         released_from_custody = self.store.inspect_state(ROOM).entities["james"]
         self.assertIs(released_from_custody["under_forced_custody"], False)
-        self.assertIs(released_from_custody["accompanying_party"], False)
+        self.assertIs(released_from_custody["accompanying"], False)
+
+    async def test_carried_james_follows_the_party_between_scenes(self) -> None:
+        """#516 回归：被标成随队同行之后，詹姆斯跟着玩家走，不必再命中任何规则。
+
+        这正是 issue 里那条复现路径断掉的地方——玩家「拽着詹姆斯」走到下一个场景时
+        不命中任何规则（`candidate_count=0`），詹姆斯于是被静默留在原地，@ 候选里也
+        没有他，叙事却还在描写他就在身边。
+        """
+
+        await self.reach_reception()
+        await self.choose(
+            "carry_james_against_his_will",
+            "carry-james",
+            "carry",
+            "entity",
+            "james",
+        )
+        self.assertIs(
+            self.store.inspect_state(ROOM).entities["james"]["accompanying"], True
+        )
+
+        await self.move("guest_room")
+        self.assertEqual(self.store.inspect_state(ROOM).scene_id, "guest_room")
+        self.assertEqual(
+            self.store.inspect_state(ROOM).entities["james"]["location_id"],
+            "guest_room",
+        )
+        view = await self.rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        self.assertIn("james", {item.id for item in view.scene.visible_entities})
+
+        await self.move("resort_reception")
+        self.assertEqual(
+            self.store.inspect_state(ROOM).entities["james"]["location_id"],
+            "resort_reception",
+        )
+
+        await self.choose(
+            "stop_carrying_james",
+            "stop-carrying-james",
+            "drop",
+            "entity",
+            "james",
+        )
+        await self.move("guest_room")
+        self.assertEqual(self.store.inspect_state(ROOM).scene_id, "guest_room")
+        self.assertEqual(
+            self.store.inspect_state(ROOM).entities["james"]["location_id"],
+            "resort_reception",
+        )
 
     async def test_early_leave_is_an_explicit_supported_ending(self) -> None:
         await self.reach_reception()
@@ -655,7 +706,7 @@ class HappyFrogRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(finished.ending_available)
         self.assertIs(finished.entities["james"]["released"], False)
         self.assertIs(finished.entities["james"]["under_forced_custody"], True)
-        self.assertIs(finished.entities["james"]["accompanying_party"], True)
+        self.assertIs(finished.entities["james"]["accompanying"], True)
         self.assertEqual(finished.entities["james"]["location_id"], "outside")
         self.assertIs(finished.entities["james"]["alive"], False)
         self.assertIn("james_forced_removal_tragedy", finished.discovered_facts)
@@ -817,7 +868,7 @@ class HappyFrogRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(resolved.entities["dream_crystal"]["broken"], True)
         self.assertIs(resolved.entities["james"]["released"], True)
         self.assertIs(resolved.entities["james"]["under_forced_custody"], False)
-        self.assertIs(resolved.entities["james"]["accompanying_party"], False)
+        self.assertIs(resolved.entities["james"]["accompanying"], False)
         self.assertIn("james_returns_home", resolved.discovered_facts)
 
         for location_id in (

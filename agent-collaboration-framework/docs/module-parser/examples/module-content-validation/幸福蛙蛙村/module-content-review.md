@@ -4,7 +4,7 @@
 ## 发布身份
 
 - `module_id`: `happy-frog-village`
-- `version`: `3.0.8`
+- `version`: `3.0.9`
 - `world_ref`: `coc-7e`
 - 原作者：一只小小信
 - 权威来源：`模组幸福蛙蛙村.docx`

@@ -3,7 +3,7 @@
 ## 发布身份与来源
 
 - `module_id`: `constant-darkness-box-zh-coc7`
-- `version`: `3.0.0`
+- `version`: `3.0.1`
 - `world_ref`: `coc-7e`
 - 原作：86式《常闇の箱》
 - 6 版繁体翻译：lordcj（CJ）
@@ -22,7 +22,7 @@
 | --- | --- | --- |
 | 顺序车厢、锁门、驾驶室 | native | `Location` + 有向 `location_edges` + gated access point |
 | 便签、报纸、证词、钥匙、操作知识 | native | `Information`、状态条件与 `reveal_information` |
-| 取回黑包、乘务员随行 | native | `move_entity` + 独立 `retrieved/accompanying/present` 状态 |
+| 取回黑包、乘务员随行 | native | 黑包 `move_entity` + 独立 `retrieved/present` 状态；随行由引擎保留键 `accompanying` 驱动 |
 | 2 号车厢潜行 | native | 主动 `coc7.skill` 检定，所有成功等级显式路由 |
 | 制造更大声响引开循声者 | lowerable | 原文规定此法自动成功，压成一次原子规则 |
 | 每车厢 3–4 次行动限制 | lowerable | 无行动计数器；降为 23:00→次日 00:00 的 `time.point_entered` 终点 |
@@ -36,7 +36,7 @@
 - travel graph：6→5→4→3 是普通前进；6→7、3→2→先头车厢、先头车厢→驾驶室均有真实边界。
 - 2 号车厢不是普通 travel：潜行成功或制造声响规则先提交 `crossing_resolved`，随后同一原子序列 `enter_location(lead_car)`。
 - 黑包是 Canon portable item；取得时真实进入行动者 inventory，不用台词代替持有状态。
-- 乘务员的 `awake`、`accompanying`、`present`、`maw_believed`、`allows_acceleration` 分开保存；随行后由 `travel.resolved` 事件真实移动到先头车厢和驾驶室。
+- 乘务员的 `awake`、`accompanying`、`present`、`maw_believed`、`allows_acceleration` 分开保存；`accompanying` 是引擎保留键，为真时由 `enter_location` 把他带到队伍实际到达的地点，模组不再逐个目的地手工同步。
 - A/B/C 各提交唯一 `train_chase.outcome`、结果 Information、`mark_core_resolved`、`set_ending_availability` 和结局场景迁移。所有分支以 `outcome=none && core_resolved=false` 互斥。
 - 午夜 C 由世界时间进入 D1 00:00 自动触发，并以 `deadline_reached` 和 `outcome` 保证重放幂等。
 
@@ -64,7 +64,7 @@
 | --- | ---: | ---: |
 | Location | 12 | 12 |
 | Information | 22 | 22 |
-| Rule | 30 | 30 |
+| Rule | 28 | 28 |
 | KnowledgeGoal | 3 | 3 |
 | EndingAnchor | 3 | 3 |
 

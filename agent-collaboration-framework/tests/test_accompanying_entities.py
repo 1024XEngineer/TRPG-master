@@ -20,6 +20,7 @@ from collaboration_framework.contracts import (
     ActionAdjudication,
     ActionMethod,
     ActionTarget,
+    ChangeEntityStateEffect,
     ContractError,
     EnterLocationEffect,
     ItemCustody,
@@ -30,6 +31,7 @@ from collaboration_framework.contracts import (
     SubmitAdjudicationRequest,
 )
 from collaboration_framework.engine import (
+    PUBLIC_STATE_KEYS,
     ActorResources,
     ActorState,
     AdjudicationEngineService,
@@ -37,6 +39,7 @@ from collaboration_framework.engine import (
     GameState,
     InMemoryEngineStore,
     RuleEngineService,
+    committed_results_from_events,
 )
 from collaboration_framework.engine.initialization import create_initial_game_state
 from collaboration_framework.registry import effects as effect_registry
@@ -126,6 +129,41 @@ class AccompanyingEntitiesTests(unittest.IsolatedAsyncioTestCase):
             EnterLocationEffect(location_id=location_id),
             target_id=location_id,
             sequence=sequence,
+        )
+
+    async def mark(self, engine, rules, entity_id: str, *, sequence: int = 1):
+        """主持人判断「他跟着走」之后落下的那一笔，走普通的角色状态裁决。
+
+        这条路径本身就是引擎的校验面：`character_state` 意图要求效果落在裁决的
+        目标上、键在公开状态白名单里、值在该键允许的取值内。主持人负责判断，
+        引擎负责校验并落状态——和其它角色状态一样，随行不需要一条专用通道。
+        """
+
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        return await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id=f"accompanying-mark-{sequence}",
+                    source_revision=snapshot.revision,
+                    actor_id=ACTOR,
+                    summary=f"带上 {entity_id}",
+                    target=ActionTarget(kind="entity", id=entity_id),
+                    method=ActionMethod(family="carry", description="请他一起走"),
+                    persistence_intent="character_state",
+                    check=NoAdjudicationCheck(),
+                    success_effects=(
+                        ChangeEntityStateEffect(
+                            entity_id=entity_id,
+                            key=ACCOMPANYING,
+                            value=True,
+                        ),
+                    ),
+                ),
+            )
         )
 
     @staticmethod
@@ -339,6 +377,63 @@ class AccompanyingEntitiesTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(store.inspect_state(ROOM).scene_id, "cemetery")
         self.assertIsNone(self.placed_at(store, "melodias"))
+
+    # --- 主持人看得见、也说得出 ---------------------------------------------- #
+    async def test_the_mark_is_visible_to_the_agent(self) -> None:
+        """随行是玩家当场就看得见的事，主持人也必须读得到。
+
+        读不到，就没法判断「他还该不该跟着」，也没法在叙事里如实描写——只能靠猜，
+        或者干脆不提。这个键因此进公开状态白名单，和意识、姿态、伤势同级（#516）。
+        """
+
+        self.assertIn(ACCOMPANYING, PUBLIC_STATE_KEYS)
+
+        _store, engine, rules = self.build()
+        await self.mark(engine, rules, "thomas")
+
+        view = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        thomas = next(
+            item for item in view.scene.visible_entities if item.id == "thomas"
+        )
+        self.assertIn(
+            (ACCOMPANYING, True),
+            {(state.key, state.value) for state in thomas.observable_state},
+        )
+
+    async def test_setting_the_mark_becomes_narration_evidence(self) -> None:
+        """「詹姆斯跟着你走出大厅」背后要有一条已提交的状态，而不是模型自己编的。"""
+
+        store, engine, rules = self.build()
+        await self.mark(engine, rules, "thomas")
+
+        results = committed_results_from_events(store.inspect_domain_events(ROOM))
+        self.assertIn(
+            ("character_state", "thomas", ACCOMPANYING, True),
+            {
+                (item.kind, item.target_id, item.state_key, item.state_value)
+                for item in results
+            },
+        )
+
+    async def test_the_mark_survives_the_engine_moving_the_follower(self) -> None:
+        """带人只改位置：标记本身、以及实体上别的状态，引擎一个都不碰。
+
+        `test_follower_keeps_following_across_later_moves` 钉的是效果——一次声明
+        一直有效；这里钉的是原因——引擎没有在到站时把标记清掉，也没有借这次写入
+        顺手规整实体状态。整份状态做等值比较，多写和漏写都会红。
+        """
+
+        before = {ACCOMPANYING: True, "awake": True}
+        store, engine, rules = self.build(entities={"thomas": dict(before)})
+
+        await self.enter(engine, rules, "arnoldsburg_streets")
+
+        self.assertEqual(
+            store.inspect_state(ROOM).entities["thomas"],
+            {**before, "location_id": "arnoldsburg_streets"},
+        )
 
     # --- 与规则手写的 move_entity 的关系 ------------------------------------ #
     async def test_a_rule_that_moves_first_does_not_move_the_follower_twice(

@@ -7,6 +7,7 @@ placed by `located_in` — only exist at that scale.
 
 from __future__ import annotations
 
+import json
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -59,7 +60,11 @@ from collaboration_framework.engine import (
 )
 from collaboration_framework.engine.initialization import create_initial_game_state
 from collaboration_framework.engine.navigation import resolve_location_target
-from collaboration_framework.engine.projection_v3 import location_breadcrumbs
+from collaboration_framework.registry import check_profiles as check_profile_registry
+from collaboration_framework.engine.projection_v3 import (
+    location_breadcrumbs,
+    rule_check_skill_id,
+)
 from collaboration_framework.engine.rules_v3 import (
     evaluate_condition,
     pending_check_for,
@@ -2581,6 +2586,703 @@ class RuleCheckAlignmentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(execution.outcome, "success")
         figure = store.inspect_state(ROOM).entities.get("cemetery_figure", {})
         self.assertIs(figure.get("left_forever"), True)
+
+
+class RuleDeclaredCheckPermissionTests(unittest.IsolatedAsyncioTestCase):
+    """主动检定也要听模组声明的推动/幸运权限（#483）。
+
+    `allow_luck` / `allow_push` 的读取点（`_post_roll_options`）一直都在，卡住它的
+    是上游：`_rule_check_spec` 靠 `decision.rule_origin` 判断「这是不是规则拥有的
+    检定」，而提交路径建 `PendingCheckDecision` 时不带出处，于是两个权限恒为 True。
+    补上出处之后，这两个字段顺着现有代码自动生效，不需要新管线。
+
+    线上四个模组还没有哪条主动检定步声明过 `allow_push=false`，所以这里给真实模组
+    打补丁造出来——这是能力补全，不是修一个正在发生的 bug。
+    """
+
+    @staticmethod
+    def module_with_active_check(**check_overrides) -> ModuleContentV3:
+        data = json.loads(FIXTURE.read_text(encoding="utf-8"))
+        rule = next(
+            item for item in data["rules"] if item["id"] == "research_library_archive"
+        )
+        step = next(
+            item
+            for item in rule["execution"]["steps"]
+            if item["id"] == "check_library-use"
+        )
+        step["check"].update(check_overrides)
+        return ModuleContentV3.model_validate(data)
+
+    async def post_roll_options(self, module_content: ModuleContentV3) -> set[str]:
+        store = InMemoryEngineStore()
+        store.register_room(
+            module_content=module_content,
+            initial_state=game_state(module_content, scene_id="library"),
+        )
+        # 目标值 70，掷 90 必失败——推动与幸运菜单才有内容可看。
+        engine = AdjudicationEngineService(
+            store, dice=DiceRoller(SequenceDiceSource([90]))
+        )
+        rules = RuleEngineService(store)
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        execution = await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id="e5-permissions",
+                    source_revision=snapshot.revision,
+                    actor_id=ACTOR,
+                    summary="查阅旧报",
+                    target=ActionTarget(kind="entity", id="newspaper_archive"),
+                    method=ActionMethod(family="research", description="查阅旧报"),
+                    rule_decision=RuleDecisionRef(
+                        rule_id="research_library_archive", option_id="library-use"
+                    ),
+                    check=RequiredAdjudicationCheck(
+                        candidates=(
+                            SkillCheckCandidate(
+                                candidate_id="library-use",
+                                skill_id="library-use",
+                                difficulty="regular",
+                                method_summary="按年份检索",
+                                player_safe_reason="使用图书馆使用",
+                            ),
+                        )
+                    ),
+                    success_effects=(),
+                    failure_effects=(),
+                ),
+            )
+        )
+        pending = execution.pending_decision
+        assert pending is not None
+        rolled = await engine.decide(
+            CheckDecisionRequest(
+                request_id="e5-permissions:select",
+                room_id=ROOM,
+                player_id=PLAYER,
+                source_revision=execution.view_revision,
+                decision_id=pending.decision_id,
+                decision_version=pending.decision_version,
+                choice=SelectCheckChoice(candidate_id="library-use"),
+            )
+        )
+        assert rolled.check_run is not None
+        self.assertFalse(rolled.check_run.roll.passed)
+        return {option.option_id for option in rolled.check_run.post_roll_options}
+
+    async def test_submitted_check_records_where_it_came_from(self) -> None:
+        """出处落在 PendingCheckDecision 上，但不带恢复游标。
+
+        带了游标就会被 `_settle_check` 当成被动检定，按不存在的 Agenda 恢复；
+        不带出处则拿不到作者声明的权限。两个都要对。
+        """
+
+        store = InMemoryEngineStore()
+        store.register_room(
+            module_content=self.module_with_active_check(),
+            initial_state=game_state(module(), scene_id="library"),
+        )
+        engine = AdjudicationEngineService(
+            store, dice=DiceRoller(SequenceDiceSource([90]))
+        )
+        rules = RuleEngineService(store)
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        execution = await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id="e5-origin",
+                    source_revision=snapshot.revision,
+                    actor_id=ACTOR,
+                    summary="查阅旧报",
+                    target=ActionTarget(kind="entity", id="newspaper_archive"),
+                    method=ActionMethod(family="research", description="查阅旧报"),
+                    rule_decision=RuleDecisionRef(
+                        rule_id="research_library_archive", option_id="library-use"
+                    ),
+                    check=RequiredAdjudicationCheck(
+                        candidates=(
+                            SkillCheckCandidate(
+                                candidate_id="library-use",
+                                skill_id="library-use",
+                                difficulty="regular",
+                                method_summary="按年份检索",
+                                player_safe_reason="使用图书馆使用",
+                            ),
+                        )
+                    ),
+                ),
+            )
+        )
+        pending = execution.pending_decision
+        assert pending is not None
+        stored = store.inspect_pending_check(ROOM, pending.decision_id)
+        assert stored is not None and stored.rule_origin is not None
+        self.assertEqual(stored.rule_origin.rule_id, "research_library_archive")
+        self.assertEqual(stored.rule_origin.branch_id, "library-use")
+        self.assertEqual(stored.rule_origin.step_id, "check_library-use")
+        self.assertFalse(stored.rule_origin.resumes_agenda)
+        # 出处是服务端私有的，不进玩家视图。
+        self.assertNotIn("rule_origin", pending.model_dump())
+
+    async def test_a_rule_can_forbid_pushing_its_own_active_check(self) -> None:
+        """作者写 `allow_push: false`，玩家菜单里就不该有推动。"""
+
+        allowed = await self.post_roll_options(self.module_with_active_check())
+        # 默认（两个字段为 null）行为不变：线上全部主动检定都走这一条。
+        self.assertIn("push-once", allowed)
+
+        forbidden = await self.post_roll_options(
+            self.module_with_active_check(allow_push=False, allow_luck=False)
+        )
+        self.assertEqual(forbidden, {"accept-current"})
+
+    async def test_declared_difficulty_wins_over_the_agent_candidate(self) -> None:
+        """作者写「困难」就按困难判，不能被 Agent 的候选降成普通（#483）。
+
+        难度不改变玩家看到的「掷什么」，所以这里覆盖而不是拒绝——两个模组里只有 2
+        条主动检定声明了非 regular 难度，为此多一轮修复的噪音大于收益。
+        """
+
+        store = InMemoryEngineStore()
+        store.register_room(
+            module_content=self.module_with_active_check(difficulty="hard"),
+            initial_state=game_state(module(), scene_id="library"),
+        )
+        engine = AdjudicationEngineService(
+            store, dice=DiceRoller(SequenceDiceSource([50]))
+        )
+        rules = RuleEngineService(store)
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        execution = await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id="e5-difficulty",
+                    source_revision=snapshot.revision,
+                    actor_id=ACTOR,
+                    summary="查阅旧报",
+                    target=ActionTarget(kind="entity", id="newspaper_archive"),
+                    method=ActionMethod(family="research", description="查阅旧报"),
+                    rule_decision=RuleDecisionRef(
+                        rule_id="research_library_archive", option_id="library-use"
+                    ),
+                    check=RequiredAdjudicationCheck(
+                        candidates=(
+                            SkillCheckCandidate(
+                                candidate_id="library-use",
+                                skill_id="library-use",
+                                # Agent 报的是普通难度，规则说困难。
+                                difficulty="regular",
+                                method_summary="按年份检索",
+                                player_safe_reason="使用图书馆使用",
+                            ),
+                        )
+                    ),
+                ),
+            )
+        )
+        pending = execution.pending_decision
+        assert pending is not None
+        self.assertEqual(pending.options[0].difficulty, "hard")
+
+        # 而且要真的按困难判：图书馆使用 70，掷 50 在普通下是成功，困难要 ≤35。
+        rolled = await engine.decide(
+            CheckDecisionRequest(
+                request_id="e5-difficulty:select",
+                room_id=ROOM,
+                player_id=PLAYER,
+                source_revision=execution.view_revision,
+                decision_id=pending.decision_id,
+                decision_version=pending.decision_version,
+                choice=SelectCheckChoice(candidate_id="library-use"),
+            )
+        )
+        assert rolled.check_run is not None
+        self.assertEqual(rolled.check_run.difficulty, "hard")
+        self.assertEqual(rolled.check_run.roll.value, 50)
+        self.assertFalse(rolled.check_run.roll.passed)
+
+    async def test_an_undeclared_difficulty_falls_back_to_the_candidate(self) -> None:
+        """规则没声明难度时沿用 Agent 候选。
+
+        线上 42 条主动检定步**全部**显式写了 `difficulty`，所以这条得把它打成 None
+        才测得到——留着它是因为 `difficulty` 在契约上可选（`module_v3.py:445`），
+        新模组完全可以不写，那时不该把候选难度吃掉。
+        """
+
+        store = InMemoryEngineStore()
+        store.register_room(
+            module_content=self.module_with_active_check(difficulty=None),
+            initial_state=game_state(module(), scene_id="library"),
+        )
+        engine = AdjudicationEngineService(
+            store, dice=DiceRoller(SequenceDiceSource([50]))
+        )
+        rules = RuleEngineService(store)
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        execution = await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id="e5-difficulty-default",
+                    source_revision=snapshot.revision,
+                    actor_id=ACTOR,
+                    summary="查阅旧报",
+                    target=ActionTarget(kind="entity", id="newspaper_archive"),
+                    method=ActionMethod(family="research", description="查阅旧报"),
+                    rule_decision=RuleDecisionRef(
+                        rule_id="research_library_archive", option_id="library-use"
+                    ),
+                    check=RequiredAdjudicationCheck(
+                        candidates=(
+                            SkillCheckCandidate(
+                                candidate_id="library-use",
+                                skill_id="library-use",
+                                difficulty="extreme",
+                                method_summary="按年份检索",
+                                player_safe_reason="使用图书馆使用",
+                            ),
+                        )
+                    ),
+                ),
+            )
+        )
+        pending = execution.pending_decision
+        assert pending is not None
+        self.assertEqual(pending.options[0].difficulty, "extreme")
+
+    async def submit_with_skill(self, skill_id: str, *, request_id: str):
+        store = InMemoryEngineStore()
+        store.register_room(
+            module_content=module(),
+            initial_state=game_state(module(), scene_id="library"),
+        )
+        engine = AdjudicationEngineService(
+            store, dice=DiceRoller(SequenceDiceSource([50]))
+        )
+        rules = RuleEngineService(store)
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        return store, await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id=request_id,
+                    source_revision=snapshot.revision,
+                    actor_id=ACTOR,
+                    summary="查阅旧报",
+                    target=ActionTarget(kind="entity", id="newspaper_archive"),
+                    method=ActionMethod(family="research", description="查阅旧报"),
+                    rule_decision=RuleDecisionRef(
+                        rule_id="research_library_archive", option_id="library-use"
+                    ),
+                    check=RequiredAdjudicationCheck(
+                        candidates=(
+                            SkillCheckCandidate(
+                                candidate_id=skill_id,
+                                skill_id=skill_id,
+                                difficulty="regular",
+                                method_summary="翻找",
+                                player_safe_reason="使用该能力",
+                            ),
+                        )
+                    ),
+                ),
+            )
+        )
+
+    async def test_a_candidate_that_is_not_the_declared_skill_is_refused(self) -> None:
+        """作者写了掷什么，Agent 就不能改掷别的（#483）。
+
+        这是《追书人》守夜那个洞的一般形式：作者在 `keep_night_watch/luck` 上写
+        `parameters.skill_id="luck"`，引擎却照 Agent 报的掷侦察，目标值和难度全错，
+        而且不报错。42 条主动检定步全都声明了技能，此前一条都没生效过。
+        """
+
+        with self.assertRaises(AdjudicationValidationError) as rejected:
+            await self.submit_with_skill("spot-hidden", request_id="e5-skill-wrong")
+
+        result = rejected.exception.result
+        self.assertEqual(result.code, "RULE_CHECK_SKILL_MISMATCH")
+        # 与 RULE_OUT_OF_SCOPE / RULE_REQUIRES_CHECK 同级：Agent 的失误，改对就能重来。
+        self.assertEqual(result.repairability, "auto_repairable")
+        self.assertEqual(result.fault, "agent")
+        assert result.internal_reason is not None
+        self.assertIn("library-use", result.internal_reason)
+
+    async def test_the_declared_skill_passes(self) -> None:
+        """报对技能就正常走到掷骰——拒绝必须有出口。"""
+
+        store, execution = await self.submit_with_skill(
+            "library-use", request_id="e5-skill-right"
+        )
+        self.assertEqual(execution.status, "awaiting_skill_choice")
+        assert execution.pending_decision is not None
+        self.assertEqual(execution.pending_decision.options[0].skill_id, "library-use")
+
+    async def test_a_free_check_may_roll_any_skill_the_actor_has(self) -> None:
+        """没有 rule_decision 就没有作者声明，自由裁决照旧自己挑技能。
+
+        E5 收窄的是「规则拥有的检定」。若这条也被卡住，玩家做任何普通行动都得先
+        有一条模组规则才能掷骰——那是 #480 的范围，不是这里。
+        """
+
+        store = InMemoryEngineStore()
+        store.register_room(
+            module_content=module(),
+            initial_state=game_state(module(), scene_id="library"),
+        )
+        engine = AdjudicationEngineService(
+            store, dice=DiceRoller(SequenceDiceSource([50]))
+        )
+        rules = RuleEngineService(store)
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        execution = await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id="e5-free-skill",
+                    source_revision=snapshot.revision,
+                    actor_id=ACTOR,
+                    summary="随便看看",
+                    target=ActionTarget(kind="location", id="library"),
+                    method=ActionMethod(family="observe", description="随便看看"),
+                    check=RequiredAdjudicationCheck(
+                        candidates=(
+                            SkillCheckCandidate(
+                                candidate_id="spot-hidden",
+                                skill_id="spot-hidden",
+                                difficulty="regular",
+                                method_summary="扫一眼",
+                                player_safe_reason="使用侦查",
+                            ),
+                        )
+                    ),
+                ),
+            )
+        )
+        assert execution.pending_decision is not None
+        self.assertEqual(
+            execution.pending_decision.options[0].skill_id, "spot-hidden"
+        )
+
+    async def test_only_skill_id_is_consumed_from_parameters(self) -> None:
+        """参数按所有者分层：E5 只消费「掷什么」，不碰 CoC7 的后果语义（#483）。
+
+        `success_loss` / `failure_loss` / `habit_cap` 是 `coc7.sanity` 的结果语义，
+        归 #486 / #487。它们出现在主动检定步上时，E5 原样保留、不解释，也不因为
+        「不认得」就报错——`recognised_parameters` 的注释写明了这条区分：「规则写错
+        了」该在发布期拒绝，「引擎还没做到」不该。
+
+        这条测的是：多写这些键不改变这次掷骰的任何东西。
+        """
+
+        module_content = self.module_with_active_check(
+            parameters={
+                "skill_id": "library-use",
+                "success_loss": "1",
+                "failure_loss": "1d6",
+                "habit_cap": "5",
+            }
+        )
+        step = next(
+            item
+            for item in next(
+                rule
+                for rule in module_content.rules
+                if rule.id == "research_library_archive"
+            ).execution.steps
+            if item.id == "check_library-use"
+        )
+        # 只认 skill_id，其余三个键连读都不读。
+        self.assertEqual(rule_check_skill_id(step), "library-use")
+
+        store = InMemoryEngineStore()
+        store.register_room(
+            module_content=module_content,
+            initial_state=game_state(module(), scene_id="library"),
+        )
+        engine = AdjudicationEngineService(
+            store, dice=DiceRoller(SequenceDiceSource([50]))
+        )
+        rules = RuleEngineService(store)
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        execution = await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id="e5-parameter-ownership",
+                    source_revision=snapshot.revision,
+                    actor_id=ACTOR,
+                    summary="查阅旧报",
+                    target=ActionTarget(kind="entity", id="newspaper_archive"),
+                    method=ActionMethod(family="research", description="查阅旧报"),
+                    rule_decision=RuleDecisionRef(
+                        rule_id="research_library_archive", option_id="library-use"
+                    ),
+                    check=RequiredAdjudicationCheck(
+                        candidates=(
+                            SkillCheckCandidate(
+                                candidate_id="library-use",
+                                skill_id="library-use",
+                                difficulty="regular",
+                                method_summary="按年份检索",
+                                player_safe_reason="使用图书馆使用",
+                            ),
+                        )
+                    ),
+                ),
+            )
+        )
+        pending = execution.pending_decision
+        assert pending is not None
+        # 提交照常通过，掷的还是图书馆使用 70，SAN 一点没动。
+        self.assertEqual(pending.options[0].skill_id, "library-use")
+        self.assertEqual(pending.options[0].target_value, 70)
+        self.assertEqual(
+            store.inspect_state(ROOM).actors[ACTOR].resources.san, 55
+        )
+
+    def test_the_profile_table_stays_out_of_the_active_path(self) -> None:
+        """`coc7.skill` 故意不注册，本 Issue 也不给它注册。
+
+        这张表自己的规矩是「登记一个名字等于宣称引擎能执行它，必须和执行器同一次
+        改动落地」。`coc7.skill` 没有固定的 `resource`——目标值来自
+        `actor.state["skills"][skill_id]`，不是 `ActorResources` 上某个字段——所以
+        `_passive_check_option` 执行不了它。注册它会让发布期校验开始放行引擎跑不动
+        的 `passive_rule` 步，把一个发布期就能拦住的错误推迟到运行时。
+
+        主动检定的目标值走 `_validated_options`，从来不经过这张表。
+        """
+
+        self.assertFalse(check_profile_registry.is_registered("coc7.skill"))
+        self.assertFalse(check_profile_registry.is_registered("coc7.luck"))
+        sanity = check_profile_registry.registration_for("coc7.sanity")
+        assert sanity is not None
+        # 后果语义仍归 coc7.sanity，E5 不接手。
+        self.assertEqual(
+            sanity.recognised_parameters,
+            frozenset({"success_loss", "failure_loss", "habit_cap"}),
+        )
+
+    async def test_the_roll_records_which_rule_it_came_from(self) -> None:
+        """CheckRun 也要追溯得到 Rule / Branch / CheckStep 与当时的模组版本（#483）。
+
+        此前要判断一次掷骰属不属于规则，只能拿 `decision_id` 回头 load
+        `PendingCheckDecision`——而它会随结算被改写，CheckRun 才是掷骰当时的事实。
+        """
+
+        store = InMemoryEngineStore()
+        store.register_room(
+            module_content=module(),
+            initial_state=game_state(module(), scene_id="library"),
+        )
+        engine = AdjudicationEngineService(
+            store, dice=DiceRoller(SequenceDiceSource([50]))
+        )
+        rules = RuleEngineService(store)
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        execution = await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id="e5-traceable",
+                    source_revision=snapshot.revision,
+                    actor_id=ACTOR,
+                    summary="查阅旧报",
+                    target=ActionTarget(kind="entity", id="newspaper_archive"),
+                    method=ActionMethod(family="research", description="查阅旧报"),
+                    rule_decision=RuleDecisionRef(
+                        rule_id="research_library_archive", option_id="library-use"
+                    ),
+                    check=RequiredAdjudicationCheck(
+                        candidates=(
+                            SkillCheckCandidate(
+                                candidate_id="library-use",
+                                skill_id="library-use",
+                                difficulty="regular",
+                                method_summary="按年份检索",
+                                player_safe_reason="使用图书馆使用",
+                            ),
+                        )
+                    ),
+                ),
+            )
+        )
+        pending = execution.pending_decision
+        assert pending is not None
+        rolled = await engine.decide(
+            CheckDecisionRequest(
+                request_id="e5-traceable:select",
+                room_id=ROOM,
+                player_id=PLAYER,
+                source_revision=execution.view_revision,
+                decision_id=pending.decision_id,
+                decision_version=pending.decision_version,
+                choice=SelectCheckChoice(candidate_id="library-use"),
+            )
+        )
+        assert rolled.check_run is not None
+        stored = store.inspect_check_run(ROOM, rolled.check_run.check_id)
+        origin = stored.rule_origin
+        assert origin is not None
+        self.assertEqual(origin.rule_id, "research_library_archive")
+        self.assertEqual(origin.branch_id, "library-use")
+        self.assertEqual(origin.step_id, "check_library-use")
+        self.assertEqual(origin.module_version, module().version)
+        # 主动检定不回 Agenda —— 结算走父动作。
+        self.assertFalse(origin.resumes_agenda)
+        # 出处是服务端私有的，玩家投影里没有它。
+        self.assertNotIn("rule_origin", rolled.check_run.model_dump())
+
+    async def test_a_free_roll_records_no_rule_origin(self) -> None:
+        """自由掷骰没有出处——不能凭空指认一条规则。"""
+
+        store = InMemoryEngineStore()
+        store.register_room(
+            module_content=module(),
+            initial_state=game_state(module(), scene_id="library"),
+        )
+        engine = AdjudicationEngineService(
+            store, dice=DiceRoller(SequenceDiceSource([50]))
+        )
+        rules = RuleEngineService(store)
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        execution = await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id="e5-free-trace",
+                    source_revision=snapshot.revision,
+                    actor_id=ACTOR,
+                    summary="随便看看",
+                    target=ActionTarget(kind="location", id="library"),
+                    method=ActionMethod(family="observe", description="随便看看"),
+                    check=RequiredAdjudicationCheck(
+                        candidates=(
+                            SkillCheckCandidate(
+                                candidate_id="spot-hidden",
+                                skill_id="spot-hidden",
+                                difficulty="regular",
+                                method_summary="扫一眼",
+                                player_safe_reason="使用侦查",
+                            ),
+                        )
+                    ),
+                ),
+            )
+        )
+        pending = execution.pending_decision
+        assert pending is not None
+        rolled = await engine.decide(
+            CheckDecisionRequest(
+                request_id="e5-free-trace:select",
+                room_id=ROOM,
+                player_id=PLAYER,
+                source_revision=execution.view_revision,
+                decision_id=pending.decision_id,
+                decision_version=pending.decision_version,
+                choice=SelectCheckChoice(candidate_id="spot-hidden"),
+            )
+        )
+        assert rolled.check_run is not None
+        self.assertIsNone(
+            store.inspect_check_run(ROOM, rolled.check_run.check_id).rule_origin
+        )
+
+    async def test_a_free_check_keeps_both_permissions(self) -> None:
+        """没有 rule_decision 的自由裁决完全不受影响。
+
+        E5 只收窄「规则拥有的检定」。自由检定没有出处，`_rule_check_spec` 仍旧返回
+        None，两个权限继续默认放开——否则这次改动会悄悄削掉玩家在普通行动里的推动权。
+        """
+
+        store = InMemoryEngineStore()
+        store.register_room(
+            module_content=module(),
+            initial_state=game_state(module(), scene_id="library"),
+        )
+        engine = AdjudicationEngineService(
+            store, dice=DiceRoller(SequenceDiceSource([90]))
+        )
+        rules = RuleEngineService(store)
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        execution = await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id="e5-free-check",
+                    source_revision=snapshot.revision,
+                    actor_id=ACTOR,
+                    summary="随便翻翻",
+                    target=ActionTarget(kind="location", id="library"),
+                    method=ActionMethod(family="observe", description="随便翻翻"),
+                    check=RequiredAdjudicationCheck(
+                        candidates=(
+                            SkillCheckCandidate(
+                                candidate_id="spot-hidden",
+                                skill_id="spot-hidden",
+                                difficulty="regular",
+                                method_summary="扫一眼",
+                                player_safe_reason="使用侦查",
+                            ),
+                        )
+                    ),
+                ),
+            )
+        )
+        pending = execution.pending_decision
+        assert pending is not None
+        stored = store.inspect_pending_check(ROOM, pending.decision_id)
+        assert stored is not None
+        self.assertIsNone(stored.rule_origin)
+        rolled = await engine.decide(
+            CheckDecisionRequest(
+                request_id="e5-free-check:select",
+                room_id=ROOM,
+                player_id=PLAYER,
+                source_revision=execution.view_revision,
+                decision_id=pending.decision_id,
+                decision_version=pending.decision_version,
+                choice=SelectCheckChoice(candidate_id="spot-hidden"),
+            )
+        )
+        assert rolled.check_run is not None
+        self.assertIn(
+            "push-once", {item.option_id for item in rolled.check_run.post_roll_options}
+        )
 
 
 if __name__ == "__main__":

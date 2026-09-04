@@ -23,7 +23,10 @@ from collaboration_framework.contracts import (
     CheckDecisionRequest,
     NoAdjudicationCheck,
     PostRollDecisionRequest,
+    RequiredAdjudicationCheck,
+    RuleDecisionRef,
     SelectCheckChoice,
+    SkillCheckCandidate,
     SubmitAdjudicationRequest,
 )
 from collaboration_framework.engine import (
@@ -401,3 +404,176 @@ async def test_two_open_decisions_never_coexist_on_one_action(
         found = await transaction.find_pending_check_by_action(action_id)
     assert found is not None
     assert found.decision_id == second.pending_decision.decision_id
+
+
+async def test_decisions_written_before_the_origin_split_still_load(
+    db_session: AsyncSession,
+    engine_store_factory: Callable[..., SqlAlchemyEngineStore],
+) -> None:
+    """#483 拆开 `RuleCheckOrigin` 之后，部署前落库的检定必须还能读回来。
+
+    出处（rule/branch/step）与恢复游标（agenda/source_event）拆开时，后两个字段
+    从必填变成可选。老行五个字段齐全，新模型照样读得动——这条把 schema version
+    压回 1 走一遍读路径，确认版本检查放行、`resumes_agenda` 仍然为真，也就是被动
+    检定结算后照旧回 Agenda 走 `result_routes`，而不是被当成主动检定。
+    """
+
+    room, players, _ = await _start_room(db_session, room_number=97)
+    room_id, player_id = room.id, players[0].id
+    actor_id = await _arm_first_sight(db_session, room_id)
+
+    store = engine_store_factory()
+    async with store.transaction(room_id) as transaction:
+        runtime = await transaction.load_runtime()
+    execution = await AdjudicationEngineService(store).submit(
+        _see_true_form(room_id, player_id, actor_id, runtime.revision)
+    )
+    pending = execution.pending_decision
+    assert pending is not None
+
+    db_session.expire_all()
+    record = (
+        await db_session.scalars(
+            select(PendingCheckDecisionRecord).where(
+                PendingCheckDecisionRecord.room_id == room_id,
+                PendingCheckDecisionRecord.decision_id == pending.decision_id,
+            )
+        )
+    ).one()
+    # 把这一行降级成 #483 之前的样子：只留当时那五个字段，版本号压回 1。
+    origin = dict(record.decision_json["rule_origin"])
+    legacy_origin = {
+        key: origin[key]
+        for key in ("agenda_id", "rule_id", "branch_id", "step_id", "source_event_id")
+    }
+    record.decision_json = {
+        **record.decision_json,
+        "rule_origin": legacy_origin,
+    }
+    record.decision_schema_version = 1
+    await db_session.commit()
+
+    async with engine_store_factory().transaction(room_id) as transaction:
+        reloaded = await transaction.load_pending_check(pending.decision_id)
+    assert reloaded is not None
+    assert reloaded.rule_origin is not None
+    # 恢复游标还在 —— 被动检定结算后仍旧回 Agenda，不会走主动路径的 _finalize_action。
+    assert reloaded.rule_origin.resumes_agenda is True
+    assert reloaded.rule_origin.agenda_id == legacy_origin["agenda_id"]
+    assert reloaded.rule_origin.source_event_id == legacy_origin["source_event_id"]
+    # 老行不知道自己出自哪一版模组，读回来就该是 None，而不是谎称是当前版本。
+    assert reloaded.rule_origin.module_version is None
+
+
+async def _stand_in_library(db: AsyncSession, room_id: str) -> str:
+    """把房间摆到图书馆，`research_library_archive` 在那里可用。"""
+
+    game_session = await db.get(GameSession, room_id)
+    assert game_session is not None
+    state = GameState.model_validate(game_session.state_json)
+    actor_id = next(iter(state.actors))
+    actor = state.actors[actor_id]
+    existing = actor.state.get("skills")
+    skills = {
+        **(existing if isinstance(existing, dict) else {}),
+        "library-use": 70,
+    }
+    game_session.state_json = state.model_copy(
+        update={
+            "scene_id": "library",
+            "actors": {
+                actor_id: actor.model_copy(
+                    update={"state": {**actor.state, "skills": skills}}, deep=True
+                )
+            },
+        },
+        deep=True,
+    ).to_json_dict()
+    await db.commit()
+    return actor_id
+
+
+async def test_an_active_rule_check_keeps_its_origin_across_a_store_restart(
+    db_session: AsyncSession,
+    engine_store_factory: Callable[..., SqlAlchemyEngineStore],
+) -> None:
+    """主动检定的出处必须真的落库，并且跨进程读回来不丢失、不漂移（#483）。
+
+    这是新形状的第一条 SQL 往返：只有 rule/branch/step + module_version，没有 Agenda
+    游标。掷骰在另一个 Store 实例里完成——等价于结算发生在重启之后——CheckRun 上记的
+    出处仍要指向同一条分支。
+    """
+
+    room, players, _ = await _start_room(db_session, room_number=98)
+    room_id, player_id = room.id, players[0].id
+    actor_id = await _stand_in_library(db_session, room_id)
+
+    store = engine_store_factory()
+    async with store.transaction(room_id) as transaction:
+        runtime = await transaction.load_runtime()
+    execution = await AdjudicationEngineService(store).submit(
+        SubmitAdjudicationRequest(
+            room_id=room_id,
+            player_id=player_id,
+            adjudication=ActionAdjudication(
+                request_id="issue483-archive",
+                source_revision=runtime.revision,
+                actor_id=actor_id,
+                summary="查阅旧报",
+                target=ActionTarget(kind="entity", id="newspaper_archive"),
+                method=ActionMethod(family="research", description="查阅旧报"),
+                rule_decision=RuleDecisionRef(
+                    rule_id="research_library_archive", option_id="library-use"
+                ),
+                check=RequiredAdjudicationCheck(
+                    candidates=(
+                        SkillCheckCandidate(
+                            candidate_id="library-use",
+                            skill_id="library-use",
+                            difficulty="regular",
+                            method_summary="按年份检索",
+                            player_safe_reason="使用图书馆使用",
+                        ),
+                    )
+                ),
+            ),
+        )
+    )
+    pending = execution.pending_decision
+    assert pending is not None
+
+    # 落库的决策带着出处，但不带恢复游标。
+    async with engine_store_factory().transaction(room_id) as transaction:
+        stored = await transaction.load_pending_check(pending.decision_id)
+    assert stored is not None and stored.rule_origin is not None
+    assert stored.rule_origin.rule_id == "research_library_archive"
+    assert stored.rule_origin.branch_id == "library-use"
+    assert stored.rule_origin.step_id == "check_library-use"
+    assert stored.rule_origin.module_version == runtime.module_version
+    assert stored.rule_origin.resumes_agenda is False
+
+    # 换一个全新的 Store 实例结算：等价于掷骰发生在重启之后。
+    rolled = await AdjudicationEngineService(
+        engine_store_factory(),
+        dice=DiceRoller(SequenceDiceSource([50])),
+    ).decide(
+        CheckDecisionRequest(
+            request_id="issue483-archive:select",
+            room_id=room_id,
+            player_id=player_id,
+            source_revision=execution.view_revision,
+            decision_id=pending.decision_id,
+            decision_version=pending.decision_version,
+            choice=SelectCheckChoice(candidate_id="library-use"),
+        )
+    )
+    assert rolled.check_run is not None
+
+    async with engine_store_factory().transaction(room_id) as transaction:
+        run = await transaction.load_check_run(rolled.check_run.check_id)
+    assert run is not None and run.rule_origin is not None
+    # 不漂移：跨实例读回来还是同一条分支的同一步。
+    assert run.rule_origin.rule_id == "research_library_archive"
+    assert run.rule_origin.branch_id == "library-use"
+    assert run.rule_origin.step_id == "check_library-use"
+    assert run.rule_origin.module_version == runtime.module_version

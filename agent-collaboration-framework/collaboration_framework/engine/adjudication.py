@@ -72,7 +72,7 @@ from .persistent_results import (
     validate_persistent_effects,
 )
 from .ports import EngineStore
-from .projection_v3 import project_v3
+from .projection_v3 import project_v3, rule_check_skill_id
 from .rules_v3 import (
     agent_match_admits,
     create_rule_agenda,
@@ -727,7 +727,7 @@ class AdjudicationEngineService:
                         player_safe_reason="房间成员已变化，需要重新确认场景切换",
                     )
                 allow_party_scene_transition = True
-            self._validate_adjudication(
+            rule_check_origin = self._validate_adjudication(
                 runtime,
                 request.adjudication,
                 allow_party_time_advance=allow_party_time_advance,
@@ -792,7 +792,11 @@ class AdjudicationEngineService:
                     fault="player",
                     player_safe_reason="该行动已经存在待处理检定",
                 )
-            options = self._validated_options(runtime, request.adjudication)
+            options = self._validated_options(
+                runtime,
+                request.adjudication,
+                rule_check=self._rule_check_spec(runtime, rule_check_origin),
+            )
             decision = PendingCheckDecision(
                 decision_id=self._new_id("check_decision"),
                 room_id=request.room_id,
@@ -803,6 +807,9 @@ class AdjudicationEngineService:
                 status="awaiting_skill_choice",
                 adjudication=request.adjudication,
                 options=options,
+                # 出处让这次检定认得自己的规则，`_rule_check_spec` 因此能取到作者
+                # 声明的权限；游标留空，结算仍旧走父动作的 `_finalize_action`（#483）。
+                rule_origin=rule_check_origin,
             )
             event = self._event(
                 runtime,
@@ -952,7 +959,7 @@ class AdjudicationEngineService:
                     player_safe_reason="所选检定方式不在当前可用列表中",
                 )
             roll = self._roll(option.target_value, option.difficulty)
-            rule_check = self._rule_check_spec(runtime, decision)
+            rule_check = self._rule_check_spec(runtime, decision.rule_origin)
             post_options = self._post_roll_options(
                 runtime,
                 actor_id=decision.actor_id,
@@ -979,6 +986,7 @@ class AdjudicationEngineService:
                 post_roll_options=post_options,
                 final_result=None if post_options else roll,
                 adjudication=decision.adjudication,
+                rule_origin=decision.rule_origin,
             )
             rolled_event = self._event(
                 runtime,
@@ -1500,7 +1508,16 @@ class AdjudicationEngineService:
         *,
         allow_party_time_advance: bool = False,
         allow_party_scene_transition: bool = False,
-    ) -> None:
+    ) -> RuleCheckOrigin | None:
+        """校验这次裁决，并把「这次检定出自哪」交还给调用方（#483）。
+
+        返回值只在「规则分支确实要掷骰」时非空。出处必须是服务端事实：这里已经从
+        固定的 ModuleVersion 解析出了权威 `CheckStep`（#462 的双向不变量就是拿它
+        算的），所以由这里返回，而不是让提交路径再解析一遍——两次解析就是两个可能
+        分叉的事实源。
+        """
+
+        rule_check_origin: RuleCheckOrigin | None = None
         state = runtime.game_state
         target = adjudication.target
         if target.kind not in _target_kinds_matching(runtime, target.id):
@@ -1583,6 +1600,41 @@ class AdjudicationEngineService:
                         f"裁决却声明 check.mode={adjudication.check.mode}"
                     ),
                 )
+            if check_step is not None:
+                # 不信 Agent 自报的来源，也不按候选菜单反推：rule/branch/step 三个
+                # id 全部来自刚刚在服务端解析过的那条分支。
+                rule_check_origin = RuleCheckOrigin(
+                    rule_id=rule.id,
+                    branch_id=branch_id,
+                    step_id=check_step.id,
+                    module_version=runtime.module_version,
+                )
+                # 作者规定了掷什么，就必须掷什么（#483）。
+                #
+                # 拒绝而不是静默改写：候选里的 method_summary / player_safe_reason
+                # 是玩家会看到的文字，Agent 是照着自己选的技能写的。把 skill_id 换
+                # 掉、把文案留下，菜单上会出现「使用图书馆使用」配着幸运的目标值。
+                # 拒绝让 Agent 自己把这一组重写一遍，与 #462 的处理一致。
+                declared_skill = rule_check_skill_id(
+                    check_step, runtime.module_content.world_ref
+                )
+                mismatched = [
+                    candidate.skill_id
+                    for candidate in adjudication.check.candidates
+                    if declared_skill is not None
+                    and candidate.skill_id != declared_skill
+                ]
+                if mismatched:
+                    self._reject_validation(
+                        "RULE_CHECK_SKILL_MISMATCH",
+                        repairability="auto_repairable",
+                        fault="agent",
+                        player_safe_reason="这次行动要用规则指定的能力来判定",
+                        internal_reason=(
+                            f"Rule {rule.id} 的分支 {branch_id} 规定掷 {declared_skill}，"
+                            f"裁决却报了 {sorted(set(mismatched))}"
+                        ),
+                    )
         else:
             # 自由行动的完整性必须在创建待检定、掷骰或写入事件之前完成；规则路径
             # 的效果由模组拥有，因此仍允许模型 success_effects 为空。
@@ -1626,7 +1678,12 @@ class AdjudicationEngineService:
             allow_party_scene_transition=allow_party_scene_transition,
         )
         if adjudication.check.mode != "none":
-            self._validated_options(runtime, adjudication)
+            self._validated_options(
+                runtime,
+                adjudication,
+                rule_check=self._rule_check_spec(runtime, rule_check_origin),
+            )
+        return rule_check_origin
 
     def _validate_effect_sequence(
         self,
@@ -1686,6 +1743,8 @@ class AdjudicationEngineService:
         self,
         runtime: EngineRuntimeSnapshot,
         adjudication: ActionAdjudication,
+        *,
+        rule_check: RuleCheckSpec | None = None,
     ) -> tuple[PendingCheckOption, ...]:
         actor = runtime.game_state.actors[adjudication.actor_id]
         skills = actor.state.get("skills")
@@ -1748,7 +1807,15 @@ class AdjudicationEngineService:
                         else candidate.skill_id
                     ),
                     target_value=value,
-                    difficulty=candidate.difficulty,
+                    # 规则声明的难度是权威的（#483）：作者写「困难」就按困难判，
+                    # 不能被 Agent 的候选降成普通。未声明（None）时沿用候选，
+                    # 与被动路径 `step.check.difficulty or profile.default_difficulty`
+                    # 同一条规矩。
+                    difficulty=(
+                        rule_check.difficulty
+                        if rule_check is not None and rule_check.difficulty is not None
+                        else candidate.difficulty
+                    ),
                     method_summary=candidate.method_summary,
                     player_safe_reason=candidate.player_safe_reason,
                 )
@@ -1840,16 +1907,18 @@ class AdjudicationEngineService:
     @staticmethod
     def _rule_check_spec(
         runtime: EngineRuntimeSnapshot,
-        decision: PendingCheckDecision,
+        origin: RuleCheckOrigin | None,
     ) -> RuleCheckSpec | None:
         """规则拥有的检定回它的 spec；玩家自己发起的检定回 None。
 
-        `rule_origin` 非空即「这是规则拥有的检定」，游标足够把 `CheckStep` 找回
-        来——`_resume_rule_check` 做的是同一件事。`PendingCheckOption` 只带得动
+        出处非空即「这是规则拥有的检定」，`rule_id` + `step_id` 足够把 `CheckStep`
+        找回来——`_resume_rule_check` 做的是同一件事。`PendingCheckOption` 只带得动
         技能与目标值，带不动出处，所以在调用点解析而不是塞进 option。
+
+        取出处而不是取 `PendingCheckDecision`（#483）：提交期要用它算难度时，决策
+        对象还没建出来。
         """
 
-        origin = decision.rule_origin
         if origin is None:
             return None
         rule = next(
@@ -2051,9 +2120,16 @@ class AdjudicationEngineService:
         玩家自己的行动检定：提交 Agent 裁决好的 success/failure 效果。
         规则拥有的被动检定：回到挂起的 Agenda，按 `result_routes` 走它的分支，
         Agent 不再参与后果裁决（#226 §5）。
+
+        判据是「要不要回 Agenda」，不是「有没有出处」（#483）。`agent_match` 提交
+        路径也有出处——它就是靠出处拿到规则声明的技能与难度的——但它没有 Agenda，
+        结算的是父动作。两者曾经共用 `rule_origin is not None` 这一个判断，于是
+        「让主动检定认得自己的规则」和「把主动检定错误地当成被动检定恢复」变成了
+        同一件事。
         """
 
-        if decision.rule_origin is not None:
+        origin = decision.rule_origin
+        if origin is not None and origin.resumes_agenda:
             return self._resume_rule_check(
                 runtime,
                 request_id=request_id,
@@ -2090,7 +2166,7 @@ class AdjudicationEngineService:
         """
 
         origin = decision.rule_origin
-        assert origin is not None
+        assert origin is not None and origin.agenda_id is not None
         state = runtime.game_state.model_copy(deep=True)
         events = [
             *prefix_events,
@@ -2420,6 +2496,7 @@ class AdjudicationEngineService:
             options=(option,),
             rule_origin=RuleCheckOrigin(
                 agenda_id=agenda.agenda_id,
+                module_version=runtime.module_version,
                 rule_id=rule.id,
                 branch_id=agenda.current_branch_id or "default",
                 step_id=step.id,

@@ -268,6 +268,14 @@ def _check_is_mechanical(
     after = repaired.check
     if before.mode != after.mode:
         return _check_realigns_with_rule(original, repaired, feedback)
+    if feedback.code == "RULE_CHECK_SKILL_MISMATCH":
+        # 引擎说这次该掷的是规则指定的能力，那么整组候选本来就得重写：换掉技能，
+        # method_summary 与 player_safe_reason 也得跟着换，不然菜单上会出现「使用
+        # 图书馆使用」配着幸运的目标值。掷什么由规则说了算，改成什么由引擎重新整体
+        # 校验（`_validated_options` 会再拒一次不合规的技能），这一层只负责确认
+        # 玩家原本要做的事没被换掉——那由上面的 summary / method / rule_decision
+        # 三道比较保证（#483）。
+        return True
     if len(before.candidates) != len(after.candidates):
         return False
     for old, new in zip(before.candidates, after.candidates, strict=True):

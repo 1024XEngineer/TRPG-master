@@ -33,6 +33,15 @@ candidate menu and never through this table.
 The table is owned by the CoC7 adapter. Runtime dispatch should use
 `registry.rulesets` so profile ids are always resolved in a `world_ref` scope.
 The compatibility helpers below remain for migration-era callers.
+
+#483 让主动检定开始消费作者声明的技能、难度与权限，但**没有**因此登记
+`coc7.skill`。它没有固定的 `resource`——目标值来自 `actor.state["skills"][skill_id]`，
+不是 `ActorResources` 上某个字段——所以 `_passive_check_option` 依然执行不了它。
+登记它只会让发布期校验开始放行引擎跑不动的 `passive_rule` 步，把一个发布期就能拦住
+的错误推迟到运行时。主动路径的目标值走 `_validated_options`，从不经过这张表。
+
+同理，#483 只消费决定「掷什么、怎么掷」的 `skill_id`；`success_loss` /
+`failure_loss` / `habit_cap` 仍旧是 recognised-but-unspent，归 #486 / #487。
 """
 
 from __future__ import annotations

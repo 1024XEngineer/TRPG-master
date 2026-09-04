@@ -96,6 +96,14 @@ _REPAIR_HINTS: dict[str, str] = {
         " rule_decision 原样不动，只把 check 换成 NoAdjudicationCheck()。"
         "不要为了凑格式编一个技能出来，也不要去掉 rule_decision。"
     ),
+    "RULE_CHECK_SKILL_MISMATCH": (
+        "所选 rule_decision 的分支规定了要掷哪一项能力，这一版报的候选技能不是它。"
+        "把 check.candidates 换成该候选的 check_skill_id（它就在 "
+        "keeper_capabilities.rule_candidates[].options[] 上），并把 method_summary 与 "
+        "player_safe_reason 一起改写成描述这项能力的说法，不要留着上一版按别的技能"
+        "写的文案。保留 summary、method、target 与 rule_decision 原样不动，也不要"
+        "去掉 rule_decision——规则确实适用，去掉它这一步会停下来问玩家。"
+    ),
     "INVENTORY_TARGET_NOT_PORTABLE": (
         "holder_actor_id 只接受 player_view.scene.loose_items、player_view.inventory，"
         "或同一 effects 序列先用 ensure_runtime_entity(entity_kind=object) 创建的物品。"

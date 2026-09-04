@@ -2796,3 +2796,59 @@ async def test_an_unchanged_repair_exhausts_the_budget_instead_of_committing() -
     assert result.run.status == "needs_clarification"
     assert result.run.steps[0].safe_failure_code == "REPAIR_BUDGET_EXHAUSTED"
     assert len(engine_store.inspect_domain_events(original.room_id)) == 0
+
+
+class WrongSkillAdjudicator(MissingCheckAdjudicator):
+    """先报一个规则没规定的技能，被拒之后改成声明的那个（#483）。
+
+    `question_neighbors/fast-talk` 的 CheckStep 上写着 `skill_id="fast-talk"`。
+    """
+
+    async def adjudicate(self, context):
+        proposal = await super().adjudicate(context)
+        skill = NEIGHBOUR_SKILL if context.previous_rejection is not None else SKILL
+        return proposal.model_copy(
+            update={
+                "check": RequiredAdjudicationCheck(
+                    candidates=(
+                        SkillCheckCandidate(
+                            candidate_id=skill,
+                            skill_id=skill,
+                            difficulty="regular",
+                            method_summary="搭话套近乎" if skill == NEIGHBOUR_SKILL else "留意神色",
+                            player_safe_reason="使用话术" if skill == NEIGHBOUR_SKILL else "使用侦查",
+                        ),
+                    )
+                )
+            },
+            deep=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_wrong_skill_is_repaired_to_the_rule_declared_one() -> None:
+    """#483 全链路：拒绝 → 带指引重试 → 语义保持放行 → 掷规则规定的那项能力。
+
+    少任何一环这一步都会停成 needs_clarification：引擎不拒就静默掷错技能；
+    `_REPAIR_HINTS` 没条目模型不知道该改什么；`_check_is_mechanical` 不放行整组候选
+    重写就会判 CHECK_CHANGED。
+    """
+
+    adjudicator = WrongSkillAdjudicator()
+    _, service = issue462_service(adjudicator)
+    original = player_input("issue483-skill-parent", "跟邻居打听消息")
+
+    result = await service.start_or_resume(original, plan=plan(1))
+
+    assert len(adjudicator.contexts) == 2
+    rejection = adjudicator.contexts[1].previous_rejection
+    assert rejection is not None
+    assert rejection.startswith("RULE_CHECK_SKILL_MISMATCH: ")
+    assert _REPAIR_HINTS["RULE_CHECK_SKILL_MISMATCH"] in rejection
+
+    # 停在检定上等玩家，掷的是规则规定的那项能力。
+    assert result.run.status == "waiting_for_player"
+    assert result.latest_execution is not None
+    pending = result.latest_execution.pending_decision
+    assert pending is not None
+    assert pending.options[0].skill_id == NEIGHBOUR_SKILL

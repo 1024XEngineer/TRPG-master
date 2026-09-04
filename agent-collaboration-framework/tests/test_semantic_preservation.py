@@ -866,3 +866,63 @@ def test_row_e_an_unchanged_reproposal_is_semantically_preserved() -> None:
 
     assert result.status == "preserved"
     assert result.reason_code == "MECHANICAL_REPAIR"
+
+
+def _luck_check() -> RequiredAdjudicationCheck:
+    """按另一项能力重写的整组候选——文案也跟着换，这才是真实的修复形状。"""
+
+    return RequiredAdjudicationCheck(
+        candidates=(
+            SkillCheckCandidate(
+                candidate_id="luck",
+                skill_id="luck",
+                difficulty="regular",
+                method_summary="全凭运气",
+                player_safe_reason="使用幸运",
+            ),
+        )
+    )
+
+
+def test_rewriting_the_candidate_to_the_declared_skill_is_mechanical() -> None:
+    """#483：引擎说该掷规则指定的能力，那么整组候选本来就得重写。
+
+    换掉 `skill_id` 之后 `method_summary` 与 `player_safe_reason` 也得跟着换，
+    否则菜单上会出现「使用话术」配着幸运的目标值。这一层只确认玩家原本要做的事没被
+    换掉；掷什么由规则说了算，改成什么由引擎重新整体校验。
+    """
+
+    result = _compare(
+        _greeting(rule=_NEIGHBOURS, check=_fast_talk_check()),
+        _greeting(rule=_NEIGHBOURS, check=_luck_check()),
+        "RULE_CHECK_SKILL_MISMATCH",
+    )
+
+    assert result.status == "preserved"
+    assert result.reason_code == "MECHANICAL_REPAIR"
+
+
+def test_the_candidate_may_not_be_rewritten_under_an_unrelated_rejection() -> None:
+    """目标不存在跟掷哪项能力无关，这时换技能是模型在夹带。"""
+
+    result = _compare(
+        _greeting(rule=_NEIGHBOURS, check=_fast_talk_check()),
+        _greeting(rule=_NEIGHBOURS, check=_luck_check()),
+        "TARGET_UNAVAILABLE",
+    )
+
+    assert result.status == "requires_clarification"
+    assert result.reason_code == "CHECK_CHANGED"
+
+
+def test_dropping_the_rule_instead_of_fixing_the_skill_asks_the_player() -> None:
+    """改技能是可自动接受的修复，丢规则不是——沿用 #462 的策略，不扩展。"""
+
+    result = _compare(
+        _greeting(rule=_NEIGHBOURS, check=_fast_talk_check()),
+        _greeting(rule=None, check=_luck_check()),
+        "RULE_CHECK_SKILL_MISMATCH",
+    )
+
+    assert result.status == "requires_clarification"
+    assert result.reason_code == "RULE_DECISION_CHANGED"

@@ -86,6 +86,7 @@ from collaboration_framework.contracts.validation import (
     Repairability,
     ValidationResult,
 )
+from collaboration_framework.registry import predicates as predicate_registry
 
 if TYPE_CHECKING:  # annotations only — this package must not import engine.
     from collaboration_framework.engine.models import (
@@ -502,6 +503,9 @@ def _validate_enter_location(
 
 def _apply_enter_location(effect: EnterLocationEffect, ctx: ApplyContext) -> ApplyResult:
     state = ctx.state
+    # 队伍出发前站在哪，决定了谁算「同场景的随行者」（#516）。必须在写 scene_id
+    # 之前取，之后这个事实就没有第二个地方还留着了。
+    origin_location_id = state.scene_id
     resolution = ctx.services.resolve_location_target(
         ctx.runtime.module_content,
         state,
@@ -538,6 +542,12 @@ def _apply_enter_location(effect: EnterLocationEffect, ctx: ApplyContext) -> App
             },
             deep=True,
         )
+        state, followed = _move_accompanying(
+            ctx,
+            state,
+            origin_location_id=origin_location_id,
+            destination_id=effect.location_id,
+        )
         return ApplyResult(
             state=state,
             event_type="travel.resolved",
@@ -545,6 +555,7 @@ def _apply_enter_location(effect: EnterLocationEffect, ctx: ApplyContext) -> App
                 "destination_id": travel.destination_id,
                 "path": list(travel.path),
             },
+            extra_events=followed,
         )
     if resolution.status == "known_blocked":
         assert resolution.boundary is not None
@@ -577,6 +588,14 @@ def _apply_enter_location(effect: EnterLocationEffect, ctx: ApplyContext) -> App
             },
             deep=True,
         )
+        # 门禁拦下的是整支队伍，不是队伍里的某一个：随行实体跟到队伍停下的那一站，
+        # 停在原地（`current_location_id == origin`）时一步都不动。
+        state, followed = _move_accompanying(
+            ctx,
+            state,
+            origin_location_id=origin_location_id,
+            destination_id=travel.current_location_id,
+        )
         return ApplyResult(
             state=state,
             event_type="travel.interrupted",
@@ -586,6 +605,7 @@ def _apply_enter_location(effect: EnterLocationEffect, ctx: ApplyContext) -> App
                 "path": list(travel.path),
                 "reached_boundary": travel.reached_boundary.to_json_dict(),
             },
+            extra_events=followed,
         )
     # Reachability is a live read of the location graph, so unlike every other
     # id check it cannot be settled by the vocabulary pass — this is the one
@@ -775,6 +795,131 @@ def _mutate_generic_entity(
         target = entity_states.setdefault(entity_id, {})
     mutate(target)
     return {"runtime_entities": runtime_entities, "entities": entity_states}
+
+
+# --------------------------------------------------------------------------- #
+# accompanying (#516)
+# --------------------------------------------------------------------------- #
+# 引擎认识的「随行」标记：实体状态里这个键为 True，它就跟着队伍一起换场景。
+#
+# 在这之前「随行」是一个引擎不认识的模组私有概念——《幸福蛙蛙村》写
+# `accompanying_party`、《常暗之厢》写 `accompanying`，两个键都零消费者。于是
+# 随行只能靠规则在每一条可能发生移动的规则里手工重复 `move_entity` 维持，而玩家
+# 的移动措辞是开集，模组不可能穷举：下一次不命中规则的移动就把 NPC 静默留在了
+# 上一个场景，叙事却还在描写他就在身边（#516）。
+#
+# 这个键是那个概念在引擎里的落点。模组声明一次，之后每一次场景移动都由
+# `enter_location` 负责带上，因为 `enter_location` 是全仓唯一写 `scene_id` 的
+# 地方——随行因此不可能漏在某一条移动路径上。
+#
+# 引擎只读这个键，从不写它：开不开随行是一次判断，不是一次结算。地点移动只要
+# 路线可达就成立，随行不是——NPC 可能不愿意，詹姆斯会挣扎，乘务员得先被背起来。
+# 「玩家是不是想让他跟」和「他愿不愿意跟」都由主持人判断，需要权威确认时走规则
+# （《常暗之厢》的 `carry_attendant_to_car_3` 就是一次 STR 检定门禁）。引擎接手
+# 的是判断之后的事：标记既然为真，队伍走到哪他就跟到哪，一条移动路径都不漏。
+ACCOMPANYING_STATE_KEY = "accompanying"
+
+
+def _entity_location_id(
+    authored: dict[str, object],
+    state: GameState,
+    entity_id: str,
+) -> str | None:
+    """实体此刻在哪：移动过就以运行态为准，没移动过回落到模组声明的位置。
+
+    这是 `projection_v3._visible_entities` 判断「谁在这个场景里」用的同一套优先级；
+    随行必须和它一致，否则会出现「投影里看得见、随行判定却认为不在场」的分裂。
+    """
+
+    placed = predicate_registry.entity_state(state, entity_id).get("location_id")
+    if isinstance(placed, str):
+        return placed
+    return getattr(authored.get(entity_id), "located_in", None)
+
+
+def accompanying_entity_ids(
+    runtime: EngineRuntimeSnapshot,
+    state: GameState,
+    *,
+    origin_location_id: str,
+) -> tuple[str, ...]:
+    """跟着队伍离开 `origin_location_id` 的实体。
+
+    只带走**此刻和队伍同场景**的随行实体：随行是一个位置关系，不是一张传送许可。
+    被留在别处的 NPC 即使还挂着标记，也不会因为队伍在另一头走动就凭空出现。
+
+    物品不在此列。物品的权威位置是 `ItemCustody` 而不是 `location_id`：背包里的
+    已经随人走，地上的不会自己起身，再按场景搬一次只会让同一件东西同时出现在
+    两个地方（`_visible_entities` 对 Canon 物品的处理是同一个理由）。
+    """
+
+    authored = {entity.id: entity for entity in runtime.module_content.entities}
+    followers: list[str] = []
+    # 结果按 id 排序返回，所以这里用集合遍历：顺序无关，也不必担心重复。
+    for entity_id in {*authored, *state.runtime_entities}:
+        if state.item_instances.get(entity_id) is not None:
+            continue
+        values = predicate_registry.entity_state(state, entity_id)
+        if values.get(ACCOMPANYING_STATE_KEY) is not True:
+            continue
+        if values.get("consumed") is True:
+            continue
+        if _entity_location_id(authored, state, entity_id) != origin_location_id:
+            continue
+        followers.append(entity_id)
+    return tuple(sorted(followers))
+
+
+def _move_accompanying(
+    ctx: ApplyContext,
+    state: GameState,
+    *,
+    origin_location_id: str,
+    destination_id: str,
+) -> tuple[GameState, tuple[ExtraEvent, ...]]:
+    """把随行实体一并挪到队伍**实际到达**的地点。
+
+    传实际到达点而不是效果里写的目的地：路线被门禁截断时队伍停在
+    `TravelInterrupted.current_location_id`，随行实体必须停在同一处，否则一次被
+    拒绝的移动反而把 NPC 单独送到了门的另一边。
+
+    事件跟着 `travel.*` 走同一次提交、序号顺延，所以没有「队伍已经到了、随行的人
+    还在路上」这种中间态可以被读到。
+    """
+
+    if destination_id == origin_location_id:
+        return state, ()
+
+    def _place(target: dict) -> None:
+        target["location_id"] = destination_id
+
+    events: list[ExtraEvent] = []
+    for entity_id in accompanying_entity_ids(
+        ctx.runtime,
+        state,
+        origin_location_id=origin_location_id,
+    ):
+        state = state.model_copy(
+            update=_mutate_generic_entity(state, entity_id, _place),
+            deep=True,
+        )
+        events.append(
+            ExtraEvent(
+                event_type="entity.moved",
+                payload={
+                    "entity_id": entity_id,
+                    "location_id": destination_id,
+                    # 通用实体没有保管人：`move_entity` 只让 ItemInstance 进背包。
+                    "holder_actor_id": None,
+                    # 与规则手写的 move_entity 区分开：没有任何人提出这一步，是
+                    # 随行标记在队伍移动时自己生效的。
+                    "reason": "accompanying",
+                },
+                # 同场景的人换了地方是公开事实，和队伍自己的 travel 事件同级。
+                visibility="public",
+            )
+        )
+    return state, tuple(events)
 
 
 # --------------------------------------------------------------------------- #
@@ -1313,6 +1458,7 @@ def absorb_writes(effect: ActionEffect, vocab: ValidationVocabulary) -> None:
 
 
 __all__ = [
+    "ACCOMPANYING_STATE_KEY",
     "EFFECTS",
     "ApplyContext",
     "ApplyResult",
@@ -1323,6 +1469,7 @@ __all__ = [
     "FieldRef",
     "ValidationVocabulary",
     "absorb_writes",
+    "accompanying_entity_ids",
     "apply",
     "classification_context",
     "classify",

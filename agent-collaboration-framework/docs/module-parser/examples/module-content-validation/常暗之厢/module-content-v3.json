@@ -4474,132 +4474,6 @@
         "steps": [
           {
             "effect": {
-              "entity_id": "attendant",
-              "location_id": "lead_car",
-              "type": "move_entity"
-            },
-            "id": "effect_0",
-            "kind": "effect",
-            "next_step_id": "finish"
-          },
-          {
-            "id": "finish",
-            "kind": "finish"
-          }
-        ]
-      },
-      "id": "sync_attendant_to_lead_car",
-      "priority": 100,
-      "trigger": {
-        "entry_branch_id": "default",
-        "event_type": "travel.resolved",
-        "kind": "event",
-        "when": {
-          "items": [
-            {
-              "args": {
-                "id": "lead_car"
-              },
-              "op": "predicate",
-              "predicate": "party_location_is"
-            },
-            {
-              "args": {
-                "entity_id": "attendant",
-                "key": "accompanying",
-                "value": true
-              },
-              "op": "predicate",
-              "predicate": "entity_state_is"
-            },
-            {
-              "args": {
-                "entity_id": "attendant",
-                "key": "present",
-                "value": true
-              },
-              "op": "predicate",
-              "predicate": "entity_state_is"
-            }
-          ],
-          "op": "all"
-        }
-      }
-    },
-    {
-      "execution": {
-        "branches": [
-          {
-            "entry_step_id": "effect_0",
-            "id": "default"
-          }
-        ],
-        "steps": [
-          {
-            "effect": {
-              "entity_id": "attendant",
-              "location_id": "driver_cab",
-              "type": "move_entity"
-            },
-            "id": "effect_0",
-            "kind": "effect",
-            "next_step_id": "finish"
-          },
-          {
-            "id": "finish",
-            "kind": "finish"
-          }
-        ]
-      },
-      "id": "sync_attendant_to_driver_cab",
-      "priority": 100,
-      "trigger": {
-        "entry_branch_id": "default",
-        "event_type": "travel.resolved",
-        "kind": "event",
-        "when": {
-          "items": [
-            {
-              "args": {
-                "id": "driver_cab"
-              },
-              "op": "predicate",
-              "predicate": "party_location_is"
-            },
-            {
-              "args": {
-                "entity_id": "attendant",
-                "key": "accompanying",
-                "value": true
-              },
-              "op": "predicate",
-              "predicate": "entity_state_is"
-            },
-            {
-              "args": {
-                "entity_id": "attendant",
-                "key": "present",
-                "value": true
-              },
-              "op": "predicate",
-              "predicate": "entity_state_is"
-            }
-          ],
-          "op": "all"
-        }
-      }
-    },
-    {
-      "execution": {
-        "branches": [
-          {
-            "entry_step_id": "effect_0",
-            "id": "default"
-          }
-        ],
-        "steps": [
-          {
-            "effect": {
               "entity_id": "key_bag",
               "location_id": "lead_car",
               "type": "move_entity"
@@ -5073,7 +4947,7 @@
       "point_id": "hour_00"
     }
   },
-  "version": "3.0.0",
+  "version": "3.0.1",
   "world_profile": {
     "era": "2013 年",
     "forbidden_content": [

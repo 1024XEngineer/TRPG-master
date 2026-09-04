@@ -39,6 +39,11 @@ CHARACTER_STATE_VALUES: dict[str, tuple[JsonValue, ...]] = {
     "posture": ("standing", "prone"),
     "restraint": ("free", "restrained"),
     "injury": ("none", "minor", "major", "critical"),
+    # 随行必须可见，否则主持人无法判断「他还该不该跟着」：谁在队伍里走是一件
+    # 玩家当场就看得见的事，模型却读不到，只能靠猜或者干脆不提（#516）。进了
+    # 这份白名单，它同时成为叙事可以引用的权威结果——「詹姆斯跟着你走出接待
+    # 大厅」这句话背后有一条已提交的状态，而不是模型自己编的。
+    "accompanying": (True, False),
 }
 OBJECT_STATE_VALUES: dict[str, tuple[JsonValue, ...]] = {
     "open": (True, False),

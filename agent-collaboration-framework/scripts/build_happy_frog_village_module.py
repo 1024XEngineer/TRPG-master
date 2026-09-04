@@ -637,7 +637,9 @@ def build_entities() -> list[dict[str, Any]]:
             state={
                 "released": False,
                 "under_forced_custody": False,
-                "accompanying_party": False,
+                # 引擎保留键：为 True 时詹姆斯跟着队伍换场景，模组不必在每一条
+                # 移动规则里重复 move_entity（#516）。
+                "accompanying": False,
                 "alive": True,
             },
         ),
@@ -858,7 +860,7 @@ def build_rules() -> list[dict[str, Any]]:
             hints=["扛起詹姆斯", "拖着詹姆斯", "强行携带詹姆斯"],
             effects=[
                 set_state("james", "under_forced_custody", True),
-                set_state("james", "accompanying_party", True),
+                set_state("james", "accompanying", True),
             ],
         ),
         effect_rule(
@@ -869,7 +871,7 @@ def build_rules() -> list[dict[str, Any]]:
             target_id="james",
             option_id="stop-carrying-james",
             hints=["放下詹姆斯", "留下詹姆斯", "放弃携带詹姆斯"],
-            effects=[set_state("james", "accompanying_party", False)],
+            effects=[set_state("james", "accompanying", False)],
         ),
         effect_rule(
             "release_james_from_forced_custody",
@@ -881,7 +883,7 @@ def build_rules() -> list[dict[str, Any]]:
             hints=["释放詹姆斯", "给詹姆斯松绑", "解除对詹姆斯的物理控制"],
             effects=[
                 set_state("james", "under_forced_custody", False),
-                set_state("james", "accompanying_party", False),
+                set_state("james", "accompanying", False),
             ],
         ),
         effect_rule(
@@ -911,14 +913,18 @@ def build_rules() -> list[dict[str, Any]]:
             question_kind="intent_relation",
             effects=[
                 set_state("james", "under_forced_custody", True),
-                set_state("james", "accompanying_party", True),
-                {"type": "enter_location", "location_id": "outside"},
+                set_state("james", "accompanying", True),
+                # 先把人拖出去再走场景：这条规则也能从 resort_boundary 触发，那时
+                # 詹姆斯还在接待大厅，不算「与队伍同场景的随行者」，引擎的随行不会
+                # 也不该替这条规则把他从另一个房间捞过来。人已经在门外之后，随后的
+                # enter_location 就不再重复搬他一次（#516）。
                 {
                     "type": "move_entity",
                     "entity_id": "james",
                     "location_id": "outside",
                     "holder_actor_id": None,
                 },
+                {"type": "enter_location", "location_id": "outside"},
                 set_state("james", "alive", False),
                 reveal("james_forced_removal_tragedy"),
                 {"type": "mark_core_resolved"},
@@ -1147,7 +1153,7 @@ def build_rules() -> list[dict[str, Any]]:
                 set_state("resort_state", "victims_released", True),
                 set_state("james", "released", True),
                 set_state("james", "under_forced_custody", False),
-                set_state("james", "accompanying_party", False),
+                set_state("james", "accompanying", False),
                 reveal("messenger_convinced"),
                 reveal("victims_released"),
                 reveal("james_returns_home"),
@@ -1170,7 +1176,7 @@ def build_rules() -> list[dict[str, Any]]:
                 set_state("resort_state", "victims_released", True),
                 set_state("james", "released", True),
                 set_state("james", "under_forced_custody", False),
-                set_state("james", "accompanying_party", False),
+                set_state("james", "accompanying", False),
                 reveal("crystal_destroyed"),
                 reveal("victims_released"),
                 reveal("james_returns_home"),
@@ -1414,7 +1420,7 @@ def build_module() -> dict[str, Any]:
     return {
         "content_schema_version": 3,
         "module_id": "happy-frog-village",
-        "version": "3.0.8",
+        "version": "3.0.9",
         "world_ref": "coc-7e",
         "background": (
             "默认采用现代城郊。莱恩夫妇委托调查员寻找失踪的儿子詹姆斯，线索指向"

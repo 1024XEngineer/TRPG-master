@@ -11,12 +11,18 @@ from pydantic import BaseModel, Field, ValidationError, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.adapters import (
+    DeepSeekChatCompletionsJsonClient,
+    OpenAIResponsesJsonClient,
+    QwenChatCompletionsJsonClient,
+)
 from app.adapters.openai_models import StructuredJsonClient
 from app.adapters.structured_http import StructuredOutputError
 from app.core.config import (
     Settings,
     get_settings,
     model_client_retry_policy,
+    secret_value,
 )
 from app.dto.ws import DialogueNpcPayload, DialoguePlayerPayload
 from app.models.content import ModuleAsset
@@ -178,6 +184,88 @@ class NpcDialogueService:
 
     def __init__(self, *, lease_seconds: int = 180) -> None:
         self.lease_seconds = max(180, lease_seconds)
+
+    async def generate_replies(
+        self,
+        *,
+        view: PlayerView,
+        player_id: str,
+        actor_id: str,
+        interlocutor_id: str,
+        utterance: str,
+        recent_dialogue: tuple[RecentDialogueItem, ...] = (),
+    ) -> NpcDialogueOutput:
+        """构造严格的玩家安全上下文并生成 NPC 回复；不暴露 Engine 或 Keeper 数据。"""
+
+        actor = view.self_actor
+        responders = tuple(
+            NpcPublicSnapshot(
+                id=npc.id,
+                name=npc.name,
+                aliases=tuple(getattr(npc, "aliases", ()) or ()),
+                description=npc.description or "",
+                observable_state=tuple(
+                    {"key": state.key, "value": state.value} for state in npc.observable_state
+                ),
+            )
+            for npc in visible_dialogue_npcs(view)
+        )
+        context = NpcDialogueContext(
+            room_id=view.room_id,
+            player_id=player_id,
+            actor_id=actor_id,
+            actor_name=actor.name,
+            scene_id=view.scene.id,
+            scene_name=view.scene.name,
+            scene_description=view.scene.description,
+            interlocutor_id=interlocutor_id,
+            allowed_responders=responders,
+            recent_dialogue=recent_dialogue,
+            utterance=utterance,
+        )
+        return await self._model().generate(context)
+
+    def _model(self) -> FakeNpcDialogueModel | PromptNpcDialogueModel:
+        """按统一 Host 配置选择 Fake 或真实结构化模型。"""
+
+        settings = get_settings()
+        if settings.host_model_provider == "fake":
+            return FakeNpcDialogueModel()
+        if settings.host_model_provider == "deepseek":
+            api_key, base_url, model, timeout = (
+                settings.deepseek_api_key,
+                settings.deepseek_base_url,
+                settings.deepseek_model,
+                settings.deepseek_timeout_seconds,
+            )
+            client_type = DeepSeekChatCompletionsJsonClient
+        elif settings.host_model_provider == "qwen":
+            api_key, base_url, model, timeout = (
+                settings.qwen_api_key,
+                settings.qwen_base_url,
+                settings.qwen_model,
+                settings.qwen_timeout_seconds,
+            )
+            client_type = QwenChatCompletionsJsonClient
+        else:
+            api_key, base_url, model, timeout = (
+                settings.openai_api_key,
+                settings.openai_base_url,
+                settings.openai_model,
+                settings.openai_timeout_seconds,
+            )
+            client_type = OpenAIResponsesJsonClient
+        if api_key is None:
+            raise ValueError("NPC Host 模型缺少 API key")
+        return PromptNpcDialogueModel(
+            client_type(
+                api_key=secret_value(api_key),
+                base_url=base_url,
+                model=model,
+                timeout_seconds=timeout,
+                retry_policy=model_client_retry_policy(settings),
+            )
+        )
 
     async def portrait_url(
         self,

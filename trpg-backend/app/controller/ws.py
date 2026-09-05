@@ -926,7 +926,7 @@ async def _run_queued_host_action(
     item,
     view: PlayerView,
 ) -> None:
-    """队列项统一走 Host 主链；NPC 只是在输入里多了一个结构化说话对象。"""
+    """执行 NPC 直接对话；普通对话不得经过 Keeper Narrator 或 ActionPlan。"""
 
     claimed = await host_action_queue_service.claim_npc(
         db,
@@ -938,7 +938,7 @@ async def _run_queued_host_action(
     item = claimed
     try:
         require_dialogue_npc(view, item.recipient_entity_id or "")
-        audience_player_ids, _ = await _npc_dialogue_audience(
+        audience_player_ids, audience_actor_ids = await _npc_dialogue_audience(
             db,
             room_id=item.room_id,
             scene_id=view.scene.id,
@@ -950,31 +950,59 @@ async def _run_queued_host_action(
             return
         if await db.get(Player, item.player_id) is None:
             raise ValueError("玩家已不在房间中")
-        interlocutor_id = item.recipient_entity_id or None
-        interlocutor_name = None
-        if interlocutor_id is not None:
-            interlocutor_name = require_dialogue_npc(view, interlocutor_id).name
-        result = await action_plan_turn_application.start(
-            room_id=item.room_id,
-            player_id=item.player_id,
-            client_action_id=item.client_action_id,
-            utterance=item.utterance,
-            interlocutor_id=interlocutor_id,
-            interlocutor_name=interlocutor_name,
-            on_progress=None,
-            on_phase=None,
-            on_input_accepted=partial(_broadcast_action_utterance, db),
+        player = await room_service.get_player(db, item.player_id)
+        player_event = await npc_dialogue_service.persist_player_event(
+            db,
+            item=item,
+            view=view,
+            audience_player_ids=audience_player_ids,
+            nickname=player.nickname if player is not None else "玩家",
         )
-        await host_action_queue_service.mark_started(db, item)
+        await _broadcast_dialogue_event(db, player_event, audience_player_ids)
+        output = await npc_dialogue_service.generate_replies(
+            view=view,
+            player_id=item.player_id,
+            actor_id=item.actor_id,
+            interlocutor_id=item.recipient_entity_id or "",
+            utterance=item.utterance,
+        )
+        # 服务端再次确认 speaker，避免模型把场景外 NPC 注入公开事件。
+        allowed_ids = {npc.id for npc in visible_dialogue_npcs(view)}
+        if output.npc_messages[0].speaker_id != item.recipient_entity_id or any(
+            message.speaker_id not in allowed_ids for message in output.npc_messages
+        ):
+            raise ValueError("NPC 模型返回了无效说话者")
+        await npc_dialogue_service.persist_replies(
+            db,
+            item=item,
+            view=view,
+            player_event=player_event,
+            audience_player_ids=audience_player_ids,
+            audience_actor_ids=audience_actor_ids,
+            output=output,
+        )
+        # 保持 SDK 对 submitPlannedAction 的完成通知兼容；真正可见的回复仍只来自 dialogue.npc。
         connections = manager.player_connections(item.room_id, item.player_id)
         websocket = connections[0] if connections else None
-        await _send_action_plan_result(
-            db,
+        await _send_to_player(
             websocket,
-            item.room_id,
-            item.player_id,
-            result,
+            {
+                "protocol_version": "1",
+                "message_type": "turn.completed",
+                "correlation_id": item.client_action_id,
+                "payload": {
+                    "room_id": item.room_id,
+                    "player_id": item.player_id,
+                    "actor_id": item.actor_id,
+                    "narration": {"kind": "narration", "text": "NPC 对话已完成"},
+                    "player_view": view.to_json_dict(),
+                },
+            },
         )
+        for event_id in item.result_event_ids:
+            event = await db.get(Event, event_id)
+            if event is not None:
+                await _broadcast_dialogue_event(db, event, audience_player_ids)
     except ValueError as exc:
         await host_action_queue_service.mark_npc_failed(db, item)
         for target_socket in manager.player_connections(item.room_id, item.player_id):

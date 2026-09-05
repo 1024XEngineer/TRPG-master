@@ -1261,6 +1261,7 @@ class ActionPlanTurnApplication:
         client_action_id: str,
         utterance: str,
         adjudication: ActionAdjudication,
+        step_request_id: str | None = None,
         on_progress: Callable[[object], Awaitable[None]] | None = None,
         on_phase: TurnPhaseObserver | None = None,
     ) -> ActionPlanTurnResult:
@@ -1274,14 +1275,15 @@ class ActionPlanTurnApplication:
                 "规则请求不属于当前角色",
                 retryable=False,
             )
+        internal_action_id = step_request_id or client_action_id
         player_input = PlayerInput(
             room_id=room_id,
             player_id=player_id,
             actor_id=actor_id,
-            client_action_id=client_action_id,
+            client_action_id=internal_action_id,
             utterance=utterance,
         )
-        existing = await self._orchestrator.get_run(room_id, client_action_id)
+        existing = await self._orchestrator.get_run(room_id, internal_action_id)
         if existing is not None:
             advanced = await self._orchestrator.start_or_resume(
                 player_input,
@@ -3427,6 +3429,7 @@ def build_rule_once_adjudication(
     target_kind: str | None = None,
     target_id: str | None = None,
     summary: str | None = None,
+    request_id: str | None = None,
 ) -> ActionAdjudication:
     """Build one rule-owned adjudication from explicit opaque references."""
 
@@ -3505,7 +3508,7 @@ def build_rule_once_adjudication(
         )
     description = (summary or player_input.utterance).strip()[:500]
     return ActionAdjudication(
-        request_id=player_input.client_action_id,
+        request_id=request_id or player_input.client_action_id,
         source_revision=player_view.revision,
         actor_id=player_input.actor_id,
         summary=description,

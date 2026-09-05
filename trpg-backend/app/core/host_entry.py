@@ -19,7 +19,11 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError,
 logger = structlog.get_logger(__name__)
 
 HostEntryRoute = Literal[
-    "direct_response", "rule_once", "delegate_to_legacy", "needs_clarification"
+    "direct_response",
+    "rule_once",
+    "composite_rule",
+    "delegate_to_legacy",
+    "needs_clarification",
 ]
 HOST_ENTRY_FALLBACK = "我暂时没能准确接住这句话，请重新说明你想做什么。"
 HOST_ENTRY_MAX_TEXT = 1000
@@ -64,6 +68,20 @@ class HostEntryDecision(BaseModel):
                 self.summary = self.summary.strip()
                 if not self.summary:
                     self.summary = None
+        elif self.route == "composite_rule":
+            if self.text not in (None, ""):
+                raise ValueError("composite_rule 不得包含 direct_response text")
+            if any(
+                value is not None
+                for value in (
+                    self.rule_id,
+                    self.option_id,
+                    self.target_kind,
+                    self.target_id,
+                    self.summary,
+                )
+            ):
+                raise ValueError("composite_rule 不得包含预先冻结的规则字段")
         elif self.text not in (None, ""):
             raise ValueError("delegate_to_legacy 不得包含 text")
         if self.route == "delegate_to_legacy" and any(
@@ -107,6 +125,8 @@ class HostPublicContext(BaseModel):
     current_keeper_text: str = Field(min_length=1, max_length=2000)
     clarification_question: str | None = Field(default=None, max_length=HOST_ENTRY_MAX_TEXT)
     player_answer: str | None = Field(default=None, max_length=2000)
+    completed_rule_feedback: tuple[str, ...] = Field(default=(), max_length=8)
+    loop_step_index: int = Field(default=0, ge=0, le=8)
 
     def to_model_payload(self) -> dict[str, object]:
         """Return the exact allow-listed payload sent to a model."""
@@ -193,6 +213,8 @@ class HostPublicContextProjector:
         public_history: Sequence[HostPublicHistoryEntry | Mapping[str, object]] = (),
         clarification_question: str | None = None,
         player_answer: str | None = None,
+        completed_rule_feedback: Sequence[str] = (),
+        loop_step_index: int = 0,
     ) -> HostPublicContext:
         scene = player_view.scene
         scene_parts = [
@@ -279,6 +301,12 @@ class HostPublicContextProjector:
             player_answer=(
                 _strip_internal_tokens(player_answer).strip() or None if player_answer else None
             ),
+            completed_rule_feedback=tuple(
+                _strip_internal_tokens(value).strip()
+                for value in completed_rule_feedback
+                if isinstance(value, str) and _strip_internal_tokens(value).strip()
+            )[-8:],
+            loop_step_index=max(0, min(loop_step_index, 8)),
         )
 
 
@@ -300,6 +328,8 @@ class DeterministicHostEntryModel:
             return {"route": "direct_response", "text": "明白了，就按这个来。"}
         if _looks_like_important_ambiguity(text):
             return {"route": "needs_clarification", "text": "你具体指的是哪一个？"}
+        if _looks_like_composite_intent(text):
+            return {"route": "composite_rule", "text": None}
         if _looks_like_ordinary_interaction(text):
             return {"route": "direct_response", "text": "对方礼貌地点了点头。"}
         return {"route": "delegate_to_legacy", "text": None}
@@ -328,6 +358,8 @@ class HostDirectResponseSafetyPolicy:
                 raise ValueError("rule_once summary contains structured content")
             if self._forbidden.search(summary):
                 raise ValueError("rule_once summary contains an authoritative claim")
+            return decision
+        if decision.route == "composite_rule":
             return decision
         text = decision.text or ""
         if not text.strip() or len(text) > HOST_ENTRY_MAX_TEXT:
@@ -387,6 +419,8 @@ class HostEntryRouter:
                     provenance = "model_clarify"
                 elif validated.route == "rule_once":
                     provenance = "rule_once"
+                elif validated.route == "composite_rule":
+                    provenance = "composite_rule"
                 else:
                     provenance = "legacy_delegate"
                 logger.info("host_entry_decision", route=validated.route, provenance=provenance)
@@ -425,6 +459,13 @@ _LEGACY_INTENT_TOKENS = (
     "怎么",
     "是否",
 )
+
+
+def _looks_like_composite_intent(text: str) -> bool:
+    """Conservative offline heuristic for compound authoritative actions."""
+
+    pattern = r"(?:并且|然后|再|同时|之后|拿出|取出).*(?:并|然后|再|拿|取|打开|搜索)"
+    return bool(re.search(pattern, text))
 
 
 def _looks_like_legacy_intent(text: str) -> bool:

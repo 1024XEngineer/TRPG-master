@@ -317,6 +317,11 @@ def committed_results_from_events(
                         event_ref=event.event_id,
                     )
                 )
+        elif event.type in {"actor.condition_applied", "actor.condition_removed"}:
+            condition_id, actor_id = payload.get("condition_id"), payload.get("actor_id")
+            if isinstance(condition_id, str) and isinstance(actor_id, str):
+                value = {"status": "active", **{key: payload[key] for key in ("bout_type", "duration_hours") if key in payload}} if event.type == "actor.condition_applied" else {"status": "removed"}
+                results.append(CommittedResult(kind="character_state", target_id=actor_id, state_key="condition:"+condition_id, state_value=value, event_ref=event.event_id))
         elif event.type == "entity.state_changed":
             target_id = payload.get("entity_id")
             key = payload.get("key")

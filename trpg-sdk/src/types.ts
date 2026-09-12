@@ -12,6 +12,7 @@
 
 import type {
   AdjudicationPendingPayload,
+  ActorConditionView,
   ErrorDetail,
   HostSpeechSettingsUpdatedPayload,
   MyRoomSummary as GeneratedMyRoomSummary,
@@ -306,6 +307,7 @@ export interface AgentSelfActor {
   skills: AgentActorValue[];
   resources: AgentActorResource[];
   conditions: string[];
+  condition_details?: ActorConditionView[];
   equipment: string[];
   background_summary: string;
   public_status_summary?: string;

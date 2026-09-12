@@ -1,5 +1,7 @@
 """Private, persisted CoC7 loss accounting. Public views expose resources only."""
 
+from __future__ import annotations
+
 from typing import Literal
 from pydantic import Field
 from .common import ContractModel
@@ -29,6 +31,38 @@ class SanityLedger(ContractModel):
     losses: tuple[SanityLoss, ...] = ()
     habituation: dict[str, int] = Field(default_factory=dict)
     development_phases: tuple[str, ...] = ()
+    safe_rests: tuple[str, ...] = ()
     coverage: Literal["new_room", "canonical_history", "legacy_gap"] = "new_room"
     coverage_start_sequence: int = Field(default=0, ge=0)
     history_gaps: tuple[str, ...] = ()
+    bouts: tuple[MadnessBout, ...] = ()
+
+
+class SanityPolicy(ContractModel):
+    # Summary mode is an authored Keeper choice. Auto only summarizes solo play.
+    bout_mode: Literal["auto", "summary", "rounds"] = "auto"
+
+
+class MadnessBout(ContractModel):
+    application_key: str
+    source_outcome_id: str
+    table_id: Literal["coc7.summary.v1"] = "coc7.summary.v1"
+    type_id: Literal[
+        "amnesia",
+        "robbed",
+        "battered",
+        "violence",
+        "ideology",
+        "significant_person",
+        "institutionalized",
+        "flee",
+        "phobia",
+        "mania",
+    ]
+    type_roll: int = Field(ge=1, le=10)
+    duration_roll: int = Field(ge=1, le=10)
+    duration_hours: int = Field(ge=1, le=10)
+    started_absolute_hour: int = Field(ge=0)
+
+
+SanityLedger.model_rebuild()

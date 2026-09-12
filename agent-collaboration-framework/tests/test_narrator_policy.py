@@ -788,6 +788,18 @@ class InventoryClaimDeclarationTests(unittest.IsolatedAsyncioTestCase):
         ).narrate(self._context(results=(result,)))
         self.assertEqual(len(output.claimed_state_changes), 1)
 
+    async def test_structured_condition_result_is_compared_without_losing_scope(self):
+        result = CommittedResult(kind="character_state", target_id="butler", state_key="condition:temporary_insanity",
+            state_value={"status": "active", "duration_hours": 8}, event_ref="event-1")
+        context = self._context(results=(result,))
+        output = await ActionPlanNarrator(_DeclaringNarrationModel("眼前的景象令人不安。",
+            state_changes=(("butler", "condition:temporary_insanity", {"duration_hours": 8, "status": "active"}),))).narrate(context)
+        self.assertEqual(len(output.claimed_state_changes), 1)
+        with self.assertRaises(ActionPlanNarrationValidationError) as raised:
+            await ActionPlanNarrator(_DeclaringNarrationModel("眼前的景象令人不安。",
+                state_changes=(("butler", "condition:temporary_insanity", {"duration_hours": 9, "status": "active"}),))).narrate(context)
+        self.assertEqual(raised.exception.reason, "state_claim_scope")
+
     async def test_under_declared_claim_carries_the_offending_sentence(self):
         """申报不足时优先修复正文而不是丢弃它：错误必须带上可剔除的那一句。"""
         text = "你在门厅站定，四下打量。你把传单收进外套口袋。远处传来钟声。"
@@ -872,8 +884,8 @@ class InventoryClaimDeclarationTests(unittest.IsolatedAsyncioTestCase):
                 (),
                 0,
             ),
-            "状态的 value 是数字": (
-                {"claimed_state_changes": [{"entity_id": "ezra", "key": "hp", "value": 3}]},
+            "状态缺少 value": (
+                {"claimed_state_changes": [{"entity_id": "ezra", "key": "hp"}]},
                 (),
                 0,
             ),

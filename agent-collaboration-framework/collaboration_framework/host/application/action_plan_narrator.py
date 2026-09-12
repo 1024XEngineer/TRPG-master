@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import json
 
 from collaboration_framework.contracts import ContractError
 from collaboration_framework.host.ports.action_plan import ActionPlanNarrationModelPort
@@ -123,16 +124,16 @@ class ActionPlanNarrator:
         if not set(output.claimed_inventory_ids).issubset(inventory_ids):
             raise ActionPlanNarrationValidationError("inventory_claim_scope")
         authoritative_states = {
-            (result.target_id, result.state_key, result.state_value)
+            (result.target_id, result.state_key, _state_value_key(result.state_value))
             for result in committed_results
             if result.state_key is not None
         } | {
-            (entity.id, state.key, state.value)
+            (entity.id, state.key, _state_value_key(state.value))
             for entity in context.player_view.scene.visible_entities
             for state in entity.observable_state
         }
         if not {
-            (claim.entity_id, claim.key, claim.value)
+            (claim.entity_id, claim.key, _state_value_key(claim.value))
             for claim in output.claimed_state_changes
         }.issubset(authoritative_states):
             raise ActionPlanNarrationValidationError("state_claim_scope")
@@ -355,3 +356,8 @@ def _term_sentence_spans(text: str, term: str) -> tuple[tuple[int, int], ...]:
             spans.append(span)
         start = folded_text.find(folded_term, start + 1)
     return tuple(spans)
+
+
+def _state_value_key(value):
+    """JsonValue may contain mappings/lists; compare canonical JSON, not hashes of dicts."""
+    return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False)

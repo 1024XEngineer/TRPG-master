@@ -24,6 +24,9 @@ from tests.test_projection_v3 import ACTOR, PLAYER, ROOM, game_state, module
 
 def sandbox_content(*, parameters=None, effects=None):
     content = module()
+    from collaboration_framework.contracts import TimePointSpec
+    points = tuple(point.model_copy(update={"order": i}) for i, point in enumerate(sorted((*content.time_policy.default_points, TimePointSpec(id="hour_12", hour_of_day=12, order=1)), key=lambda p: p.hour_of_day)))
+    content = content.model_copy(update={"time_policy": content.time_policy.model_copy(update={"default_points": points})})
     if parameters and ("habit_cap" in parameters or "sanity_source" in parameters):
         from collaboration_framework.contracts.sanity import SanitySource
         parameters = {**parameters, "sanity_source": "test.creature"}
@@ -139,3 +142,27 @@ async def settle(store, *, dice=(4,), roll=81, request_id="trigger"):
         store, dice=DiceRoller(SequenceDiceSource(dice))
     ).decide_post_roll(request)
     return result
+
+
+def with_world_actions(content, actions):
+    """Author explicit rule commands used by rest/treatment integration scenarios."""
+    rules = list(content.rules)
+    for name, (action_id, parameters) in actions.items():
+        rule = rules[0].to_json_dict()
+        rule["id"] = "command_" + name
+        rule["trigger"] = {"kind": "event", "event_type": "entity.state_changed", "entry_branch_id": "default", "when": {
+            "op": "predicate", "predicate": "entity_state_is", "args": {"entity_id": "cemetery_figure", "key": "test_command", "value": name}}}
+        rule["execution"] = {"branches": [{"id": "default", "entry_step_id": "invoke"}], "steps": [
+            {"id": "invoke", "kind": "invoke_ruleset_action", "action_id": action_id, "actor_binding": "actor", "parameters": parameters, "next_step_id": "finish"},
+            {"id": "finish", "kind": "finish"}]}
+        rules.append(RuleSpecV3.model_validate(rule))
+    return content.model_copy(update={"rules": tuple(rules)})
+
+
+async def invoke_world_action(store, name, *, tag=None, dice=()):
+    async with store.transaction(ROOM) as tx:
+        runtime = await tx.load_runtime()
+    request = trigger(runtime.revision, tag or name)
+    effect = ChangeEntityStateEffect(entity_id="cemetery_figure", key="test_command", value=name)
+    request = request.model_copy(update={"adjudication": request.adjudication.model_copy(update={"success_effects": (ChangeEntityStateEffect(entity_id="cemetery_figure", key="true_form_seen", value=False), effect)})})
+    return await AdjudicationEngineService(store, dice=DiceRoller(SequenceDiceSource(dice))).submit(request)

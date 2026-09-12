@@ -174,7 +174,8 @@ async def test_new_source_has_its_own_cap():
         }
     )
     store = make_store(content)
-    await settle(store, dice=(6,))
+    await settle(store, dice=(4,), request_id="source-a-1")
+    await settle(store, dice=(4,), request_id="source-a-2")
     async with store.transaction(ROOM) as tx:
         runtime = await tx.load_runtime()
     request = trigger(runtime.revision, "source-b")

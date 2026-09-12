@@ -15,14 +15,21 @@ the CoC7 adapter therefore registers only the already executable
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+from collaboration_framework.contracts import ModuleContentV3
+from .check_outcomes import OutcomeServices
+
+if TYPE_CHECKING:
+    from collaboration_framework.engine.models import GameState
 
 from .sanity_ledger import development_phase, acknowledge_history
 from .check_profiles import COC7_CHECK_PROFILES, CheckProfileRegistration
 from .check_outcomes import CheckOutcomeHandler, coc7_sanity_outcome
+from .insanity import insanity_int_outcome, safe_rest, end_bout
 
 
 class RulesetRegistryError(LookupError):
@@ -39,27 +46,33 @@ class RulesetActionError(ValueError):
 
 @dataclass(frozen=True)
 class RulesetActionContext:
-    state: Any
+    state: GameState
     actor_id: str
     actor_binding: str
     parameters: Mapping[str, Any]
     request_id: str
     operation_key: str
+    services: OutcomeServices | None = None
+    module_content: ModuleContentV3 | None = None
+    simulation: bool = False
 
 
 @dataclass(frozen=True)
 class RulesetActionResult:
-    state: Any
+    state: GameState
     event_type: str | None = None
     payload: dict[str, Any] = field(default_factory=dict)
 
 
-RulesetAction = Any
+RulesetAction = Callable[[RulesetActionContext], RulesetActionResult]
 
 
 COC7_CONDITION_IDS: frozenset[str] = frozenset(
     {
         "unconscious",
+        "temporary_insanity",
+        "indefinite_insanity",
+        "madness_bout",
         "unconscious_until_night",
         "arrested_during_prohibition",
         "drowning",
@@ -210,7 +223,7 @@ class RulesetAdapter:
     def check_outcome_handler_for(self, profile_id: str) -> CheckOutcomeHandler | None:
         return self.check_outcome_handlers.get(profile_id)
 
-    def world_action_for(self, action_id: str) -> Any | None:
+    def world_action_for(self, action_id: str) -> RulesetAction | None:
         return self.world_actions.get(action_id)
 
 
@@ -314,8 +327,17 @@ class RulesetAdapterRegistry:
 COC7_ADAPTER = RulesetAdapter(
     world_ref="coc-7e",
     check_profiles=COC7_CHECK_PROFILES,
-    check_outcome_handlers={"coc7.sanity": coc7_sanity_outcome},
-    world_actions={"coc7.apply_condition": _coc7_apply_condition, "coc7.investigator_development": development_phase, "coc7.acknowledge_sanity_history": acknowledge_history},
+    check_outcome_handlers={
+        "coc7.sanity": coc7_sanity_outcome,
+        "coc7.insanity_int": insanity_int_outcome,
+    },
+    world_actions={
+        "coc7.apply_condition": _coc7_apply_condition,
+        "coc7.safe_rest": safe_rest,
+        "coc7.end_bout": end_bout,
+        "coc7.investigator_development": development_phase,
+        "coc7.acknowledge_sanity_history": acknowledge_history,
+    },
 )
 
 DEFAULT_RULESET_REGISTRY = RulesetAdapterRegistry((COC7_ADAPTER,))

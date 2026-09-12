@@ -7,7 +7,10 @@ from typing import Literal
 
 from pydantic import Field, JsonValue, model_validator
 
+from collaboration_framework.contracts.sanity import SanityLedger
+
 from collaboration_framework.contracts import (
+    RuleCheckSpec,
     ActionAdjudication,
     ActionRequest,
     ActionResult,
@@ -53,6 +56,7 @@ class ConditionExpiry(ContractModel):
 
     kind: Literal["time_point", "time_task"]
     reference_id: str = Field(min_length=1)
+    absolute_hour: int | None = Field(default=None, ge=0)
 
 
 class ActorCondition(ContractModel):
@@ -67,9 +71,7 @@ class ActorCondition(ContractModel):
     applied_event_id: str | None = Field(default=None, min_length=1)
     removal_reason: str | None = Field(default=None, min_length=1)
     removal_event_id: str | None = Field(default=None, min_length=1)
-
-
-from collaboration_framework.contracts.sanity import SanityLedger
+    details: dict[str, JsonValue] = Field(default_factory=dict)
 
 
 class ActorState(ContractModel):
@@ -434,6 +436,8 @@ class PendingCheckDecision(ContractModel):
     # success/failure 效果。
     rule_origin: RuleCheckOrigin | None = None
     allow_cancel: bool = True
+    consequence_spec: RuleCheckSpec | None = None
+    consequence_parent: CheckConsequenceParent | None = None
 
     def player_view(self) -> PendingCheckDecisionView:
         if self.status != "awaiting_skill_choice":
@@ -477,6 +481,15 @@ class CheckRun(ContractModel):
     # `PendingCheckDecision`——它会随结算被改写，而 CheckRun 是掷骰当时的事实。
     # 玩家投影 `CheckRunView` 不带它：出处是服务端私有的。
     rule_origin: RuleCheckOrigin | None = None
+
+
+class CheckConsequenceParent(ContractModel):
+    decision: PendingCheckDecision
+    check: CheckRun
+    carried_events: tuple[DomainEvent, ...] = ()
+
+
+PendingCheckDecision.model_rebuild()
 
 
 WorkflowRequest = SubmitAdjudicationRequest | CheckDecisionRequest | PostRollDecisionRequest

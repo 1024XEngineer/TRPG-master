@@ -103,7 +103,8 @@ async def test_bad_parameters_leave_pending_check_and_resource_intact(bad):
     )
 
 
-async def test_active_rule_sanity_uses_same_settlement_without_agenda():
+@pytest.mark.parametrize("loss", [4, 5])
+async def test_active_rule_sanity_uses_same_settlement_without_agenda(loss):
     from collaboration_framework.contracts import (
         RuleSpecV3,
         RuleDecisionRef,
@@ -151,7 +152,7 @@ async def test_active_rule_sanity_uses_same_settlement_without_agenda():
         }
     )
     engine = AdjudicationEngineService(
-        store, dice=DiceRoller(SequenceDiceSource([81, 4]))
+        store, dice=DiceRoller(SequenceDiceSource([81, loss]))
     )
     result = await engine.submit(request)
     pending = result.pending_decision
@@ -180,8 +181,11 @@ async def test_active_rule_sanity_uses_same_settlement_without_agenda():
             option_id="accept-current",
         )
     )
+    if loss == 5:
+        from tests.test_temporary_insanity import resolve_int
+        result, _ = await resolve_int(store, result, roll=91, dice=())
     assert result.status == "resolved"
-    assert store.inspect_state(ROOM).actors[ACTOR].resources.san == 56
+    assert store.inspect_state(ROOM).actors[ACTOR].resources.san == 60 - loss
     assert store.inspect_state(ROOM).rule_agendas == {}
 
 

@@ -2870,6 +2870,23 @@
       "title": "RuleSpecV3",
       "type": "object"
     },
+    "SanityPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "bout_mode": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "summary",
+            "rounds"
+          ],
+          "title": "Bout Mode",
+          "type": "string"
+        }
+      },
+      "title": "SanityPolicy",
+      "type": "object"
+    },
     "SanitySource": {
       "additionalProperties": false,
       "properties": {
@@ -3325,6 +3342,17 @@
       },
       "title": "Sanity Sources",
       "type": "array"
+    },
+    "sanity_policy": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SanityPolicy"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "core_resolution": {
       "$ref": "#/$defs/CoreResolutionSpec"

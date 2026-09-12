@@ -61,6 +61,19 @@ describe('CharacterBasicInfo', () => {
     expect(screen.getByTestId('derived-stat-san')).toHaveTextContent(/^0$/)
   })
 
+  it('updates and removes authoritative insanity states independently', () => {
+    const temp = { id: 'temporary_insanity', name: '临时疯狂', remaining_hours: 8 }
+    const bout = { id: 'madness_bout', name: '疯狂发作', remaining_hours: 2, bout_type: '失忆' }
+    const view = (conditions: typeof temp[]) => <CharacterBasicInfo character={character()} attributes={ATTRIBUTES} liveConditions={conditions} />
+    const { rerender } = render(view([temp, bout]))
+    expect(screen.getByLabelText('当前状态')).toHaveTextContent('临时疯狂 · 剩余 8 个游戏小时')
+    expect(screen.getByLabelText('当前状态')).toHaveTextContent('疯狂发作 · 失忆')
+    rerender(view([{ ...temp, remaining_hours: 6 }]))
+    expect(screen.getByLabelText('当前状态')).not.toHaveTextContent('疯狂发作')
+    rerender(view([]))
+    expect(screen.queryByLabelText('当前状态')).not.toBeInTheDocument()
+  })
+
   // 建卡完成页在开局前渲染同一个组件，那时没有 PlayerView 可读。
   it('falls back to the creation snapshot when no live resources are supplied', () => {
     render(<CharacterBasicInfo character={character()} attributes={ATTRIBUTES} />)

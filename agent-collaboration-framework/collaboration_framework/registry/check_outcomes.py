@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 from pydantic import JsonValue
 
 if TYPE_CHECKING:
@@ -26,6 +26,36 @@ from collaboration_framework.contracts.resources import (
 )
 
 
+class OutcomeServices(Protocol):
+    def quantity(self, quantity: DiceQuantity) -> tuple[int, tuple[int, ...]]: ...
+    def condition(
+        self,
+        state: GameState,
+        *,
+        condition_id: str,
+        key: str,
+        source: str,
+        hours: int | None,
+        details: dict[str, JsonValue],
+    ) -> GameState: ...
+    def remove(
+        self, state: GameState, *, condition_id: str, reason: str
+    ) -> GameState: ...
+    def emit(
+        self,
+        event_type: str,
+        payload: dict[str, JsonValue],
+        *,
+        visibility: str = "public",
+    ) -> DomainEvent: ...
+
+
+@dataclass(frozen=True)
+class OutcomeProgress:
+    state: GameState
+    followup: RuleCheckSpec | None = None
+
+
 @dataclass(frozen=True)
 class CheckOutcomeContext:
     check: RuleCheckSpec
@@ -33,15 +63,19 @@ class CheckOutcomeContext:
     runtime: EngineRuntimeSnapshot
     actor_id: str
     origin: RuleCheckOrigin
+    check_id: str
+    services: OutcomeServices
+    fact: DomainEvent | None = None
 
 
 @dataclass(frozen=True)
 class CheckOutcome:
-    effect: ChangeActorResourceEffect
-    event_type: str
+    effect: ChangeActorResourceEffect | None = None
+    event_type: str | None = None
     decrease_limit: int | None = None
     audit: dict[str, JsonValue] = field(default_factory=dict)
     record: Callable[[GameState, DomainEvent], GameState] | None = None
+    resolve: Callable[[CheckOutcomeContext], OutcomeProgress] | None = None
 
 
 CheckOutcomeHandler = Callable[[CheckOutcomeContext], CheckOutcome]
@@ -105,7 +139,12 @@ def coc7_sanity_outcome(context: CheckOutcomeContext) -> CheckOutcome:
     limit = (
         max(0, cap - ledger.habituation.get(source.id, 0)) if cap is not None else None
     )
+    if "madness_bout" in context.runtime.game_state.actors[context.actor_id].conditions:
+        limit = 0
+    from .insanity import after_sanity_loss
+
     return CheckOutcome(
+        resolve=after_sanity_loss,
         decrease_limit=limit,
         audit={
             "sanity_source": source.id if source else None,

@@ -3268,6 +3268,7 @@ export default function RoomPage() {
                     : null}
                   attributes={ruleset?.attributes ?? []}
                   liveResources={liveResources}
+                  liveConditions={playerView?.self_actor.condition_details ?? []}
                   portraitAction={{ kind: 'generate', onActivate: () => setShowPortraitGenerator(true) }}
                 />
               </div>

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
-from pydantic import BeforeValidator, Field, model_validator
+from pydantic import BeforeValidator, Field, JsonValue, TypeAdapter, ValidationError, model_validator
 
 from collaboration_framework.contracts import (
     ActionAdjudication,
@@ -571,8 +571,8 @@ class NarrationStateClaim(ContractModel):
 
     entity_id: str = Field(min_length=1)
     key: str = Field(min_length=1)
-    # 与 CommittedResult.state_value 的类型保持一致，避免 JsonValue 展开过大的 schema。
-    value: str | bool
+    # Match the authoritative result, including numeric resources and condition facts.
+    value: JsonValue
 
 
 # committed_results 用的是 target_id / state_key / state_value。模型在输入 payload
@@ -631,7 +631,11 @@ def _coerce_claimed_state_changes(value: object) -> object:
             continue
         if not isinstance(fields["key"], str) or not fields["key"]:
             continue
-        if not isinstance(fields["value"], (str, bool)):
+        if "value" not in item and "state_value" not in item:
+            continue
+        try:
+            fields["value"] = TypeAdapter(JsonValue).validate_python(fields["value"])
+        except ValidationError:
             continue
         claims.append(fields)
     return tuple(claims)

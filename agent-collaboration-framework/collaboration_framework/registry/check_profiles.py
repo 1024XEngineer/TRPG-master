@@ -38,6 +38,7 @@ class CheckProfileRegistration:
     method_summary: str
     player_safe_reason: str
     default_difficulty: CheckDifficulty = "regular"
+    target_kind: str = "resource"
     # 本 Profile 认得、但**本期不消费**的参数键。列出来是为了把「规则写错了」
     # 和「引擎还没做到」区分开：前者该在发布期拒绝，后者不该。
     recognised_parameters: frozenset[str] = field(default_factory=frozenset)
@@ -45,6 +46,11 @@ class CheckProfileRegistration:
 
 COC7_CHECK_PROFILES: Mapping[str, CheckProfileRegistration] = MappingProxyType(
     {
+        "coc7.insanity_int": CheckProfileRegistration(
+            display_name="智力", resource="INT", target_kind="attribute",
+            method_summary="理解刚才冲击的意义", player_safe_reason="这次理智损失需要进行智力检定",
+            recognised_parameters=frozenset({"outcome_id"}),
+        ),
         "coc7.sanity": CheckProfileRegistration(
             display_name="理智",
             resource="san",

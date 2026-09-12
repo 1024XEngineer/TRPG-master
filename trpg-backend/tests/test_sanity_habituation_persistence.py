@@ -110,7 +110,8 @@ async def accept_check(
         option_id="accept-current",
     )
     result = await AdjudicationEngineService(
-        store_factory(), dice=DiceRoller(SequenceDiceSource([loss]))
+        store_factory(),
+        dice=DiceRoller(SequenceDiceSource(loss if isinstance(loss, tuple) else [loss])),
     ).decide_post_roll(request)
     return result, request
 

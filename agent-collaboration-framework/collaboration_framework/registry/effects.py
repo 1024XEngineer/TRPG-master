@@ -1227,6 +1227,7 @@ def _apply_advance_world_time(
         extra_events=tuple(
             ExtraEvent(
                 event_type="time.task_due",
+                visibility=task.visibility,
                 payload={
                     "task_id": task.task_id,
                     "task_key": task.task_key,

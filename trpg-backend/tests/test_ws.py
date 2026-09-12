@@ -1,5 +1,8 @@
 """WebSocket protocol, authorization, persistence, and reconnect regression tests."""
 
+import asyncio
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager
 from dataclasses import replace
 
 import anyio
@@ -173,10 +176,34 @@ class _FailOnceActionPlanNarrator:
 
 
 @pytest.fixture
-def sync_client() -> TestClient:
-    # 用同一个 app 实例的同步 TestClient——HTTP 部分照常发请求准备房间/角色
-    # 数据，WS 部分用它的 websocket_connect（httpx 异步 client 不支持 WS）。
-    return TestClient(app)
+def sync_client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+    # Keep HTTP preparation, sockets, and background SQL work on one portal.
+    # conftest already seeds the isolated DB and installs offline services, so
+    # production startup is intentionally replaced with test-owned cleanup.
+    @asynccontextmanager
+    async def seeded_lifespan(_app: object) -> AsyncIterator[None]:
+        yield
+        while True:
+            tasks = [
+                task
+                for task in asyncio.all_tasks()
+                if task is not asyncio.current_task()
+                and not task.done()
+                and (
+                    task.get_name().startswith("enqueue-conversation-summary-")
+                    or getattr(task.get_coro(), "__qualname__", "")
+                    in {"_drain_host_action_queue", "AsyncSession.close", "AsyncConnection.close"}
+                )
+            ]
+            if not tasks:
+                break
+            # Surface background failures and close their sessions before the
+            # outer database fixture attempts DROP TABLE on SQLite.
+            await asyncio.wait_for(asyncio.gather(*tasks), timeout=10)
+
+    monkeypatch.setattr(app.router, "lifespan_context", seeded_lifespan)
+    with TestClient(app) as client:
+        yield client
 
 
 def register_and_login(client: TestClient, account: str = "host1") -> str:

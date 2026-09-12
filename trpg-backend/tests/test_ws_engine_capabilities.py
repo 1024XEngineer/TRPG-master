@@ -33,7 +33,6 @@ from collaboration_framework.contracts import (
 from starlette.testclient import TestClient
 
 from app.controller import ws as ws_controller
-from app.main import app
 from tests.test_ws import (
     advance_to_building,
     complete_character,
@@ -43,14 +42,7 @@ from tests.test_ws import (
     register_and_login,
     start_game,
 )
-
-
-@pytest.fixture
-def sync_client() -> TestClient:
-    # `sync_client` lives in test_ws.py as a fixture, and pytest fixtures are
-    # not importable across modules; the body is a one-liner, so redeclare it.
-    return TestClient(app)
-
+from tests.test_ws import sync_client as sync_client
 
 # Paper Chase, the module the WebSocket suite loads: the opening scene, a
 # keeper-only Information nobody has discovered yet, and one declared Ending.

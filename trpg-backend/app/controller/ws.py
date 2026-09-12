@@ -47,6 +47,7 @@ import anyio
 import structlog
 from collaboration_framework.contracts import (
     TERMINAL_ADJUDICATION_STATUSES,
+    ActionAdjudication,
     ActorBindingError,
     AdjudicationExecution,
     AdjudicationValidationError,
@@ -66,7 +67,11 @@ from collaboration_framework.host.application import (
     normalize_narration_text,
     split_narration_chunks,
 )
-from collaboration_framework.host.schemas import NarrationOutput, reservation_is_expired
+from collaboration_framework.host.schemas import (
+    ActionPlanNarrationOutput,
+    NarrationOutput,
+    reservation_is_expired,
+)
 from collaboration_framework.host.schemas.action_plan import ActionPlanNpcReply
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field, ValidationError
@@ -103,6 +108,7 @@ from app.core.host_entry import (
     HostRuleOptionContext,
     HostTargetContext,
 )
+from app.core.host_rule_loop import RuleLoopState, RuleLoopStep, new_rule_loop, rule_loop_id
 from app.core.turn import (
     ActorResolutionError,
     session_view_application,
@@ -417,11 +423,18 @@ async def _current_room_action_state(
             "awaiting_time_consent",
             "awaiting_scene_consent",
         }
+        composite = await _find_composite_step(db, room_id, active.parent_action_id)
+        owner = composite[0] if composite is not None else None
+        public_client_action_id = (
+            owner.client_action_id if owner is not None else active.parent_action_id
+        )
+        public_player_id = owner.player_id if owner is not None else active.player_id
+        public_actor_id = owner.actor_id if owner is not None else active.actor_id
         return RoomActionStatePayload(
             status="awaiting_player" if waiting else "processing",
-            player_id=active.player_id,
-            actor_id=active.actor_id,
-            client_action_id=active.parent_action_id,
+            player_id=public_player_id,
+            actor_id=public_actor_id,
+            client_action_id=public_client_action_id,
             started_at=active.created_at,
             revision=str(session.state_version),
             queued=queued,
@@ -442,11 +455,15 @@ async def _current_room_action_state(
         actor_id = time_proposal.adjudication_json.get("actor_id")
         if not isinstance(actor_id, str) or not actor_id:
             raise ContractError("时间提案缺少行动 Actor")
+        composite = await _find_composite_step(db, room_id, time_proposal.parent_action_id)
+        owner = composite[0] if composite is not None else None
         return RoomActionStatePayload(
             status=("awaiting_player" if time_proposal.status == "pending" else "processing"),
             player_id=time_proposal.player_id,
             actor_id=actor_id,
-            client_action_id=time_proposal.parent_action_id,
+            client_action_id=(
+                owner.client_action_id if owner is not None else time_proposal.parent_action_id
+            ),
             started_at=time_proposal.created_at,
             revision=str(session.state_version),
             queued=queued,
@@ -465,11 +482,15 @@ async def _current_room_action_state(
         actor_id = scene_proposal.adjudication_json.get("actor_id")
         if not isinstance(actor_id, str) or not actor_id:
             raise ContractError("场景提案缺少行动 Actor")
+        composite = await _find_composite_step(db, room_id, scene_proposal.parent_action_id)
+        owner = composite[0] if composite is not None else None
         return RoomActionStatePayload(
             status=("awaiting_player" if scene_proposal.status == "pending" else "processing"),
             player_id=scene_proposal.player_id,
             actor_id=actor_id,
-            client_action_id=scene_proposal.parent_action_id,
+            client_action_id=(
+                owner.client_action_id if owner is not None else scene_proposal.parent_action_id
+            ),
             started_at=scene_proposal.created_at,
             revision=str(session.state_version),
             queued=queued,
@@ -911,8 +932,16 @@ async def _persist_rule_rejection(db: AsyncSession, item) -> None:
             ).model_dump(by_alias=True),
             created_at=datetime.now(UTC),
         )
-        db.add(event)
-        await db.commit()
+        try:
+            db.add(event)
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            event = await room_service.get_correlated_event(
+                db, item.room_id, "narration.push", correlation
+            )
+            if event is None:
+                raise
     item.status = "completed"
     item.lease_owner = None
     item.lease_expires_at = None
@@ -1139,7 +1168,9 @@ async def _run_clarification_prompt(
             if existing is None:
                 raise
             recorded = False
-    await host_action_queue_service.mark_awaiting_clarification(db, item, [existing.id])
+    await host_action_queue_service.mark_awaiting_clarification(
+        db, item, list(dict.fromkeys((*item.result_event_ids, existing.id)))
+    )
     narration = NarrationOutput(kind="clarification", text=normalize_narration_text(text))
     if recorded:
         await _emit_turn_narration(
@@ -1328,6 +1359,13 @@ async def _route_keeper_queue_item(db: AsyncSession, item, view: PlayerView) -> 
                 "target_id": decision.target_id,
                 "summary": decision.summary,
             }
+        if decision.route == "composite_rule":
+            loop = new_rule_loop(
+                client_action_id=item.client_action_id,
+                player_id=item.player_id,
+                actor_id=item.actor_id,
+            )
+            await host_action_queue_service.save_rule_loop(db, item, loop)
         await host_action_queue_service.save_execution_route(
             db,
             item,
@@ -1392,6 +1430,13 @@ async def _route_keeper_queue_item(db: AsyncSession, item, view: PlayerView) -> 
                 "target_id": decision.target_id,
                 "summary": decision.summary,
             }
+        if decision.route == "composite_rule":
+            loop = new_rule_loop(
+                client_action_id=item.client_action_id,
+                player_id=item.player_id,
+                actor_id=item.actor_id,
+            )
+            await host_action_queue_service.save_rule_loop(db, item, loop)
         await host_action_queue_service.save_execution_route(
             db,
             item,
@@ -1410,6 +1455,409 @@ async def _route_keeper_queue_item(db: AsyncSession, item, view: PlayerView) -> 
         provenance=item.execution_provenance,
     )
     return route
+
+
+async def _persist_composite_step_feedback(
+    db: AsyncSession,
+    item: HostActionQueueItem,
+    view: PlayerView,
+    step: RuleLoopStep,
+    text: str,
+    websocket: WebSocket | None,
+    *,
+    narration: ActionPlanNarrationOutput | None = None,
+) -> RuleLoopStep:
+    """Freeze public feedback before releasing the run or deciding another rule."""
+
+    correlation = step.feedback_correlation_id or rule_loop_id(
+        item.client_action_id, "step", step.index
+    )
+    event = await room_service.get_correlated_event(db, item.room_id, "narration.push", correlation)
+    recorded = False
+    if event is None:
+        recorded, _ = await _persist_turn_narration(
+            db,
+            item.room_id,
+            item.player_id,
+            client_action_id=correlation,
+            narration=NarrationOutput(
+                kind=narration.kind if narration else "narration",
+                text=text,
+                claimed_fact_ids=narration.claimed_evidence_refs if narration else (),
+                suggested_actions=narration.suggested_actions if narration else (),
+            ),
+            npc_replies=narration.npc_replies if narration else (),
+            npc_reply_count=len(narration.npc_replies) if narration else 0,
+            actor_id=item.actor_id,
+            scene_id=view.scene.id,
+            view_revision=view.revision,
+            participant_ids=(
+                tuple(reply.speaker_id for reply in narration.npc_replies) if narration else ()
+            )
+            + tuple(
+                entity.id
+                for entity in view.scene.visible_entities
+                if entity.kind == "npc"
+                and any(
+                    state.key == "accompanying" and state.value is True
+                    for state in entity.observable_state
+                )
+            ),
+        )
+        await db.refresh(item)
+        event = await room_service.get_correlated_event(
+            db, item.room_id, "narration.push", correlation
+        )
+    if event is None or event.actor_id != item.actor_id or event.player_id != item.player_id:
+        raise ContractError("复合步骤反馈缺失或不属于当前行动者")
+    # A replay must use the original event text, even if a narrator regenerated
+    # different wording between its commit and the cursor update.
+    persisted = NarrationPushPayload.model_validate(event.payload)
+    step = step.model_copy(
+        update={
+            "status": "feedback_persisted",
+            "feedback_correlation_id": correlation,
+            "feedback_text": persisted.text,
+        }
+    )
+    item.result_event_ids = list(dict.fromkeys((*item.result_event_ids, event.id)))
+    loop = host_action_queue_service.load_rule_loop(item)
+    if (
+        loop is not None
+        and loop.step_index <= step.index
+        and any(entry.step_id == step.step_id for entry in loop.steps)
+    ):
+        loop = loop.model_copy(
+            update={
+                "status": "awaiting_feedback",
+                "steps": tuple(
+                    step if entry.step_id == step.step_id else entry for entry in loop.steps
+                ),
+            }
+        )
+        await host_action_queue_service.save_rule_loop(db, item, loop)
+    else:
+        await db.commit()
+    if recorded:
+        await _broadcast_player_views(item.room_id)
+        try:
+            await _emit_turn_narration(
+                websocket,
+                item.room_id,
+                client_action_id=correlation,
+                narration=NarrationOutput(kind="narration", text=persisted.text),
+            )
+        except Exception as exc:
+            # The event is durable and included in conversation replay. A broken
+            # recipient cannot undo this step or force another rule execution.
+            logger.warning(
+                "host_composite_feedback_delivery_failed",
+                room_id=item.room_id,
+                client_action_id=item.client_action_id,
+                step_index=step.index,
+                error_type=type(exc).__name__,
+            )
+    completion = _PersistedTurnCompletion.model_validate(
+        event.payload.get(room_service.PERSISTED_TURN_COMPLETION_KEY) or {}
+    )
+    if completion.npc_replies:
+        missing_reply = False
+        for ordinal in range(len(completion.npc_replies)):
+            reply = await room_service.get_correlated_event(
+                db, item.room_id, "dialogue.npc", f"{correlation}:followup-npc:{ordinal}"
+            )
+            missing_reply = missing_reply or reply is None
+        if missing_reply:
+            await _emit_keeper_followup_dialogue(
+                db,
+                room_id=item.room_id,
+                player_id=item.player_id,
+                client_action_id=correlation,
+                player_view=view,
+                narration=ActionPlanNarrationOutput(
+                    kind=completion.kind,
+                    text=persisted.text,
+                    npc_replies=completion.npc_replies,
+                ),
+            )
+    return step
+
+
+async def _advance_composite_feedback(
+    db: AsyncSession, item: HostActionQueueItem, loop: RuleLoopState, step: RuleLoopStep
+) -> RuleLoopState:
+    """Release one internal run only after its public feedback is durable."""
+
+    current = host_action_queue_service.load_rule_loop(item)
+    if current is None:
+        raise ContractError("复合行动游标缺失")
+    if current.step_index > step.index:
+        return current
+    loop = current
+    await time_advance_service.mark_narration_persisted(
+        db, room_id=item.room_id, parent_action_id=step.step_id
+    )
+    await scene_transition_service.mark_narration_persisted(
+        db, room_id=item.room_id, parent_action_id=step.step_id
+    )
+    await action_plan_turn_application.mark_narration_persisted(
+        room_id=item.room_id, parent_action_id=step.step_id
+    )
+    loop = loop.model_copy(
+        update={
+            "status": "deciding",
+            "step_index": step.index + 1,
+            "steps": tuple(
+                step if entry.step_id == step.step_id else entry for entry in loop.steps
+            ),
+        }
+    )
+    await host_action_queue_service.save_rule_loop(db, item, loop)
+    return loop
+
+
+async def _record_composite_step_result(
+    db: AsyncSession,
+    websocket: WebSocket | None,
+    item: HostActionQueueItem,
+    loop: RuleLoopState,
+    step: RuleLoopStep,
+    result: ActionPlanTurnResult,
+) -> RuleLoopState:
+    if result.waiting_for_player:
+        step = step.model_copy(update={"status": "waiting_for_player"})
+        loop = loop.model_copy(
+            update={"status": "awaiting_player", "steps": (*loop.steps[:-1], step)}
+        )
+        await host_action_queue_service.save_rule_loop(db, item, loop)
+        await _send_action_plan_result(
+            db,
+            websocket,
+            item.room_id,
+            item.player_id,
+            result,
+            public_correlation_id=item.client_action_id,
+        )
+        return loop
+    if result.narration is None:
+        raise ContractError("复合规则步骤完成时缺少 narration")
+    stop_reason = (
+        result.status if result.status in {"stopped", "cancelled", "needs_clarification"} else None
+    )
+    step = step.model_copy(
+        update={
+            "status": "committed",
+            "stop_reason": stop_reason,
+            "execution_event_refs": result.execution.event_refs if result.execution else (),
+        }
+    )
+    loop = loop.model_copy(
+        update={"status": "awaiting_feedback", "steps": (*loop.steps[:-1], step)}
+    )
+    await host_action_queue_service.save_rule_loop(db, item, loop)
+    step = await _persist_composite_step_feedback(
+        db,
+        item,
+        result.player_view,
+        step,
+        result.narration.text,
+        websocket,
+        narration=result.narration,
+    )
+    return await _advance_composite_feedback(db, item, loop, step)
+
+
+async def _run_composite_rule_action(
+    db: AsyncSession,
+    item: HostActionQueueItem,
+    view: PlayerView,
+    websocket: WebSocket | None,
+) -> None:
+    """Recover the current consequence before considering any future rule."""
+
+    if item.status in _HOST_QUEUE_TERMINAL or item.status == "completed":
+        return
+    loop = host_action_queue_service.load_rule_loop(item)
+    if loop is None:
+        if item.rule_loop_json is not None:
+            raise ContractError("复合行动游标损坏或作用域不匹配")
+        loop = new_rule_loop(
+            client_action_id=item.client_action_id,
+            player_id=item.player_id,
+            actor_id=item.actor_id,
+        )
+        await host_action_queue_service.save_rule_loop(db, item, loop)
+    while True:
+        await db.refresh(item)
+        if item.status in _HOST_QUEUE_TERMINAL:
+            return
+        view = await session_view_application.current_player_view(
+            room_id=item.room_id, player_id=item.player_id
+        )
+        if view.self_actor.id != item.actor_id:
+            raise ContractError("复合行动的角色绑定已改变")
+        if loop.status in {"completed", "stopped", "failed"}:
+            await _complete_composite_action(db, item, loop, view, websocket)
+            return
+        if loop.status == "awaiting_clarification":
+            if not item.continuation_text:
+                await _run_clarification_prompt(db, item, view, websocket)
+                return
+            loop = loop.model_copy(update={"status": "deciding"})
+            await host_action_queue_service.save_rule_loop(db, item, loop)
+        step = loop.current()
+        if step is not None and step.index == loop.step_index:
+            correlation = step.feedback_correlation_id or rule_loop_id(
+                item.client_action_id, "step", step.index
+            )
+            feedback = await room_service.get_correlated_event(
+                db, item.room_id, "narration.push", correlation
+            )
+            if feedback is not None:
+                step = await _persist_composite_step_feedback(
+                    db,
+                    item,
+                    view,
+                    step,
+                    NarrationPushPayload.model_validate(feedback.payload).text,
+                    websocket,
+                )
+                loop = await _advance_composite_feedback(db, item, loop, step)
+                continue
+            existing = await action_plan_turn_application.get_plan(item.room_id, step.step_id)
+            if existing is not None:
+                result = await action_plan_turn_application.resume_owned(
+                    room_id=item.room_id,
+                    player_id=item.player_id,
+                    parent_action_id=step.step_id,
+                    on_phase=partial(_send_turn_phase, websocket, item.client_action_id),
+                )
+            else:
+                if step.status != "frozen" or step.adjudication_json is None:
+                    raise ContractError("复合行动缺少已冻结的步骤或持久化执行")
+                adjudication = ActionAdjudication.model_validate(step.adjudication_json)
+                if (
+                    adjudication.actor_id != item.actor_id
+                    or adjudication.request_id != step.request_id
+                    or adjudication.source_revision != step.source_revision
+                ):
+                    raise ContractError("已冻结的规则步骤与当前行动不一致")
+                result = await action_plan_turn_application.start_rule_once(
+                    room_id=item.room_id,
+                    player_id=item.player_id,
+                    client_action_id=item.client_action_id,
+                    step_request_id=step.step_id,
+                    utterance=adjudication.summary,
+                    adjudication=adjudication,
+                    on_phase=partial(_send_turn_phase, websocket, item.client_action_id),
+                )
+            loop = await _record_composite_step_result(db, websocket, item, loop, step, result)
+            if loop.status == "awaiting_player":
+                return
+            continue
+        if step is not None and step.stop_reason:
+            await _stop_composite_rule_action(
+                db,
+                item,
+                view,
+                websocket,
+                stop_reason=step.stop_reason,
+                public_text="这次行动到此为止。",
+            )
+            return
+        if loop.step_index >= loop.max_steps:
+            await _stop_composite_rule_action(
+                db,
+                item,
+                view,
+                websocket,
+                stop_reason="max_steps_reached",
+                public_text="这次行动先进行到这里。",
+            )
+            return
+        history = await _public_host_history(
+            db, item.room_id, exclude_correlation_id=item.client_action_id
+        )
+        public = HostPublicContextProjector(
+            max_turns=get_settings().recent_history_max_turns,
+            max_chars=get_settings().recent_history_max_chars,
+        ).project(
+            view,
+            current_keeper_text=item.utterance,
+            public_history=history,
+            completed_rule_feedback=tuple(
+                entry.feedback_text for entry in loop.steps if entry.feedback_text
+            ),
+            loop_step_index=loop.step_index,
+            rule_loop_active=True,
+            clarification_question=item.direct_response_text,
+            player_answer=item.continuation_text,
+        )
+        context = await _host_entry_context(item=item, view=view, public=public)
+        decision, provenance = await _get_host_entry_router().decide(context)
+        if decision.route == "needs_clarification" and not (
+            loop.clarification_asked
+            or item.continuation_text
+            or provenance == "fallback_clarification"
+        ):
+            loop = loop.model_copy(
+                update={"status": "awaiting_clarification", "clarification_asked": True}
+            )
+            item.direct_response_text = decision.text
+            await host_action_queue_service.save_rule_loop(db, item, loop)
+            await _run_clarification_prompt(db, item, view, websocket)
+            return
+        if decision.route != "rule_once":
+            final = decision.text if decision.route == "direct_response" else None
+            if not final or any(
+                entry.feedback_text and entry.feedback_text in final for entry in loop.steps
+            ):
+                final = "这次行动到此为止。"
+            loop = loop.model_copy(
+                update={
+                    "status": "completed" if decision.route == "direct_response" else "stopped",
+                    "stop_reason": "no_further_rule",
+                    "final_text": final,
+                }
+            )
+            await host_action_queue_service.save_rule_loop(db, item, loop)
+            await _complete_composite_action(db, item, loop, view, websocket)
+            return
+        step_id = rule_loop_id(item.client_action_id, "rule", loop.step_index)
+        player_input = PlayerInput(
+            room_id=item.room_id,
+            player_id=item.player_id,
+            actor_id=item.actor_id,
+            client_action_id=item.client_action_id,
+            utterance=item.utterance,
+        )
+        capabilities = await action_plan_turn_application._keeper_capabilities(player_input, view)
+        if capabilities is None:
+            raise ValueError("RULE_CAPABILITIES_UNAVAILABLE")
+        adjudication = build_rule_once_adjudication(
+            player_input=player_input,
+            player_view=view,
+            capabilities=capabilities,
+            rule_id=decision.rule_id or "",
+            option_id=decision.option_id or "",
+            target_kind=decision.target_kind,
+            target_id=decision.target_id,
+            summary=decision.summary,
+            request_id=step_id,
+        )
+        step = RuleLoopStep(
+            index=loop.step_index,
+            step_id=step_id,
+            request_id=step_id,
+            source_revision=view.revision,
+            rule_id=decision.rule_id or "",
+            option_id=decision.option_id or "",
+            target_kind=decision.target_kind,
+            target_id=decision.target_id,
+            adjudication_json=adjudication.model_dump(mode="json"),
+        )
+        loop = loop.model_copy(update={"status": "awaiting_rule", "steps": (*loop.steps, step)})
+        await host_action_queue_service.save_rule_loop(db, item, loop)
 
 
 async def _start_keeper_action(
@@ -1513,15 +1961,183 @@ async def _reject_rule_host_action(
     )
 
 
+async def _cancel_composite_step(
+    db: AsyncSession,
+    item: HostActionQueueItem,
+    step: RuleLoopStep,
+    request_id: str,
+) -> ActionPlanTurnResult:
+    active = await action_plan_turn_application.get_plan(item.room_id, step.step_id)
+    if active is not None and active.status == "awaiting_narration":
+        return await action_plan_turn_application.committed_stop_result(
+            room_id=item.room_id, player_id=item.player_id, parent_action_id=step.step_id
+        )
+    # Consent records use the internal step identity and must be released along
+    # with the run, otherwise they keep blocking the room after cancellation.
+    scene_aborted = await scene_transition_service.abort_pending(
+        db,
+        engine=adjudication_engine_service,
+        room_id=item.room_id,
+        player_id=item.player_id,
+        parent_action_id=step.step_id,
+    )
+    if scene_aborted is not None:
+        await _broadcast_scene_transition(item.room_id, scene_aborted)
+    time_aborted = await time_advance_service.abort_pending(
+        db,
+        engine=adjudication_engine_service,
+        room_id=item.room_id,
+        player_id=item.player_id,
+        parent_action_id=step.step_id,
+    )
+    if time_aborted is not None:
+        await _broadcast_time_advance(item.room_id, time_aborted)
+    try:
+        return await action_plan_turn_application.cancel_remaining(
+            room_id=item.room_id,
+            player_id=item.player_id,
+            parent_action_id=step.step_id,
+            request_id=request_id,
+        )
+    except TurnExecutionError as exc:
+        if exc.code != "PLAN_NARRATOR_FAILED":
+            raise
+        return await action_plan_turn_application.committed_stop_result(
+            room_id=item.room_id, player_id=item.player_id, parent_action_id=step.step_id
+        )
+
+
+async def _cancel_composite_action(
+    db: AsyncSession,
+    websocket: WebSocket | None,
+    *,
+    room_id: str,
+    player_id: str,
+    client_action_id: str,
+    request_id: str,
+) -> bool:
+    item = await host_action_queue_service.get_by_client_action(db, room_id, client_action_id)
+    if (
+        item is None
+        or host_action_queue_service.effective_execution_route(item) != "composite_rule"
+    ):
+        return False
+    if item.player_id != player_id:
+        raise ContractError("不能取消其他玩家的复合行动")
+    if item.status in _HOST_QUEUE_TERMINAL:
+        return True
+    loop = host_action_queue_service.load_rule_loop(item)
+    step = loop.current() if loop is not None else None
+    run = await action_plan_turn_application.get_plan(room_id, step.step_id) if step else None
+    if step is not None and loop is not None and run is not None and run.status != "completed":
+        result = await _cancel_composite_step(db, item, step, request_id)
+        await _finish_composite_step(db, websocket, item, loop, step, result)
+    else:
+        view = await session_view_application.current_player_view(
+            room_id=room_id, player_id=player_id
+        )
+        await _stop_composite_rule_action(
+            db, item, view, websocket, stop_reason="cancelled", public_text="这次行动就先停在这里。"
+        )
+    return True
+
+
+async def _handle_composite_failure(
+    db: AsyncSession,
+    item: HostActionQueueItem,
+    websocket: WebSocket | None,
+    exc: Exception,
+) -> None:
+    room_id, client_action_id = item.room_id, item.client_action_id
+    await db.rollback()
+    persisted = await host_action_queue_service.get_by_client_action(db, room_id, client_action_id)
+    if persisted is None or persisted.status in _HOST_QUEUE_TERMINAL:
+        return
+    item = persisted
+    if (
+        isinstance(exc, host_action_queue_service.HostActionQueueError)
+        and exc.code == "RULE_LOOP_CONFLICT"
+    ):
+        return
+    logger.warning(
+        "host_composite_recovery_needed",
+        room_id=room_id,
+        client_action_id=client_action_id,
+        error_type=type(exc).__name__,
+    )
+    rejected = isinstance(exc, (ContractError, AdjudicationValidationError)) or (
+        isinstance(exc, ValueError) and str(exc).startswith("RULE_")
+    )
+    if not rejected and item.attempt_count < 2:
+        await host_action_queue_service.mark_npc_retryable(db, item, delay_seconds=0)
+        schedule_host_action_drain(room_id)
+        return
+    loop = host_action_queue_service.load_rule_loop(item)
+    step = loop.current() if loop is not None else None
+    if step is not None:
+        active = await action_plan_turn_application.get_plan(room_id, step.step_id)
+        if active is not None and active.status != "completed":
+            result = await _cancel_composite_step(
+                db, item, step, rule_loop_id(client_action_id, "rule", 8)
+            )
+            if loop is not None and result.narration is not None:
+                await _record_composite_step_result(db, websocket, item, loop, step, result)
+    view = await session_view_application.current_player_view(
+        room_id=room_id, player_id=item.player_id
+    )
+    await _stop_composite_rule_action(
+        db, item, view, websocket, stop_reason="rule_rejected" if rejected else "retry_exhausted"
+    )
+
+
+async def _recover_composite_action(
+    db: AsyncSession, item: HostActionQueueItem, websocket: WebSocket | None
+) -> None:
+    view = await session_view_application.current_player_view(
+        room_id=item.room_id, player_id=item.player_id
+    )
+    loop = host_action_queue_service.load_rule_loop(item)
+    if loop is not None and loop.status in {"completed", "stopped", "failed"}:
+        await _complete_composite_action(db, item, loop, view, websocket)
+        return
+    if item.status == "needs_clarification":
+        await _run_clarification_prompt(db, item, view, websocket)
+        return
+    room_id = item.room_id
+    token = action_lock_manager.try_acquire(
+        room_id,
+        player_id=item.player_id,
+        actor_id=item.actor_id,
+        client_action_id=item.client_action_id,
+        revision=view.revision,
+    )
+    if token is None:
+        return
+    try:
+        claimed = await host_action_queue_service.claim(db, item, recipient_kind="keeper")
+        if claimed is not None:
+            try:
+                await _run_composite_rule_action(db, claimed, view, websocket)
+            except Exception as exc:
+                await _handle_composite_failure(db, claimed, websocket, exc)
+    finally:
+        action_lock_manager.release(room_id, token)
+
+
 async def _drain_host_action_queue(room_id: str) -> None:
     async with _host_drain_lock(room_id):
         while True:
             async with _short_db_session() as db:
                 state = await _current_room_action_state(db, room_id)
-                if state is None or state.status != "idle":
-                    return
                 item = await host_action_queue_service.peek_next(db, room_id)
-                if item is None:
+                if state is None or item is None:
+                    return
+                recovering_composite = (
+                    host_action_queue_service.effective_execution_route(item) == "composite_rule"
+                    and state.client_action_id == item.client_action_id
+                    and state.status == "processing"
+                )
+                if state.status != "idle" and not recovering_composite:
                     return
                 try:
                     view = await session_view_application.current_player_view(
@@ -1595,6 +2211,9 @@ async def _drain_host_action_queue(room_id: str) -> None:
                     if route == "direct_response":
                         await _run_direct_host_action(db, item, view, websocket)
                         continue
+                    if route == "composite_rule":
+                        await _run_composite_rule_action(db, item, view, websocket)
+                        continue
                     result = await _start_keeper_action(item, websocket)
                     await host_action_queue_service.mark_started(db, item)
                     await _send_action_plan_result(
@@ -1607,6 +2226,13 @@ async def _drain_host_action_queue(room_id: str) -> None:
                     if result.waiting_for_player:
                         return
                 except Exception as exc:
+                    if (
+                        item.recipient_kind == "keeper"
+                        and host_action_queue_service.effective_execution_route(item)
+                        == "composite_rule"
+                    ):
+                        await _handle_composite_failure(db, item, websocket, exc)
+                        continue
                     if _is_rule_rejection(item, exc):
                         await _reject_rule_host_action(db, item, websocket)
                         continue
@@ -1934,6 +2560,146 @@ async def _resume_after_authoritative_decision(
     )
 
 
+async def _find_composite_step(
+    db: AsyncSession, room_id: str, step_request_id: str
+) -> tuple[HostActionQueueItem, RuleLoopState, RuleLoopStep] | None:
+    """Resolve an internal step request back to its outer queued action."""
+
+    rows = (
+        await db.scalars(
+            select(HostActionQueueItem).where(
+                HostActionQueueItem.room_id == room_id,
+                HostActionQueueItem.status.in_(("processing", "retryable_failure")),
+            )
+        )
+    ).all()
+    for item in rows:
+        loop = host_action_queue_service.load_rule_loop(item)
+        if loop is None:
+            continue
+        step = next((entry for entry in loop.steps if entry.step_id == step_request_id), None)
+        if step is not None:
+            return item, loop, step
+    return None
+
+
+async def _find_composite_action(
+    db: AsyncSession, room_id: str, client_action_id: str
+) -> tuple[HostActionQueueItem, RuleLoopState, RuleLoopStep] | None:
+    """Resolve the public action ID to its currently waiting internal step."""
+
+    item = await host_action_queue_service.get_by_client_action(db, room_id, client_action_id)
+    if item is None or host_action_queue_service.effective_execution_route(item) != (
+        "composite_rule"
+    ):
+        return None
+    loop = host_action_queue_service.load_rule_loop(item)
+    if loop is None or loop.client_action_id != client_action_id:
+        return None
+    if item.status in _HOST_QUEUE_TERMINAL or item.status == "completed":
+        return None
+    step = loop.current()
+    if step is None or step.status not in {"frozen", "waiting_for_player", "committed"}:
+        return None
+    return item, loop, step
+
+
+async def _complete_composite_action(
+    db: AsyncSession,
+    item: HostActionQueueItem,
+    loop: RuleLoopState,
+    view: PlayerView,
+    websocket: WebSocket | None,
+) -> None:
+    """Persist exactly one outer completion after all completed step feedback."""
+
+    async def complete() -> None:
+        await db.refresh(item)
+        event = await room_service.get_correlated_event(
+            db, item.room_id, "narration.push", item.client_action_id
+        )
+        event_ids = list(item.result_event_ids)
+        if event is not None and event.id not in event_ids:
+            event_ids.append(event.id)
+        await host_action_queue_service.mark_completed_with_events(db, item, event_ids)
+
+    await _send_completed_turn_message(
+        db,
+        websocket,
+        item.room_id,
+        item.player_id,
+        actor_id=item.actor_id,
+        client_action_id=item.client_action_id,
+        player_view=view,
+        narration=NarrationOutput(kind="narration", text=loop.final_text or "这次行动到此为止。"),
+        before_completed=complete,
+    )
+    await _broadcast_room_action_state_fresh(item.room_id)
+    schedule_host_action_drain(item.room_id)
+
+
+async def _stop_composite_rule_action(
+    db: AsyncSession,
+    item: HostActionQueueItem,
+    view: PlayerView,
+    websocket: WebSocket | None,
+    *,
+    stop_reason: str,
+    public_text: str = "这次行动暂时无法继续，已经发生的结果保持不变。",
+) -> None:
+    """Freeze a safe terminal response without replaying committed consequences."""
+
+    if item.status == "completed":
+        return
+    loop = host_action_queue_service.load_rule_loop(item)
+    if loop is None:
+        loop = new_rule_loop(
+            client_action_id=item.client_action_id, player_id=item.player_id, actor_id=item.actor_id
+        )
+        version = (item.rule_loop_json or {}).get("cursor_version", 0)
+        if isinstance(version, int) and version >= 0:
+            loop.cursor_version = version
+    if loop.status not in {"completed", "stopped", "failed"}:
+        loop = loop.model_copy(
+            update={
+                "status": "stopped",
+                "stop_reason": stop_reason[:120],
+                "final_text": public_text,
+            }
+        )
+        await host_action_queue_service.save_rule_loop(db, item, loop)
+    await _complete_composite_action(db, item, loop, view, websocket)
+
+
+async def _finish_composite_step(
+    db: AsyncSession,
+    websocket: WebSocket | None,
+    item: HostActionQueueItem,
+    loop: RuleLoopState,
+    step: RuleLoopStep,
+    result: ActionPlanTurnResult,
+) -> None:
+    """Continue the same outer action after a check or consent result."""
+
+    await db.refresh(item)
+    current_loop = host_action_queue_service.load_rule_loop(item)
+    if current_loop is None:
+        raise ContractError("复合行动游标缺失")
+    if item.status == "completed" or current_loop.step_index > step.index:
+        return
+    current = current_loop.current()
+    if current is None or current.step_id != step.step_id:
+        raise ContractError("恢复结果不属于当前复合步骤")
+    try:
+        loop = await _record_composite_step_result(
+            db, websocket, item, current_loop, current, result
+        )
+        if loop.status != "awaiting_player":
+            await _run_composite_rule_action(db, item, result.player_view, websocket)
+    except Exception as exc:
+        await _handle_composite_failure(db, item, websocket, exc)
+
+
 def _check_decision_engine() -> ConsentAwareAdjudicationEngine:
     """检定结算必须经过确认装饰器，才能在成功的换场景效果上开全员确认。"""
 
@@ -1962,7 +2728,18 @@ async def _send_action_plan_result(
     player_id: str,
     result: ActionPlanTurnResult,
     before_completed: Callable[[], Awaitable[None]] | None = None,
+    public_correlation_id: str | None = None,
 ) -> bool:
+    if public_correlation_id is None:
+        composite = await _find_composite_step(db, room_id, result.player_input.client_action_id)
+        if composite is not None:
+            item, loop, step = composite
+            if item.player_id != player_id:
+                raise ContractError("复合行动结果不属于当前玩家")
+            if not result.waiting_for_player:
+                await _finish_composite_step(db, websocket, item, loop, step, result)
+                return True
+            public_correlation_id = item.client_action_id
     if result.waiting_for_player:
         execution = result.execution
         if execution is None:
@@ -2009,7 +2786,7 @@ async def _send_action_plan_result(
             await _broadcast_scene_transition(room_id, pending_scene)
             return False
         pending = AdjudicationPendingPayload(
-            correlation_id=result.player_input.client_action_id,
+            correlation_id=public_correlation_id or result.player_input.client_action_id,
             plan_id=result.plan_id,
             source_revision=execution.view_revision,
             status=_require_pending_adjudication_status(execution.status),
@@ -2213,12 +2990,22 @@ async def _recover_persisted_turn_narration(
     room_id: str,
     player_id: str,
     client_action_id: str,
+    resume_composite: bool = False,
 ) -> bool:
     # A1 direct responses have no ActionPlan/Engine record.  Recover from the
     # queue item's frozen text and correlated public event instead.
     queued_item = await host_action_queue_service.get_by_client_action(
         db, room_id, client_action_id
     )
+    if (
+        queued_item is not None
+        and host_action_queue_service.effective_execution_route(queued_item) == "composite_rule"
+    ):
+        if queued_item.player_id != player_id:
+            raise ContractError("复合行动不属于当前玩家")
+        if resume_composite and queued_item.status not in _HOST_QUEUE_TERMINAL:
+            await _recover_composite_action(db, queued_item, websocket)
+            return True
     if (
         queued_item is not None
         and host_action_queue_service.effective_execution_route(queued_item)
@@ -2322,7 +3109,8 @@ async def _recover_persisted_turn_narration(
     elif (
         queued_item is not None
         and queued_item.status == "completed"
-        and host_action_queue_service.effective_execution_route(queued_item) == "rule_once"
+        and host_action_queue_service.effective_execution_route(queued_item)
+        in {"rule_once", "composite_rule"}
     ):
         # Rejected frozen rules have a durable narration but never create a run.
         if queued_item.player_id != player_id:
@@ -3269,8 +4057,27 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                         ),
                                     ).model_dump(by_alias=True),
                                 )
+                            composite = (
+                                await _find_composite_step(
+                                    db, room_id, active_plan.parent_action_id
+                                )
+                                if active_plan is not None
+                                else None
+                            )
+                            public_action_id = (
+                                composite[0].client_action_id
+                                if composite is not None
+                                else active_plan.parent_action_id
+                                if active_plan is not None
+                                else ""
+                            )
                             if active_plan is not None and active_plan.player_id == bound_player_id:
                                 if (
+                                    composite is not None
+                                    and active_plan.status not in _OWN_WAITING_STATUSES
+                                ):
+                                    await _recover_composite_action(db, composite[0], websocket)
+                                elif (
                                     active_plan.status
                                     in {
                                         "awaiting_time_consent",
@@ -3331,7 +4138,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                             (),
                                             {
                                                 "type": "plan.step_changed",
-                                                "correlation_id": active_plan.parent_action_id,
+                                                "correlation_id": public_action_id,
                                                 "current_step": min(
                                                     active_plan.current_step_index + 1,
                                                     len(active_plan.steps),
@@ -3359,7 +4166,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                         ].adjudication_execution
                                         if execution is not None:
                                             pending = AdjudicationPendingPayload(
-                                                correlation_id=active_plan.parent_action_id,
+                                                correlation_id=public_action_id,
                                                 plan_id=active_plan.plan_id,
                                                 source_revision=execution.view_revision,
                                                 status=_require_pending_adjudication_status(
@@ -3520,24 +4327,44 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 room_id,
                                 force_processing=True,
                             )
-                            resumed = await _resume_after_authoritative_decision(
-                                db,
-                                room_id=room_id,
-                                player_id=resume_player_id,
-                                parent_action_id=action_request_id,
-                            )
-                            # 最后一票可能来自队友，语叙和私有视图必须发给原行动者。
-                            for target_socket in manager.player_connections(
-                                room_id,
-                                resume_player_id,
-                            ):
-                                await _send_action_plan_result(
+                            composite = await _find_composite_step(db, room_id, action_request_id)
+                            if composite is not None:
+                                item, loop, step = composite
+                                resumed = await action_plan_turn_application.resume_pending(
+                                    room_id=room_id,
+                                    player_id=resume_player_id,
+                                    parent_action_id=step.step_id,
+                                )
+                            else:
+                                resumed = await _resume_after_authoritative_decision(
                                     db,
-                                    target_socket,
-                                    room_id,
-                                    resume_player_id,
+                                    room_id=room_id,
+                                    player_id=resume_player_id,
+                                    parent_action_id=action_request_id,
+                                )
+                            # 最后一票可能来自队友，语叙和私有视图必须发给原行动者。
+                            target_sockets = manager.player_connections(room_id, resume_player_id)
+                            if composite is not None and not resumed.waiting_for_player:
+                                await _finish_composite_step(
+                                    db,
+                                    target_sockets[0] if target_sockets else None,
+                                    item,
+                                    loop,
+                                    step,
                                     resumed,
                                 )
+                            else:
+                                for target_socket in target_sockets:
+                                    await _send_action_plan_result(
+                                        db,
+                                        target_socket,
+                                        room_id,
+                                        resume_player_id,
+                                        resumed,
+                                        public_correlation_id=(
+                                            item.client_action_id if composite is not None else None
+                                        ),
+                                    )
                     elif event_type == "scene.transition.respond":
                         response_payload = SceneTransitionRespondPayload.model_validate(raw_payload)
                         try:
@@ -3565,22 +4392,42 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 room_id,
                                 force_processing=True,
                             )
-                            resumed = await action_plan_turn_application.resume_pending(
-                                room_id=room_id,
-                                player_id=resume_player_id,
-                                parent_action_id=action_request_id,
-                            )
-                            for target_socket in manager.player_connections(
-                                room_id,
-                                resume_player_id,
-                            ):
-                                await _send_action_plan_result(
+                            composite = await _find_composite_step(db, room_id, action_request_id)
+                            if composite is not None:
+                                item, loop, step = composite
+                                resumed = await action_plan_turn_application.resume_pending(
+                                    room_id=room_id,
+                                    player_id=resume_player_id,
+                                    parent_action_id=step.step_id,
+                                )
+                            else:
+                                resumed = await action_plan_turn_application.resume_pending(
+                                    room_id=room_id,
+                                    player_id=resume_player_id,
+                                    parent_action_id=action_request_id,
+                                )
+                            target_sockets = manager.player_connections(room_id, resume_player_id)
+                            if composite is not None and not resumed.waiting_for_player:
+                                await _finish_composite_step(
                                     db,
-                                    target_socket,
-                                    room_id,
-                                    resume_player_id,
+                                    target_sockets[0] if target_sockets else None,
+                                    item,
+                                    loop,
+                                    step,
                                     resumed,
                                 )
+                            else:
+                                for target_socket in target_sockets:
+                                    await _send_action_plan_result(
+                                        db,
+                                        target_socket,
+                                        room_id,
+                                        resume_player_id,
+                                        resumed,
+                                        public_correlation_id=(
+                                            item.client_action_id if composite is not None else None
+                                        ),
+                                    )
                     elif event_type == "action.plan.submit":
                         submit_payload = ActionSubmitPayload.model_validate(raw_payload)
                         if not submit_payload.recipient.explicit:
@@ -3612,6 +4459,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             room_id=room_id,
                             player_id=bound_player_id,
                             client_action_id=submit_payload.client_action_id,
+                            resume_composite=True,
                         ):
                             continue
                         try:
@@ -3828,6 +4676,11 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                             db, queued_item, action_view, websocket
                                         )
                                         continue
+                            if queued_item is not None and route == "composite_rule":
+                                await _run_composite_rule_action(
+                                    db, queued_item, action_view, websocket
+                                )
+                                continue
                             if queued_item is not None:
                                 result = await _start_keeper_action(queued_item, websocket)
                             else:
@@ -3909,6 +4762,13 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 end_to_end_ms=completed_ms,
                             )
                         except Exception as exc:
+                            if (
+                                queued_item is not None
+                                and host_action_queue_service.effective_execution_route(queued_item)
+                                == "composite_rule"
+                            ):
+                                await _handle_composite_failure(db, queued_item, websocket, exc)
+                                continue
                             if queued_item is not None and _is_rule_rejection(queued_item, exc):
                                 await _reject_rule_host_action(db, queued_item, websocket)
                                 continue
@@ -3996,28 +4856,55 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 client_action_id=choice.client_action_id,
                             ):
                                 continue
-                            result = await _resume_after_authoritative_decision(
-                                db,
-                                room_id=room_id,
-                                player_id=bound_player_id,
-                                parent_action_id=choice.client_action_id,
-                                on_progress=lambda event: _send_plan_progress(
-                                    websocket,
-                                    event,
-                                ),
-                                on_phase=partial(
-                                    _send_turn_phase,
-                                    websocket,
-                                    choice.client_action_id,
-                                ),
+                            composite = await _find_composite_action(
+                                db, room_id, choice.client_action_id
                             )
-                            await _send_action_plan_result(
-                                db,
-                                websocket,
-                                room_id,
-                                bound_player_id,
-                                result,
-                            )
+                            if composite is not None:
+                                item, loop, step = composite
+                                result = await action_plan_turn_application.resume_pending(
+                                    room_id=room_id,
+                                    player_id=bound_player_id,
+                                    parent_action_id=step.step_id,
+                                    on_progress=lambda event: _send_plan_progress(websocket, event),
+                                    on_phase=partial(
+                                        _send_turn_phase,
+                                        websocket,
+                                        choice.client_action_id,
+                                    ),
+                                )
+                                if result.waiting_for_player:
+                                    await _send_action_plan_result(
+                                        db,
+                                        websocket,
+                                        room_id,
+                                        bound_player_id,
+                                        result,
+                                        public_correlation_id=choice.client_action_id,
+                                    )
+                                else:
+                                    await _finish_composite_step(
+                                        db, websocket, item, loop, step, result
+                                    )
+                            else:
+                                result = await _resume_after_authoritative_decision(
+                                    db,
+                                    room_id=room_id,
+                                    player_id=bound_player_id,
+                                    parent_action_id=choice.client_action_id,
+                                    on_progress=lambda event: _send_plan_progress(websocket, event),
+                                    on_phase=partial(
+                                        _send_turn_phase,
+                                        websocket,
+                                        choice.client_action_id,
+                                    ),
+                                )
+                                await _send_action_plan_result(
+                                    db,
+                                    websocket,
+                                    room_id,
+                                    bound_player_id,
+                                    result,
+                                )
                         except Exception as exc:
                             code, _, _ = _map_turn_error(exc)
                             log_turn_failed(
@@ -4072,28 +4959,55 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 client_action_id=choice.client_action_id,
                             ):
                                 continue
-                            result = await _resume_after_authoritative_decision(
-                                db,
-                                room_id=room_id,
-                                player_id=bound_player_id,
-                                parent_action_id=choice.client_action_id,
-                                on_progress=lambda event: _send_plan_progress(
-                                    websocket,
-                                    event,
-                                ),
-                                on_phase=partial(
-                                    _send_turn_phase,
-                                    websocket,
-                                    choice.client_action_id,
-                                ),
+                            composite = await _find_composite_action(
+                                db, room_id, choice.client_action_id
                             )
-                            await _send_action_plan_result(
-                                db,
-                                websocket,
-                                room_id,
-                                bound_player_id,
-                                result,
-                            )
+                            if composite is not None:
+                                item, loop, step = composite
+                                result = await action_plan_turn_application.resume_pending(
+                                    room_id=room_id,
+                                    player_id=bound_player_id,
+                                    parent_action_id=step.step_id,
+                                    on_progress=lambda event: _send_plan_progress(websocket, event),
+                                    on_phase=partial(
+                                        _send_turn_phase,
+                                        websocket,
+                                        choice.client_action_id,
+                                    ),
+                                )
+                                if result.waiting_for_player:
+                                    await _send_action_plan_result(
+                                        db,
+                                        websocket,
+                                        room_id,
+                                        bound_player_id,
+                                        result,
+                                        public_correlation_id=choice.client_action_id,
+                                    )
+                                else:
+                                    await _finish_composite_step(
+                                        db, websocket, item, loop, step, result
+                                    )
+                            else:
+                                result = await _resume_after_authoritative_decision(
+                                    db,
+                                    room_id=room_id,
+                                    player_id=bound_player_id,
+                                    parent_action_id=choice.client_action_id,
+                                    on_progress=lambda event: _send_plan_progress(websocket, event),
+                                    on_phase=partial(
+                                        _send_turn_phase,
+                                        websocket,
+                                        choice.client_action_id,
+                                    ),
+                                )
+                                await _send_action_plan_result(
+                                    db,
+                                    websocket,
+                                    room_id,
+                                    bound_player_id,
+                                    result,
+                                )
                         except Exception as exc:
                             code, _, _ = _map_turn_error(exc)
                             log_turn_failed(
@@ -4109,6 +5023,15 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             await _broadcast_room_action_state(db, room_id)
                     elif event_type == "action.plan.cancel":
                         cancel = ActionPlanCancelPayload.model_validate(raw_payload)
+                        if await _cancel_composite_action(
+                            db,
+                            websocket,
+                            room_id=room_id,
+                            player_id=bound_player_id,
+                            client_action_id=cancel.client_action_id,
+                            request_id=cancel.request_id,
+                        ):
+                            continue
                         if await host_action_queue_service.cancel(
                             db,
                             room_id=room_id,

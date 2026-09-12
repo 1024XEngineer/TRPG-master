@@ -552,7 +552,7 @@ class HostActionQueueItem(Base):
         ),
         CheckConstraint(
             "execution_route IN ('unresolved', 'direct_response', 'rule_once', "
-            "'delegate_to_legacy', 'needs_clarification')",
+            "'composite_rule', 'delegate_to_legacy', 'needs_clarification')",
             name="ck_host_action_queue_execution_route",
         ),
         CheckConstraint("attempt_count >= 0", name="ck_host_action_queue_attempt_count"),
@@ -608,6 +608,9 @@ class HostActionQueueItem(Base):
     continuation_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     execution_provenance: Mapped[str | None] = mapped_column(String(40), nullable=True)
     rule_request_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Composite host actions keep a versioned, player-safe loop cursor here so
+    # recovery never needs to re-ask the router or re-run a committed step.
+    rule_loop_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")
     attempt_count: Mapped[int] = mapped_column(

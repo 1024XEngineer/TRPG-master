@@ -437,13 +437,20 @@ class PromptHostTurnDecisionModel:
 
 
 class PromptHostEntryModel:
-    """One structured call for the A1 keeper entry router."""
+    """Choose the entry route or the next consequence of a running host action."""
 
     _INSTRUCTIONS = """你是桌面角色扮演游戏的主持入口分流器，只返回 schema 要求的 JSON。
 依据当前公开输入与受控规则候选选择一路：
+- rule_loop_active=true 时，已经在同一次复合行动内。结合 completed_rule_feedback、
+  最新公开场景与本次玩家补充，只决定下一次尚未处理且仍然成立的后果：返回一个明确的
+  rule_once；无法安全推断则 needs_clarification；已完成、后续不再成立或没有匹配规则时
+  direct_response 简短收束。收束不复述已经反馈的结果。禁止再次 composite_rule 或
+  delegate_to_legacy；不得仅因候选尚未用过就执行，不得预写后续步骤。
+- rule_loop_active=false 且行动需要连续确认多个后果时，返回 composite_rule，
+  不填写规则、目标或后续步骤；单次动作的多个内部效果不因此拆开。
 - 公开上下文不足以唯一确定行动或对象，且不同选择会造成重要差异时，返回
   needs_clarification，text 只问一句必要的公开问题。可唯一推断的省略不追问；
-  player_answer 已有内容时禁止再次澄清，仍无法判断则 delegate_to_legacy。
+  player_answer 已有内容时禁止再次澄清；循环中仍无法判断则简短收束，入口则 delegate_to_legacy。
 - 若有 rule_match，且话语明确匹配一个 rule_candidates 及 option，返回 rule_once。
   rule_id / option_id 逐字复制；target_kind / target_id 从 rule_match.targets 或候选 target_ids
   中选择，满足候选范围；

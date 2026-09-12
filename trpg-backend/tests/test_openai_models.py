@@ -67,6 +67,7 @@ from app.core.action_plan_turn import (
     semantic_planner_selected,
 )
 from app.core.config import Settings, model_client_retry_policy
+from app.core.host_entry import HostEntryContext, HostPublicContext
 from app.core.turn import _configured_opening_models
 from app.service.character_background import build_character_background_service
 from app.service.portrait_generation import build_portrait_generation_service
@@ -1518,3 +1519,27 @@ def test_no_production_http_client_passes_a_scalar_timeout() -> None:
         "这些 httpx 客户端还在用标量 timeout，连不上时会把整份预算耗在建连上：\n"
         + "\n".join(offenders)
     )
+
+
+async def test_host_entry_provider_receives_loop_phase_and_committed_feedback() -> None:
+    calls = []
+
+    class Client:
+        async def generate(self, **kwargs):
+            calls.append(kwargs)
+            return {"route": "direct_response", "text": "就先聊到这里。"}
+
+    context = HostEntryContext(
+        public=HostPublicContext(
+            current_keeper_text="先打招呼，再询问往事",
+            rule_loop_active=True,
+            loop_step_index=1,
+            completed_rule_feedback=("他愿意与你交谈。",),
+        )
+    )
+    decision = await PromptHostEntryModel(Client()).generate(context)
+    assert decision["route"] == "direct_response"
+    assert calls[0]["input_payload"]["public"]["rule_loop_active"] is True
+    assert calls[0]["input_payload"]["public"]["completed_rule_feedback"] == ["他愿意与你交谈。"]
+    assert "rule_loop_active=true" in calls[0]["instructions"]
+    assert "禁止再次 composite_rule" in calls[0]["instructions"]

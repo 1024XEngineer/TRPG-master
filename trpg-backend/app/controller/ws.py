@@ -1967,6 +1967,11 @@ async def _cancel_composite_step(
     step: RuleLoopStep,
     request_id: str,
 ) -> ActionPlanTurnResult:
+    active = await action_plan_turn_application.get_plan(item.room_id, step.step_id)
+    if active is not None and active.status == "awaiting_narration":
+        return await action_plan_turn_application.committed_stop_result(
+            room_id=item.room_id, player_id=item.player_id, parent_action_id=step.step_id
+        )
     # Consent records use the internal step identity and must be released along
     # with the run, otherwise they keep blocking the room after cancellation.
     scene_aborted = await scene_transition_service.abort_pending(
@@ -1987,12 +1992,19 @@ async def _cancel_composite_step(
     )
     if time_aborted is not None:
         await _broadcast_time_advance(item.room_id, time_aborted)
-    return await action_plan_turn_application.cancel_remaining(
-        room_id=item.room_id,
-        player_id=item.player_id,
-        parent_action_id=step.step_id,
-        request_id=request_id,
-    )
+    try:
+        return await action_plan_turn_application.cancel_remaining(
+            room_id=item.room_id,
+            player_id=item.player_id,
+            parent_action_id=step.step_id,
+            request_id=request_id,
+        )
+    except TurnExecutionError as exc:
+        if exc.code != "PLAN_NARRATOR_FAILED":
+            raise
+        return await action_plan_turn_application.committed_stop_result(
+            room_id=item.room_id, player_id=item.player_id, parent_action_id=step.step_id
+        )
 
 
 async def _cancel_composite_action(

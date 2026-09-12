@@ -1736,6 +1736,38 @@ class ActionPlanTurnApplication:
             return derived_request_id
         return "post-roll-accept-" + hashlib.sha256(cancel_id.encode("utf-8")).hexdigest()
 
+    async def committed_stop_result(
+        self, *, room_id: str, player_id: str, parent_action_id: str
+    ) -> ActionPlanTurnResult:
+        """Render durable consequences without a model before stopping an outer loop."""
+
+        run = await self._orchestrator.get_run(room_id, parent_action_id)
+        actor_id = await self._resolve_actor_id(room_id, player_id)
+        if run is None or run.player_id != player_id or run.actor_id != actor_id:
+            raise TurnExecutionError(
+                "RULE_ACTOR_MISMATCH", "规则请求不属于当前角色", retryable=False
+            )
+        if run.status != "awaiting_narration":
+            raise TurnExecutionError("PLAN_NOT_SETTLED", "当前规则尚未结算", retryable=True)
+        player_input = PlayerInput(
+            room_id=room_id,
+            player_id=player_id,
+            actor_id=actor_id,
+            client_action_id=parent_action_id,
+            utterance=run.parent_utterance or run.plan.goal,
+        )
+        context = await self._orchestrator.build_narration_context(
+            player_input, verify_fingerprint=False
+        )
+        return ActionPlanTurnResult(
+            player_input=player_input,
+            player_view=context.player_view,
+            status="stopped",
+            execution=run.steps[-1].adjudication_execution,
+            narration=self._deterministic_narration_fallback(context),
+            plan_id=run.plan_id,
+        )
+
     async def mark_narration_persisted(
         self,
         *,

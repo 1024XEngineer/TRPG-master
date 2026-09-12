@@ -26,6 +26,7 @@ from collaboration_framework.engine import (
 )
 from collaboration_framework.engine.initialization import create_initial_game_state
 from collaboration_framework.engine.models import ActorState
+from collaboration_framework.host.application import ActionPlanNarrator, TurnExecutionError
 from collaboration_framework.host.schemas.action_plan import ActionPlanNpcReply
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -832,3 +833,49 @@ async def test_answer_to_initial_clarification_can_enter_a_fresh_composite_loop(
     assert await ws._route_keeper_queue_item(db_session, item, view) == "composite_rule"
     loop = queue.load_rule_loop(item)
     assert loop is not None and loop.step_index == 0 and not loop.steps
+
+
+@pytest.mark.parametrize("stop_method", ["retry_exhausted", "cancel"])
+async def test_exhausted_narrator_retries_stop_and_release_the_committed_rule(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    action_plan_store_factory,
+    stop_method: str,
+) -> None:
+    store, item, app, contexts, _ = await _runtime(
+        db_session, monkeypatch, action_plan_store_factory
+    )
+
+    class UnavailableNarrator:
+        async def generate(self, context):
+            raise RuntimeError("narration provider unavailable")
+
+    monkeypatch.setattr(app, "_narrator", ActionPlanNarrator(UnavailableNarrator()))
+    view = await ws.session_view_application.current_player_view(
+        room_id=item.room_id, player_id=item.player_id
+    )
+    for attempt in range(2):
+        if attempt:
+            claimed = await queue.claim(db_session, item, recipient_kind="keeper")
+            assert claimed is not None
+            item = claimed
+        with pytest.raises(TurnExecutionError) as failure:
+            await ws._run_composite_rule_action(db_session, item, view, None)
+        if stop_method == "cancel":
+            assert await ws._cancel_composite_action(
+                db_session,
+                None,
+                room_id=item.room_id,
+                player_id=item.player_id,
+                client_action_id=item.client_action_id,
+                request_id="cancel-committed-rule",
+            )
+            break
+        await ws._handle_composite_failure(db_session, item, None, failure.value)
+    assert item.status == "completed"
+    assert len(contexts) == 1
+    state = await _state(store, item.room_id)
+    assert state.entities["cemetery_figure"]["willing_to_talk"] is True
+    assert not state.entities["cemetery_figure"].get("truth_told")
+    assert await app.active_for_room(item.room_id) is None
+    assert len(await _events(db_session, item.room_id)) == 2

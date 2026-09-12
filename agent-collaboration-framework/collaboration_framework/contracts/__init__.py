@@ -159,6 +159,7 @@ from .module_v3 import (
     EndingAnchorSpec,
     EndingPolicySpec,
     EntityRelationSpec,
+    EntityVoiceProfile,
     EntitySpecV3,
     EventTriggerSpec,
     ExecutionBranchSpec,

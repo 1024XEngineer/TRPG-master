@@ -1,9 +1,23 @@
 {
   "content_schema_version": 3,
   "module_id": "happy-frog-village",
-  "version": "3.0.8",
+  "version": "3.0.14",
   "world_ref": "coc-7e",
   "background": "默认采用现代城郊。莱恩夫妇委托调查员寻找失踪的儿子詹姆斯，线索指向不存在于官方记录的蛙蛙度假村。叙事从温馨田园与整齐笑容逐渐滑向梦境、身体异变和选择权被剥夺的恐怖；信使本体、青蛙来源和水晶弱点只能随权威信息揭示。",
+  "opening_text": "你们接到了一个找人的委托，来到了莱恩庄园，一位衣着华贵但面容憔悴的中年男人在管家的陪同下接待了你们。他是本市有名的企业家，理查德·莱恩先生。没有寒暄，他直接将一个厚厚的信封放在桌上，里面装有100美金。\n\n“我知道你们的本事和……收费。”他声音沙哑，开门见山。“我儿子，詹姆斯·莱恩，已经失踪一周了。这是预付金。找到他，把他安全地带回来，你们每人还能再拿到四百金币。”\n\n他推过来一张照片，上面是一个笑容开朗的二十来岁青年。\n\n“警方的常规搜寻毫无进展。他最后被看见，是独自一人往城郊的‘老林地’方向去了。在他房间的垃圾桶里，我们只找到了这个。”管家补充道，递过来一张被揉皱后又展平的彩色传单。",
+  "opening_key_facts": [
+    "调查员因寻人委托来到莱恩庄园。",
+    "委托人理查德·莱恩是企业家，也是失踪青年詹姆斯·莱恩的父亲。",
+    "詹姆斯已经失踪一周。",
+    "委托目标是找到詹姆斯并把他安全带回来。",
+    "理查德当场将装有100美金预付金的信封放在桌上。",
+    "安全带回詹姆斯后，每人还能拿到四百金币；保留作者写明的数量、单位和条件。",
+    "提供了詹姆斯的照片，照片上是一个笑容开朗的二十来岁青年。",
+    "警方常规搜寻没有进展。",
+    "詹姆斯最后被看见独自往城郊老林地方向去。",
+    "在詹姆斯房间的垃圾桶中找到了一张彩色传单。",
+    "管家在场接待，补充线索并递交这张传单。"
+  ],
   "information": [
     {
       "id": "commission_received",
@@ -55,6 +69,93 @@
         "show_in_ui": true
       },
       "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "resort_grounds_seen",
+      "kind": "fact",
+      "title": "抵达蛙蛙度假村",
+      "keeper_content": "调查员抵达后可观察别墅入口、蛙鸣泉与返程小径，尚未得到室内布局。",
+      "player_content": "林间道路尽头出现田园度假村与两层别墅，入口通向接待处，附近有池塘和返程小径。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "resort_map_layout",
+      "kind": "fact",
+      "title": "前台地图上的房间布局",
+      "keeper_content": "原图一楼是前台、餐厅后厨、老板与员工宿舍；二楼有八间客房和上锁杂物间。住客秘密不属于公开布局。",
+      "player_content": "前台地图标明：一楼有接待处、餐厅兼酒吧、后厨、老板宿舍和员工宿舍；楼梯通往二楼走廊、八间编号客房和杂物间。知道房间位置并不代表可以自由进入。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "storage_key_found",
+      "kind": "fact",
+      "title": "二楼杂物间钥匙",
+      "keeper_content": "在员工区侦查成功后发现杂物间钥匙，队伍取得该房间的通行条件。",
+      "player_content": "你们在员工工作服和日用品间找到一把标着“二楼杂物间”的钥匙，可以用它打开杂物间。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "supporting",
       "recovery": {
         "policy": "adaptive",
         "allowed_source_types": [
@@ -930,6 +1031,123 @@
   ],
   "entities": [
     {
+      "id": "richard_lane",
+      "kind": "npc",
+      "origin": "canon",
+      "name": "理查德·莱恩",
+      "player_visible_name": "理查德·莱恩",
+      "player_visible_aliases": [
+        "莱恩先生",
+        "理查德",
+        "詹姆斯的父亲"
+      ],
+      "description": "莱恩先生，詹姆斯的父亲。与妻子在庄园接待调查员，委托他们寻找失踪一周的儿子，并等待调查员回来汇报。",
+      "located_in": "lane_manor",
+      "relations": [],
+      "state": {},
+      "item_component": null,
+      "voice": {
+        "provider": "doubao",
+        "resource_id": "seed-tts-2.0",
+        "voice_type": "zh_male_ruyayichen_saturn_bigtts"
+      },
+      "visibility": "public",
+      "visibility_conditions": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "mrs_lane",
+      "kind": "npc",
+      "origin": "canon",
+      "name": "莱恩夫人",
+      "player_visible_name": "莱恩夫人",
+      "player_visible_aliases": [
+        "莱恩太太",
+        "詹姆斯的母亲"
+      ],
+      "description": "詹姆斯的母亲。与丈夫在庄园等候儿子的消息，向调查员提供寻人委托中公开的情况。",
+      "located_in": "lane_manor",
+      "relations": [],
+      "state": {},
+      "item_component": null,
+      "voice": {
+        "provider": "doubao",
+        "resource_id": "seed-tts-2.0",
+        "voice_type": "zh_female_santongyongns_saturn_bigtts"
+      },
+      "visibility": "public",
+      "visibility_conditions": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "lane_butler",
+      "kind": "npc",
+      "origin": "canon",
+      "name": "莱恩家的管家",
+      "player_visible_name": "莱恩家的管家",
+      "player_visible_aliases": [],
+      "description": "陪同莱恩先生接待调查员，补充詹姆斯最后出现的位置并递交传单。",
+      "located_in": "lane_manor",
+      "relations": [],
+      "state": {},
+      "item_component": null,
+      "voice": {
+        "provider": "doubao",
+        "resource_id": "seed-tts-2.0",
+        "voice_type": "zh_male_ruyayichen_saturn_bigtts"
+      },
+      "visibility": "public",
+      "visibility_conditions": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "james_photo",
+      "kind": "object",
+      "origin": "canon",
+      "name": "詹姆斯的照片",
+      "player_visible_name": "詹姆斯的照片",
+      "player_visible_aliases": [],
+      "description": "照片上是一个笑容开朗的二十来岁青年。",
+      "located_in": "lane_manor",
+      "relations": [],
+      "state": {},
+      "item_component": {
+        "portable": true,
+        "unique": true,
+        "quantity": 1,
+        "capabilities": []
+      },
+      "visibility": "public",
+      "visibility_conditions": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "commission_envelope",
+      "kind": "object",
+      "origin": "canon",
+      "name": "预付金信封",
+      "player_visible_name": "预付金信封",
+      "player_visible_aliases": [],
+      "description": "桌上的厚信封，里面装有 100 美金。",
+      "located_in": "lane_manor",
+      "relations": [],
+      "state": {},
+      "item_component": {
+        "portable": true,
+        "unique": true,
+        "quantity": 1,
+        "capabilities": []
+      },
+      "visibility": "public",
+      "visibility_conditions": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
       "id": "lane_commission",
       "kind": "object",
       "origin": "canon",
@@ -956,6 +1174,9 @@
       "description": "设计精美、地址模糊的彩色传单。",
       "located_in": "lane_manor",
       "relations": [],
+      "initial_custody": {
+        "kind": "starting_actor"
+      },
       "state": {},
       "item_component": {
         "portable": true,
@@ -997,6 +1218,11 @@
       "relations": [],
       "state": {},
       "item_component": null,
+      "voice": {
+        "provider": "doubao",
+        "resource_id": "seed-tts-2.0",
+        "voice_type": "zh_male_ruyayichen_saturn_bigtts"
+      },
       "visibility": "public",
       "visibility_conditions": [],
       "plot_relevance": true,
@@ -1014,6 +1240,11 @@
       "relations": [],
       "state": {},
       "item_component": null,
+      "voice": {
+        "provider": "doubao",
+        "resource_id": "seed-tts-2.0",
+        "voice_type": "zh_male_dongfanghaoran_uranus_bigtts"
+      },
       "visibility": "public",
       "visibility_conditions": [],
       "plot_relevance": true,
@@ -1033,6 +1264,11 @@
         "convinced": false
       },
       "item_component": null,
+      "voice": {
+        "provider": "doubao",
+        "resource_id": "seed-tts-2.0",
+        "voice_type": "zh_female_vv_uranus_bigtts"
+      },
       "visibility": "public",
       "visibility_conditions": [],
       "plot_relevance": true,
@@ -1050,6 +1286,11 @@
       "relations": [],
       "state": {},
       "item_component": null,
+      "voice": {
+        "provider": "doubao",
+        "resource_id": "seed-tts-2.0",
+        "voice_type": "zh_female_santongyongns_saturn_bigtts"
+      },
       "visibility": "public",
       "visibility_conditions": [],
       "plot_relevance": true,
@@ -1068,10 +1309,15 @@
       "state": {
         "released": false,
         "under_forced_custody": false,
-        "accompanying_party": false,
-        "alive": true
+        "accompanying": false,
+        "consciousness": "conscious"
       },
       "item_component": null,
+      "voice": {
+        "provider": "doubao",
+        "resource_id": "seed-tts-2.0",
+        "voice_type": "zh_male_dayi_saturn_bigtts"
+      },
       "visibility": "public",
       "visibility_conditions": [],
       "plot_relevance": true,
@@ -1093,6 +1339,142 @@
       "item_component": null,
       "visibility": "public",
       "visibility_conditions": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "resort_map",
+      "kind": "object",
+      "origin": "canon",
+      "name": "前台地图",
+      "player_visible_name": "前台地图",
+      "player_visible_aliases": [
+        "度假村地图",
+        "楼层地图",
+        "挂图"
+      ],
+      "description": "挂在接待处墙上的度假村楼层地图。",
+      "located_in": "resort_reception",
+      "relations": [],
+      "state": {
+        "viewed": false
+      },
+      "item_component": null,
+      "visibility": "public",
+      "visibility_conditions": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "bedroom_door",
+      "kind": "object",
+      "origin": "canon",
+      "name": "老板宿舍入口",
+      "player_visible_name": "老板宿舍入口",
+      "player_visible_aliases": [],
+      "description": "通往老板私人宿舍的门。",
+      "located_in": "resort_reception",
+      "relations": [],
+      "state": {
+        "open": false
+      },
+      "item_component": null,
+      "visibility": "public",
+      "visibility_conditions": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "storage_door",
+      "kind": "object",
+      "origin": "canon",
+      "name": "杂物间房门",
+      "player_visible_name": "杂物间房门",
+      "player_visible_aliases": [],
+      "description": "二楼走廊尽头标着“杂物间”的房门。",
+      "located_in": "guest_corridor",
+      "relations": [],
+      "state": {
+        "open": false,
+        "unlocked": false
+      },
+      "item_component": null,
+      "visibility": "public",
+      "visibility_conditions": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "guest_room_2_door",
+      "kind": "object",
+      "origin": "canon",
+      "name": "客房2房门",
+      "player_visible_name": "客房2房门",
+      "player_visible_aliases": [],
+      "description": "二楼走廊里标着“2”的客房门。",
+      "located_in": "guest_corridor",
+      "relations": [],
+      "state": {
+        "open": false,
+        "unlocked": false
+      },
+      "item_component": null,
+      "visibility": "public",
+      "visibility_conditions": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "staff_belongings",
+      "kind": "object",
+      "origin": "canon",
+      "name": "员工工作服与日用品",
+      "player_visible_name": "员工工作服与日用品",
+      "player_visible_aliases": [
+        "工作服",
+        "日用品"
+      ],
+      "description": "员工区堆放的工作服、日用品和未完成传单。",
+      "located_in": "staff_area",
+      "relations": [],
+      "state": {},
+      "item_component": null,
+      "visibility": "public",
+      "visibility_conditions": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "storage_key",
+      "kind": "object",
+      "origin": "canon",
+      "name": "二楼杂物间钥匙",
+      "player_visible_name": "二楼杂物间钥匙",
+      "player_visible_aliases": [],
+      "description": "一把贴着“二楼杂物间”标签的小钥匙。",
+      "located_in": "staff_area",
+      "relations": [],
+      "state": {
+        "found": false
+      },
+      "item_component": {
+        "portable": true,
+        "unique": true,
+        "quantity": 1,
+        "capabilities": []
+      },
+      "visibility": "public",
+      "visibility_conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "storage_key",
+            "key": "found",
+            "value": true
+          }
+        }
+      ],
       "plot_relevance": true,
       "lifecycle": "session"
     },
@@ -1121,10 +1503,15 @@
       "player_visible_name": "宽衣游客",
       "player_visible_aliases": [],
       "description": "用宽大衣物遮挡身体异样的游客。",
-      "located_in": "guest_room",
+      "located_in": "guest_room_2",
       "relations": [],
       "state": {},
       "item_component": null,
+      "voice": {
+        "provider": "doubao",
+        "resource_id": "seed-tts-2.0",
+        "voice_type": "zh_male_xuanyijieshuo_uranus_bigtts"
+      },
       "visibility": "public",
       "visibility_conditions": [],
       "plot_relevance": true,
@@ -1137,7 +1524,7 @@
       "name": "汤品与饮料",
       "player_visible_name": "汤品与饮料",
       "player_visible_aliases": [],
-      "description": "由蛙鸣泉池水制作的饮品与汤。",
+      "description": "餐桌上供应的汤品与饮料。",
       "located_in": "dining_kitchen",
       "relations": [],
       "state": {},
@@ -1154,7 +1541,7 @@
       "name": "厨房水桶",
       "player_visible_name": "厨房水桶",
       "player_visible_aliases": [],
-      "description": "装着带微弱磷光池水的大桶。",
+      "description": "盛水的大桶，桶中的液体泛着微光。",
       "located_in": "dining_kitchen",
       "relations": [],
       "state": {},
@@ -1193,6 +1580,11 @@
       "relations": [],
       "state": {},
       "item_component": null,
+      "voice": {
+        "provider": "doubao",
+        "resource_id": "seed-tts-2.0",
+        "voice_type": "zh_female_mizai_saturn_bigtts"
+      },
       "visibility": "public",
       "visibility_conditions": [],
       "plot_relevance": true,
@@ -1282,7 +1674,7 @@
       "name": "信使的私人笔记",
       "player_visible_name": "信使的私人笔记",
       "player_visible_aliases": [],
-      "description": "记录她的来历、目标和转化原因。",
+      "description": "房间里保存的一本私人笔记。",
       "located_in": "messenger_bedroom",
       "relations": [],
       "state": {},
@@ -1398,7 +1790,7 @@
       "origin": "canon",
       "name": "老林地周边村镇",
       "player_visible_name": "老林地周边村镇",
-      "player_visible_description": "村民、警局档案和地方机构提供互相印证的线索。",
+      "player_visible_description": "老林地附近的村镇，可在出发前走访。",
       "parent_location_id": null,
       "region_id": null,
       "relations": [],
@@ -1411,7 +1803,7 @@
       "origin": "canon",
       "name": "老林地碎石路",
       "player_visible_name": "老林地碎石路",
-      "player_visible_description": "通往度假村的潮湿林间道路。",
+      "player_visible_description": "通往老林地的林间道路。",
       "parent_location_id": null,
       "region_id": null,
       "relations": [],
@@ -1424,7 +1816,7 @@
       "origin": "canon",
       "name": "蛙蛙度假村",
       "player_visible_name": "蛙蛙度假村",
-      "player_visible_description": "被雾气与老林环绕的田园度假村。沿碎石路望去，一栋醒目的两层别墅坐落在修剪整齐的草坪后方；别墅正门通向一层接待大厅，附近还能看到通往蛙鸣泉与度假村边界的小径。",
+      "player_visible_description": "传单上位于城郊老林地的度假村。",
       "parent_location_id": null,
       "region_id": null,
       "relations": [],
@@ -1437,7 +1829,7 @@
       "origin": "canon",
       "name": "度假村别墅",
       "player_visible_name": "度假村别墅",
-      "player_visible_description": "接待、客房和员工区域所在的两层别墅。",
+      "player_visible_description": "度假村内的两层别墅。",
       "parent_location_id": "frog_resort",
       "region_id": null,
       "relations": [],
@@ -1450,7 +1842,7 @@
       "origin": "canon",
       "name": "别墅一层",
       "player_visible_name": "别墅一层",
-      "player_visible_description": "接待大厅与餐厅厨房所在楼层。",
+      "player_visible_description": "别墅入口所在楼层。",
       "parent_location_id": "resort_villa",
       "region_id": null,
       "relations": [],
@@ -1463,7 +1855,7 @@
       "origin": "canon",
       "name": "别墅二层",
       "player_visible_name": "别墅二层",
-      "player_visible_description": "客房与非公开员工区域所在楼层。",
+      "player_visible_description": "地图标注的客房与杂物间所在楼层。",
       "parent_location_id": "resort_villa",
       "region_id": null,
       "relations": [],
@@ -1476,7 +1868,7 @@
       "origin": "canon",
       "name": "一层接待大厅",
       "player_visible_name": "一层接待大厅",
-      "player_visible_description": "卡通青蛙木牌后的明亮接待区。",
+      "player_visible_description": "大门内是前台、沙发与茶几，墙上挂着楼层地图，旁边有通往二楼的楼梯。",
       "aliases": [
         "度假村别墅",
         "别墅",
@@ -1489,12 +1881,147 @@
       "lifecycle": "session"
     },
     {
+      "id": "guest_corridor",
+      "kind": "connector",
+      "origin": "canon",
+      "name": "二楼客房走廊",
+      "player_visible_name": "二楼客房走廊",
+      "player_visible_description": "连接二楼编号客房、楼梯和杂物间的走廊。",
+      "aliases": [
+        "二楼",
+        "楼上",
+        "客房走廊"
+      ],
+      "parent_location_id": "resort_second_floor",
+      "region_id": null,
+      "relations": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
       "id": "guest_room",
       "kind": "room",
       "origin": "canon",
-      "name": "客房",
-      "player_visible_name": "客房",
-      "player_visible_description": "整洁舒适，却处处重复幸福口号。",
+      "name": "客房1",
+      "player_visible_name": "客房1",
+      "player_visible_description": "二楼地图上标为1号的客房。",
+      "aliases": [
+        "客房",
+        "1号客房",
+        "客房一"
+      ],
+      "parent_location_id": "resort_second_floor",
+      "region_id": null,
+      "relations": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "guest_room_2",
+      "kind": "room",
+      "origin": "canon",
+      "name": "客房2",
+      "player_visible_name": "客房2",
+      "player_visible_description": "二楼地图上标为2号的客房。",
+      "aliases": [
+        "2号客房"
+      ],
+      "parent_location_id": "resort_second_floor",
+      "region_id": null,
+      "relations": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "guest_room_3",
+      "kind": "room",
+      "origin": "canon",
+      "name": "客房3",
+      "player_visible_name": "客房3",
+      "player_visible_description": "二楼地图上标为3号的客房。",
+      "aliases": [
+        "3号客房"
+      ],
+      "parent_location_id": "resort_second_floor",
+      "region_id": null,
+      "relations": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "guest_room_4",
+      "kind": "room",
+      "origin": "canon",
+      "name": "客房4",
+      "player_visible_name": "客房4",
+      "player_visible_description": "二楼地图上标为4号的客房。",
+      "aliases": [
+        "4号客房"
+      ],
+      "parent_location_id": "resort_second_floor",
+      "region_id": null,
+      "relations": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "guest_room_5",
+      "kind": "room",
+      "origin": "canon",
+      "name": "客房5",
+      "player_visible_name": "客房5",
+      "player_visible_description": "二楼地图上标为5号的客房。",
+      "aliases": [
+        "5号客房"
+      ],
+      "parent_location_id": "resort_second_floor",
+      "region_id": null,
+      "relations": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "guest_room_6",
+      "kind": "room",
+      "origin": "canon",
+      "name": "客房6",
+      "player_visible_name": "客房6",
+      "player_visible_description": "二楼地图上标为6号的客房。",
+      "aliases": [
+        "6号客房"
+      ],
+      "parent_location_id": "resort_second_floor",
+      "region_id": null,
+      "relations": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "guest_room_7",
+      "kind": "room",
+      "origin": "canon",
+      "name": "客房7",
+      "player_visible_name": "客房7",
+      "player_visible_description": "二楼地图上标为7号的客房。",
+      "aliases": [
+        "7号客房"
+      ],
+      "parent_location_id": "resort_second_floor",
+      "region_id": null,
+      "relations": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "guest_room_8",
+      "kind": "room",
+      "origin": "canon",
+      "name": "客房8",
+      "player_visible_name": "客房8",
+      "player_visible_description": "二楼地图上标为8号的客房。",
+      "aliases": [
+        "8号客房"
+      ],
       "parent_location_id": "resort_second_floor",
       "region_id": null,
       "relations": [],
@@ -1505,9 +2032,15 @@
       "id": "dining_kitchen",
       "kind": "room",
       "origin": "canon",
-      "name": "用餐区与厨房",
-      "player_visible_name": "用餐区与厨房",
-      "player_visible_description": "所有汤水都带着蛙鸣泉的微光。",
+      "name": "餐厅与后厨",
+      "player_visible_name": "餐厅与后厨",
+      "player_visible_description": "地图标注的一楼餐厅兼酒吧，旁边连接后厨。",
+      "aliases": [
+        "用餐区",
+        "厨房",
+        "餐厅",
+        "酒吧"
+      ],
       "parent_location_id": "resort_ground_floor",
       "region_id": null,
       "relations": [],
@@ -1533,7 +2066,7 @@
       "origin": "canon",
       "name": "水晶池岸",
       "player_visible_name": "水晶池岸",
-      "player_visible_description": "调查员将梦境水晶带上岸后，才形成的结局行动位置。",
+      "player_visible_description": "蛙鸣泉边的一段池岸。",
       "parent_location_id": "frog_resort",
       "region_id": null,
       "relations": [],
@@ -1544,10 +2077,14 @@
       "id": "staff_area",
       "kind": "room",
       "origin": "canon",
-      "name": "员工区",
-      "player_visible_name": "员工区",
-      "player_visible_description": "堆放制服、传单和员工纸条的非公开区域。",
-      "parent_location_id": "resort_second_floor",
+      "name": "员工宿舍",
+      "player_visible_name": "员工宿舍",
+      "player_visible_description": "地图标注的一楼员工区域，不向游客开放。",
+      "aliases": [
+        "员工区",
+        "员工区域"
+      ],
+      "parent_location_id": "resort_ground_floor",
       "region_id": null,
       "relations": [],
       "plot_relevance": true,
@@ -1559,7 +2096,7 @@
       "origin": "canon",
       "name": "二楼杂物间",
       "player_visible_name": "二楼杂物间",
-      "player_visible_description": "堆满甜腻营养液桶的房间。",
+      "player_visible_description": "地图标注的二楼杂物间。",
       "parent_location_id": "resort_second_floor",
       "region_id": null,
       "relations": [],
@@ -1570,10 +2107,14 @@
       "id": "messenger_bedroom",
       "kind": "room",
       "origin": "canon",
-      "name": "信使卧室",
-      "player_visible_name": "信使卧室",
-      "player_visible_description": "保存信使私人笔记的简单卧室。",
-      "parent_location_id": "resort_second_floor",
+      "name": "老板宿舍",
+      "player_visible_name": "老板宿舍",
+      "player_visible_description": "地图标注的一楼老板私人宿舍。",
+      "aliases": [
+        "信使卧室",
+        "老板卧室"
+      ],
+      "parent_location_id": "resort_ground_floor",
       "region_id": null,
       "relations": [],
       "plot_relevance": true,
@@ -1585,7 +2126,7 @@
       "origin": "canon",
       "name": "度假村边界",
       "player_visible_name": "度假村边界",
-      "player_visible_description": "雾气包围的返程道路。",
+      "player_visible_description": "通向度假村外的返程小径。",
       "parent_location_id": "frog_resort",
       "region_id": null,
       "relations": [],
@@ -1598,7 +2139,7 @@
       "origin": "canon",
       "name": "城郊道路",
       "player_visible_name": "城郊道路",
-      "player_visible_description": "离开度假村后的现实道路。",
+      "player_visible_description": "通往城市的道路。",
       "parent_location_id": null,
       "region_id": null,
       "relations": [],
@@ -1664,14 +2205,58 @@
       "origin": "authored"
     },
     {
-      "id": "forest_to_resort",
+      "id": "manor_to_forest",
+      "from_location_id": "lane_manor",
+      "to_location_id": "forest_road",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "hidden",
+      "access_point_id": null,
+      "conditions": [
+        {
+          "op": "predicate",
+          "predicate": "information_is",
+          "args": {
+            "id": "frog_resort_flyer"
+          }
+        }
+      ],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "manor_to_forest_back",
       "from_location_id": "forest_road",
-      "to_location_id": "frog_resort",
+      "to_location_id": "lane_manor",
       "kind": "public_network",
       "traversal": "automatic",
       "visibility": "public",
       "access_point_id": null,
       "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "forest_to_resort",
+      "from_location_id": "forest_road",
+      "to_location_id": "frog_resort",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "hidden",
+      "access_point_id": null,
+      "conditions": [
+        {
+          "op": "predicate",
+          "predicate": "information_is",
+          "args": {
+            "id": "frog_resort_flyer"
+          }
+        }
+      ],
       "travel_cost": {
         "minutes": 0
       },
@@ -1697,9 +2282,17 @@
       "to_location_id": "resort_reception",
       "kind": "public_network",
       "traversal": "automatic",
-      "visibility": "public",
+      "visibility": "hidden",
       "access_point_id": null,
-      "conditions": [],
+      "conditions": [
+        {
+          "op": "predicate",
+          "predicate": "information_is",
+          "args": {
+            "id": "resort_grounds_seen"
+          }
+        }
+      ],
       "travel_cost": {
         "minutes": 0
       },
@@ -1720,12 +2313,84 @@
       "origin": "authored"
     },
     {
+      "id": "resort_to_pond",
+      "from_location_id": "frog_resort",
+      "to_location_id": "frog_pond",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "hidden",
+      "access_point_id": null,
+      "conditions": [
+        {
+          "op": "predicate",
+          "predicate": "information_is",
+          "args": {
+            "id": "resort_grounds_seen"
+          }
+        }
+      ],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "resort_to_pond_back",
+      "from_location_id": "frog_pond",
+      "to_location_id": "frog_resort",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "resort_to_boundary",
+      "from_location_id": "frog_resort",
+      "to_location_id": "resort_boundary",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "hidden",
+      "access_point_id": null,
+      "conditions": [
+        {
+          "op": "predicate",
+          "predicate": "information_is",
+          "args": {
+            "id": "resort_grounds_seen"
+          }
+        }
+      ],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "resort_to_boundary_back",
+      "from_location_id": "resort_boundary",
+      "to_location_id": "frog_resort",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
       "id": "reception_to_dining",
       "from_location_id": "resort_reception",
       "to_location_id": "dining_kitchen",
       "kind": "public_network",
       "traversal": "automatic",
-      "visibility": "public",
+      "visibility": "hidden",
       "access_point_id": null,
       "conditions": [],
       "travel_cost": {
@@ -1750,10 +2415,10 @@
     {
       "id": "reception_stairs_to_guest",
       "from_location_id": "resort_reception",
-      "to_location_id": "guest_room",
+      "to_location_id": "guest_corridor",
       "kind": "public_network",
       "traversal": "automatic",
-      "visibility": "public",
+      "visibility": "hidden",
       "access_point_id": null,
       "conditions": [],
       "travel_cost": {
@@ -1763,7 +2428,7 @@
     },
     {
       "id": "reception_stairs_to_guest_back",
-      "from_location_id": "guest_room",
+      "from_location_id": "guest_corridor",
       "to_location_id": "resort_reception",
       "kind": "public_network",
       "traversal": "automatic",
@@ -1776,9 +2441,23 @@
       "origin": "authored"
     },
     {
-      "id": "resort_to_pond",
-      "from_location_id": "frog_resort",
-      "to_location_id": "frog_pond",
+      "id": "corridor_to_guest_room",
+      "from_location_id": "guest_corridor",
+      "to_location_id": "guest_room",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "hidden",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "corridor_to_guest_room_back",
+      "from_location_id": "guest_room",
+      "to_location_id": "guest_corridor",
       "kind": "public_network",
       "traversal": "automatic",
       "visibility": "public",
@@ -1790,9 +2469,308 @@
       "origin": "authored"
     },
     {
-      "id": "resort_to_pond_back",
-      "from_location_id": "frog_pond",
-      "to_location_id": "frog_resort",
+      "id": "corridor_to_guest_room_2",
+      "from_location_id": "guest_corridor",
+      "to_location_id": "guest_room_2",
+      "kind": "private",
+      "traversal": "gated",
+      "visibility": "hidden",
+      "access_point_id": "guest_room_2_door",
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "corridor_to_guest_room_2_back",
+      "from_location_id": "guest_room_2",
+      "to_location_id": "guest_corridor",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "corridor_to_guest_room_3",
+      "from_location_id": "guest_corridor",
+      "to_location_id": "guest_room_3",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "hidden",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "corridor_to_guest_room_3_back",
+      "from_location_id": "guest_room_3",
+      "to_location_id": "guest_corridor",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "corridor_to_guest_room_4",
+      "from_location_id": "guest_corridor",
+      "to_location_id": "guest_room_4",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "hidden",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "corridor_to_guest_room_4_back",
+      "from_location_id": "guest_room_4",
+      "to_location_id": "guest_corridor",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "corridor_to_guest_room_5",
+      "from_location_id": "guest_corridor",
+      "to_location_id": "guest_room_5",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "hidden",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "corridor_to_guest_room_5_back",
+      "from_location_id": "guest_room_5",
+      "to_location_id": "guest_corridor",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "corridor_to_guest_room_6",
+      "from_location_id": "guest_corridor",
+      "to_location_id": "guest_room_6",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "hidden",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "corridor_to_guest_room_6_back",
+      "from_location_id": "guest_room_6",
+      "to_location_id": "guest_corridor",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "corridor_to_guest_room_7",
+      "from_location_id": "guest_corridor",
+      "to_location_id": "guest_room_7",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "hidden",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "corridor_to_guest_room_7_back",
+      "from_location_id": "guest_room_7",
+      "to_location_id": "guest_corridor",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "corridor_to_guest_room_8",
+      "from_location_id": "guest_corridor",
+      "to_location_id": "guest_room_8",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "hidden",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "corridor_to_guest_room_8_back",
+      "from_location_id": "guest_room_8",
+      "to_location_id": "guest_corridor",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "reception_to_staff",
+      "from_location_id": "resort_reception",
+      "to_location_id": "staff_area",
+      "kind": "private",
+      "traversal": "gated",
+      "visibility": "hidden",
+      "access_point_id": "staff_door",
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "reception_to_staff_back",
+      "from_location_id": "staff_area",
+      "to_location_id": "resort_reception",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "reception_to_bedroom",
+      "from_location_id": "resort_reception",
+      "to_location_id": "messenger_bedroom",
+      "kind": "private",
+      "traversal": "gated",
+      "visibility": "hidden",
+      "access_point_id": "bedroom_door",
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "reception_to_bedroom_back",
+      "from_location_id": "messenger_bedroom",
+      "to_location_id": "resort_reception",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "corridor_to_storage",
+      "from_location_id": "guest_corridor",
+      "to_location_id": "storage_room",
+      "kind": "private",
+      "traversal": "gated",
+      "visibility": "hidden",
+      "access_point_id": "storage_door",
+      "conditions": [
+        {
+          "op": "any",
+          "items": [
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "storage_key",
+                "key": "found",
+                "value": true
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "storage_door",
+                "key": "unlocked",
+                "value": true
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "storage_door",
+                "key": "open",
+                "value": true
+              }
+            }
+          ]
+        }
+      ],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "corridor_to_storage_back",
+      "from_location_id": "storage_room",
+      "to_location_id": "guest_corridor",
       "kind": "public_network",
       "traversal": "automatic",
       "visibility": "public",
@@ -1809,7 +2787,7 @@
       "to_location_id": "crystal_shore",
       "kind": "public_network",
       "traversal": "automatic",
-      "visibility": "public",
+      "visibility": "hidden",
       "access_point_id": null,
       "conditions": [
         {
@@ -1831,166 +2809,6 @@
       "id": "pond_to_crystal_shore_back",
       "from_location_id": "crystal_shore",
       "to_location_id": "frog_pond",
-      "kind": "public_network",
-      "traversal": "automatic",
-      "visibility": "public",
-      "access_point_id": null,
-      "conditions": [],
-      "travel_cost": {
-        "minutes": 0
-      },
-      "origin": "authored"
-    },
-    {
-      "id": "resort_to_boundary",
-      "from_location_id": "frog_resort",
-      "to_location_id": "resort_boundary",
-      "kind": "public_network",
-      "traversal": "automatic",
-      "visibility": "public",
-      "access_point_id": null,
-      "conditions": [],
-      "travel_cost": {
-        "minutes": 0
-      },
-      "origin": "authored"
-    },
-    {
-      "id": "resort_to_boundary_back",
-      "from_location_id": "resort_boundary",
-      "to_location_id": "frog_resort",
-      "kind": "public_network",
-      "traversal": "automatic",
-      "visibility": "public",
-      "access_point_id": null,
-      "conditions": [],
-      "travel_cost": {
-        "minutes": 0
-      },
-      "origin": "authored"
-    },
-    {
-      "id": "reception_to_staff",
-      "from_location_id": "resort_reception",
-      "to_location_id": "staff_area",
-      "kind": "private",
-      "traversal": "gated",
-      "visibility": "public",
-      "access_point_id": "staff_door",
-      "conditions": [
-        {
-          "op": "predicate",
-          "predicate": "entity_state_is",
-          "args": {
-            "entity_id": "staff_door",
-            "key": "open",
-            "value": true
-          }
-        }
-      ],
-      "travel_cost": {
-        "minutes": 0
-      },
-      "origin": "authored"
-    },
-    {
-      "id": "reception_to_staff_back",
-      "from_location_id": "staff_area",
-      "to_location_id": "resort_reception",
-      "kind": "public_network",
-      "traversal": "automatic",
-      "visibility": "public",
-      "access_point_id": null,
-      "conditions": [],
-      "travel_cost": {
-        "minutes": 0
-      },
-      "origin": "authored"
-    },
-    {
-      "id": "guest_to_staff",
-      "from_location_id": "guest_room",
-      "to_location_id": "staff_area",
-      "kind": "private",
-      "traversal": "gated",
-      "visibility": "public",
-      "access_point_id": "staff_door",
-      "conditions": [
-        {
-          "op": "predicate",
-          "predicate": "entity_state_is",
-          "args": {
-            "entity_id": "staff_door",
-            "key": "open",
-            "value": true
-          }
-        }
-      ],
-      "travel_cost": {
-        "minutes": 0
-      },
-      "origin": "authored"
-    },
-    {
-      "id": "guest_to_staff_back",
-      "from_location_id": "staff_area",
-      "to_location_id": "guest_room",
-      "kind": "public_network",
-      "traversal": "automatic",
-      "visibility": "public",
-      "access_point_id": null,
-      "conditions": [],
-      "travel_cost": {
-        "minutes": 0
-      },
-      "origin": "authored"
-    },
-    {
-      "id": "staff_to_storage",
-      "from_location_id": "staff_area",
-      "to_location_id": "storage_room",
-      "kind": "public_network",
-      "traversal": "automatic",
-      "visibility": "public",
-      "access_point_id": null,
-      "conditions": [],
-      "travel_cost": {
-        "minutes": 0
-      },
-      "origin": "authored"
-    },
-    {
-      "id": "staff_to_storage_back",
-      "from_location_id": "storage_room",
-      "to_location_id": "staff_area",
-      "kind": "public_network",
-      "traversal": "automatic",
-      "visibility": "public",
-      "access_point_id": null,
-      "conditions": [],
-      "travel_cost": {
-        "minutes": 0
-      },
-      "origin": "authored"
-    },
-    {
-      "id": "staff_to_bedroom",
-      "from_location_id": "staff_area",
-      "to_location_id": "messenger_bedroom",
-      "kind": "public_network",
-      "traversal": "automatic",
-      "visibility": "public",
-      "access_point_id": null,
-      "conditions": [],
-      "travel_cost": {
-        "minutes": 0
-      },
-      "origin": "authored"
-    },
-    {
-      "id": "staff_to_bedroom_back",
-      "from_location_id": "messenger_bedroom",
-      "to_location_id": "staff_area",
       "kind": "public_network",
       "traversal": "automatic",
       "visibility": "public",
@@ -2849,7 +3667,7 @@
             "effect": {
               "type": "change_entity_state",
               "entity_id": "james",
-              "key": "accompanying_party",
+              "key": "accompanying",
               "value": true
             },
             "next_step_id": "finish"
@@ -2923,7 +3741,7 @@
             "effect": {
               "type": "change_entity_state",
               "entity_id": "james",
-              "key": "accompanying_party",
+              "key": "accompanying",
               "value": false
             },
             "next_step_id": "finish"
@@ -3008,7 +3826,7 @@
             "effect": {
               "type": "change_entity_state",
               "entity_id": "james",
-              "key": "accompanying_party",
+              "key": "accompanying",
               "value": false
             },
             "next_step_id": "finish"
@@ -3109,7 +3927,7 @@
             "effect": {
               "type": "change_entity_state",
               "entity_id": "james",
-              "key": "accompanying_party",
+              "key": "accompanying",
               "value": true
             },
             "next_step_id": "effect_2"
@@ -3118,8 +3936,10 @@
             "id": "effect_2",
             "kind": "effect",
             "effect": {
-              "type": "enter_location",
-              "location_id": "outside"
+              "type": "move_entity",
+              "entity_id": "james",
+              "location_id": "outside",
+              "holder_actor_id": null
             },
             "next_step_id": "effect_3"
           },
@@ -3127,10 +3947,8 @@
             "id": "effect_3",
             "kind": "effect",
             "effect": {
-              "type": "move_entity",
-              "entity_id": "james",
-              "location_id": "outside",
-              "holder_actor_id": null
+              "type": "enter_location",
+              "location_id": "outside"
             },
             "next_step_id": "effect_4"
           },
@@ -3140,8 +3958,8 @@
             "effect": {
               "type": "change_entity_state",
               "entity_id": "james",
-              "key": "alive",
-              "value": false
+              "key": "consciousness",
+              "value": "dead"
             },
             "next_step_id": "effect_5"
           },
@@ -3265,7 +4083,7 @@
             "observe"
           ],
           "location_ids": [
-            "guest_room"
+            "guest_room_2"
           ],
           "target_kinds": [
             "entity"
@@ -3750,6 +4568,307 @@
             "effect": {
               "type": "reveal_information",
               "information_id": "staff_are_conditioned",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "find_storage_key",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "search",
+            "inspect"
+          ],
+          "location_ids": [
+            "staff_area"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "staff_belongings"
+          ]
+        },
+        "when": {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "storage_key",
+            "key": "found",
+            "value": false
+          }
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "搜索员工工作服与日用品",
+            "寻找杂物间钥匙"
+          ]
+        },
+        "options": [
+          {
+            "id": "spot-hidden",
+            "semantic_hints": [
+              "搜索员工工作服与日用品",
+              "寻找杂物间钥匙"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "spot-hidden",
+            "entry_step_id": "check"
+          }
+        ],
+        "steps": [
+          {
+            "id": "check",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "spot-hidden"
+              },
+              "difficulty": "regular",
+              "allow_luck": true,
+              "allow_push": true
+            },
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "hard_success": "success_0",
+              "regular_success": "success_0",
+              "failure": "failure_0",
+              "fumble": "failure_0"
+            }
+          },
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "storage_key",
+              "key": "found",
+              "value": true
+            },
+            "next_step_id": "success_1"
+          },
+          {
+            "id": "success_1",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "storage_key_found",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "failure_0",
+            "kind": "effect",
+            "effect": {
+              "type": "narrative_only"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "infiltrate_messenger_bedroom",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "sneak",
+            "enter",
+            "distract"
+          ],
+          "location_ids": [
+            "resort_reception"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "bedroom_door"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "潜入老板宿舍",
+            "避开员工进入老板卧室"
+          ]
+        },
+        "options": [
+          {
+            "id": "stealth",
+            "semantic_hints": [
+              "潜入老板宿舍",
+              "避开员工进入老板卧室"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "stealth",
+            "entry_step_id": "check"
+          }
+        ],
+        "steps": [
+          {
+            "id": "check",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "stealth"
+              },
+              "difficulty": "regular",
+              "allow_luck": true,
+              "allow_push": true
+            },
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "hard_success": "success_0",
+              "regular_success": "success_0",
+              "failure": "failure_0",
+              "fumble": "failure_0"
+            }
+          },
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "bedroom_door",
+              "key": "open",
+              "value": true
+            },
+            "next_step_id": "success_1"
+          },
+          {
+            "id": "success_1",
+            "kind": "effect",
+            "effect": {
+              "type": "enter_location",
+              "location_id": "messenger_bedroom"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "failure_0",
+            "kind": "effect",
+            "effect": {
+              "type": "narrative_only"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "read_resort_map",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "read",
+            "inspect",
+            "observe"
+          ],
+          "location_ids": [
+            "resort_reception"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "resort_map"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "查看前台地图",
+            "了解度假村楼层布局"
+          ]
+        },
+        "options": [
+          {
+            "id": "read-map",
+            "semantic_hints": [
+              "查看前台地图",
+              "了解度假村楼层布局"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "read-map",
+            "entry_step_id": "effect_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "effect_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "resort_map_layout",
               "scope": "party"
             },
             "next_step_id": "finish"
@@ -4717,7 +5836,7 @@
             "effect": {
               "type": "change_entity_state",
               "entity_id": "james",
-              "key": "accompanying_party",
+              "key": "accompanying",
               "value": false
             },
             "next_step_id": "success_5"
@@ -4899,7 +6018,7 @@
             "effect": {
               "type": "change_entity_state",
               "entity_id": "james",
-              "key": "accompanying_party",
+              "key": "accompanying",
               "value": false
             },
             "next_step_id": "effect_6"
@@ -5394,6 +6513,351 @@
               "entity_id": "final_debate",
               "key": "available",
               "value": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "see_resort_grounds",
+      "priority": 0,
+      "trigger": {
+        "kind": "event",
+        "event_type": "travel.resolved",
+        "when": {
+          "op": "all",
+          "items": [
+            {
+              "op": "predicate",
+              "predicate": "party_location_is",
+              "args": {
+                "id": "frog_resort"
+              }
+            },
+            {
+              "op": "not",
+              "item": {
+                "op": "predicate",
+                "predicate": "information_is",
+                "args": {
+                  "id": "resort_grounds_seen"
+                }
+              }
+            }
+          ]
+        },
+        "entry_branch_id": "default"
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "default",
+            "entry_step_id": "effect_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "effect_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "resort_grounds_seen",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "see_reception_map",
+      "priority": 0,
+      "trigger": {
+        "kind": "event",
+        "event_type": "travel.resolved",
+        "when": {
+          "op": "all",
+          "items": [
+            {
+              "op": "predicate",
+              "predicate": "party_location_is",
+              "args": {
+                "id": "resort_reception"
+              }
+            },
+            {
+              "op": "not",
+              "item": {
+                "op": "predicate",
+                "predicate": "information_is",
+                "args": {
+                  "id": "resort_map_layout"
+                }
+              }
+            }
+          ]
+        },
+        "entry_branch_id": "default"
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "default",
+            "entry_step_id": "effect_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "effect_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "resort_map_layout",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "learn_locations_from_map",
+      "priority": 0,
+      "trigger": {
+        "kind": "event",
+        "event_type": "information.revealed",
+        "when": {
+          "op": "all",
+          "items": [
+            {
+              "op": "predicate",
+              "predicate": "information_is",
+              "args": {
+                "id": "resort_map_layout"
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "resort_map",
+                "key": "viewed",
+                "value": false
+              }
+            }
+          ]
+        },
+        "entry_branch_id": "default"
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "default",
+            "entry_step_id": "effect_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "effect_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "resort_map",
+              "key": "viewed",
+              "value": true
+            },
+            "next_step_id": "effect_1"
+          },
+          {
+            "id": "effect_1",
+            "kind": "effect",
+            "effect": {
+              "type": "set_visibility",
+              "target_kind": "location",
+              "target_id": "resort_reception",
+              "visible": true,
+              "scope": "party"
+            },
+            "next_step_id": "effect_2"
+          },
+          {
+            "id": "effect_2",
+            "kind": "effect",
+            "effect": {
+              "type": "set_visibility",
+              "target_kind": "location",
+              "target_id": "dining_kitchen",
+              "visible": true,
+              "scope": "party"
+            },
+            "next_step_id": "effect_3"
+          },
+          {
+            "id": "effect_3",
+            "kind": "effect",
+            "effect": {
+              "type": "set_visibility",
+              "target_kind": "location",
+              "target_id": "guest_corridor",
+              "visible": true,
+              "scope": "party"
+            },
+            "next_step_id": "effect_4"
+          },
+          {
+            "id": "effect_4",
+            "kind": "effect",
+            "effect": {
+              "type": "set_visibility",
+              "target_kind": "location",
+              "target_id": "staff_area",
+              "visible": true,
+              "scope": "party"
+            },
+            "next_step_id": "effect_5"
+          },
+          {
+            "id": "effect_5",
+            "kind": "effect",
+            "effect": {
+              "type": "set_visibility",
+              "target_kind": "location",
+              "target_id": "storage_room",
+              "visible": true,
+              "scope": "party"
+            },
+            "next_step_id": "effect_6"
+          },
+          {
+            "id": "effect_6",
+            "kind": "effect",
+            "effect": {
+              "type": "set_visibility",
+              "target_kind": "location",
+              "target_id": "messenger_bedroom",
+              "visible": true,
+              "scope": "party"
+            },
+            "next_step_id": "effect_7"
+          },
+          {
+            "id": "effect_7",
+            "kind": "effect",
+            "effect": {
+              "type": "set_visibility",
+              "target_kind": "location",
+              "target_id": "guest_room",
+              "visible": true,
+              "scope": "party"
+            },
+            "next_step_id": "effect_8"
+          },
+          {
+            "id": "effect_8",
+            "kind": "effect",
+            "effect": {
+              "type": "set_visibility",
+              "target_kind": "location",
+              "target_id": "guest_room_2",
+              "visible": true,
+              "scope": "party"
+            },
+            "next_step_id": "effect_9"
+          },
+          {
+            "id": "effect_9",
+            "kind": "effect",
+            "effect": {
+              "type": "set_visibility",
+              "target_kind": "location",
+              "target_id": "guest_room_3",
+              "visible": true,
+              "scope": "party"
+            },
+            "next_step_id": "effect_10"
+          },
+          {
+            "id": "effect_10",
+            "kind": "effect",
+            "effect": {
+              "type": "set_visibility",
+              "target_kind": "location",
+              "target_id": "guest_room_4",
+              "visible": true,
+              "scope": "party"
+            },
+            "next_step_id": "effect_11"
+          },
+          {
+            "id": "effect_11",
+            "kind": "effect",
+            "effect": {
+              "type": "set_visibility",
+              "target_kind": "location",
+              "target_id": "guest_room_5",
+              "visible": true,
+              "scope": "party"
+            },
+            "next_step_id": "effect_12"
+          },
+          {
+            "id": "effect_12",
+            "kind": "effect",
+            "effect": {
+              "type": "set_visibility",
+              "target_kind": "location",
+              "target_id": "guest_room_6",
+              "visible": true,
+              "scope": "party"
+            },
+            "next_step_id": "effect_13"
+          },
+          {
+            "id": "effect_13",
+            "kind": "effect",
+            "effect": {
+              "type": "set_visibility",
+              "target_kind": "location",
+              "target_id": "guest_room_7",
+              "visible": true,
+              "scope": "party"
+            },
+            "next_step_id": "effect_14"
+          },
+          {
+            "id": "effect_14",
+            "kind": "effect",
+            "effect": {
+              "type": "set_visibility",
+              "target_kind": "location",
+              "target_id": "guest_room_8",
+              "visible": true,
+              "scope": "party"
             },
             "next_step_id": "finish"
           },

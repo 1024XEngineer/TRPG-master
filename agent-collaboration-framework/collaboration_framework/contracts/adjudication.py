@@ -168,17 +168,10 @@ class NarrativeOnlyEffect(ContractModel):
 
 
 class AdvanceWorldTimeEffect(ContractModel):
-    """Jump the room to the single next point on the discrete timeline (#245).
+    """Advance exactly one point on the authored timeline.
 
-    One effect is exactly one jump — the timeline decides *where*, the caller
-    only decides *that*. Sleeping from noon until 20:00 is therefore two of
-    these in sequence, and each one publishes its own `time.point_entered`, so
-    a Rule that watches for nightfall still fires on the point it was written
-    against instead of being skipped over.
-
-    `to_point_id` is not a destination request: it is the Agent stating which
-    point it believes comes next, and the Engine refuses the effect when that
-    disagrees with the authored timeline.
+    If provided, to_point_id must equal the next point, not a later destination.
+    Reaching a later point requires sequential effects so intermediate events fire.
     """
 
     type: Literal["advance_world_time"] = "advance_world_time"
@@ -205,13 +198,9 @@ ActionEffect = Annotated[
 
 
 class RuleDecisionRef(ContractModel):
-    """The Agent's answer to a Rule Match View question (#226 §2).
+    """Select opaque rule and option IDs from the published candidate menu.
 
-    Both ids are opaque: they come from the candidate menu the Engine published,
-    and the Agent may not invent them. Naming a rule hands ownership of the
-    outcome to that rule — `success_effects` / `failure_effects` on the same
-    adjudication are then ignored, because the published rule owns what the
-    result does (`effect_authority: rule`, #226 §5).
+    The selected rule owns the outcome; agent-authored effects are not applied.
     """
 
     rule_id: str = Field(min_length=1, max_length=100)
@@ -435,7 +424,7 @@ class NarrationEvidence(ContractModel):
     """Player-safe meaning of one public event that narration may rely on."""
 
     ref: str = Field(min_length=1)
-    kind: Literal["entity_discovered"]
+    kind: Literal["entity_discovered", "information_revealed"]
     subject_id: str = Field(min_length=1)
     subject_name: str = Field(min_length=1)
     subject_aliases: tuple[str, ...] = ()
@@ -520,9 +509,7 @@ class AdjudicationExecution(ContractModel):
 # 「它触发的规则链没跑完」——效果一样已经落库，所以凡是问「这次裁决提交了没有」
 # 的地方都必须把它算进来。集中在这里而不是散在调用点，是因为 #398 新增
 # `rule_failed` 时，正是这些散落的 `== "resolved"` 最容易漏。
-COMMITTED_ADJUDICATION_STATUSES: frozenset[str] = frozenset(
-    {"resolved", "rule_failed"}
-)
+COMMITTED_ADJUDICATION_STATUSES: frozenset[str] = frozenset({"resolved", "rule_failed"})
 # 再没有下一步的状态：要么已提交，要么已取消。
 TERMINAL_ADJUDICATION_STATUSES: frozenset[str] = COMMITTED_ADJUDICATION_STATUSES | {
     "cancelled"

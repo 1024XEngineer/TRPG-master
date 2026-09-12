@@ -731,6 +731,67 @@
   transition: filter 160ms ease, transform 160ms ease;
 }
 
+.room-play__mention-anchor {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.room-play__recipient-hint {
+  position: absolute;
+  z-index: 5;
+  bottom: calc(100% + 0.65rem);
+  left: 0;
+  display: flex;
+  width: max-content;
+  max-width: min(18rem, calc(100vw - 6rem));
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.45rem 0.4rem 0.7rem;
+  border: 1px solid rgb(139 91 38 / 35%);
+  border-radius: 0.5rem;
+  color: #4b321b;
+  background: #f7e7c7;
+  box-shadow: 0 0.35rem 0.8rem rgb(42 24 10 / 18%);
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+
+.room-play__recipient-hint::after {
+  position: absolute;
+  bottom: -0.35rem;
+  left: 1.375rem;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-right: 1px solid rgb(139 91 38 / 35%);
+  border-bottom: 1px solid rgb(139 91 38 / 35%);
+  background: #f7e7c7;
+  content: '';
+  pointer-events: none;
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.room-play__recipient-hint-close {
+  display: grid;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex: 0 0 1.75rem;
+  place-items: center;
+  border: 0;
+  border-radius: 0.25rem;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.room-play__recipient-hint-close:hover {
+  background: rgb(213 170 104 / 24%);
+}
+
+.room-play__recipient-hint-close:focus-visible {
+  outline: 2px solid #9b6428;
+  outline-offset: 2px;
+}
+
 .room-play__recipient-menu {
   position: absolute;
   z-index: 5;
@@ -896,14 +957,14 @@
   overscroll-behavior: contain;
 }
 
-/* 连续幸运骰使用紧凑固定高度，避免移动端被普通骰子面板撑出大块留白。 */
+/* 连续幸运骰占手机框 72%，确保结果和确认按钮无需滚动即可同时看到。 */
 .room-play__bottom-panel--sequential-dice {
-  height: 64vh !important;
-  max-height: 64vh !important;
+  height: 72% !important;
+  max-height: 72dvh !important;
 }
 
 .room-play__bottom-panel--sequential-dice > .room-play__bottom-panel-content {
-  max-height: calc(64vh - 60px) !important;
+  max-height: calc(100% - 60px) !important;
 }
 
 .room-play__bottom-panel--character-sheet > .room-play__bottom-panel-content {
@@ -1150,12 +1211,12 @@
   }
 
   .room-play__bottom-panel--sequential-dice {
-    height: 64dvh !important;
-    max-height: 64dvh !important;
+    height: 72% !important;
+    max-height: 72dvh !important;
   }
 
   .room-play__bottom-panel--sequential-dice > .room-play__bottom-panel-content {
-    max-height: calc(64dvh - 60px) !important;
+    max-height: calc(100% - 60px) !important;
   }
 
   .room-play__header {

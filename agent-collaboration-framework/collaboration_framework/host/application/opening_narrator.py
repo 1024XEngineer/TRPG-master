@@ -42,7 +42,11 @@ class OpeningNarrator:
         self._model = model
 
     async def narrate(self, context: OpeningNarrationContext) -> NarrationOutput:
-        """Require a narration-only result that names every public participant."""
+        """Validate output protocol and shared identity, allowing natural rewrites.
+
+        Authored source and key facts guide generation, not literal acceptance.
+        This validator does not claim to prove semantic coverage of those facts.
+        """
 
         raw = await self._model.generate(context)
         if isinstance(raw, dict) and isinstance(raw.get("text"), str):
@@ -51,11 +55,7 @@ class OpeningNarrator:
             output = NarrationOutput.model_validate(raw)
         except (TypeError, ValueError) as exc:
             raise OpeningNarrationValidationError("outer_schema") from exc
-        if (
-            output.kind != "narration"
-            or output.claimed_fact_ids
-            or output.suggested_actions
-        ):
+        if output.kind != "narration" or output.claimed_fact_ids or output.suggested_actions:
             raise OpeningNarrationValidationError("opening_contract")
         rejection_reason = narration_text_rejection_reason(output.text)
         if rejection_reason is not None:
@@ -66,7 +66,7 @@ class OpeningNarrator:
         )
         if subject_rejection is not None:
             raise OpeningNarrationValidationError("subject_ownership")
-        if any(
+        if (len(context.participants) > 1 or context.addressing_mode == "named_actor") and any(
             participant.name not in output.text for participant in context.participants
         ):
             raise OpeningNarrationValidationError("participant_coverage")
@@ -81,13 +81,23 @@ def deterministic_opening_narration(
     addressing_mode = getattr(context, "addressing_mode", "second_person")
     scene_name = context.scene.name.strip()
     scene_description = context.scene.description.strip()
-    if scene_description and narration_subject_rejection_reason(
-        scene_description,
-        addressing_mode=addressing_mode,
+    if (
+        not context.opening_text
+        and scene_description
+        and narration_subject_rejection_reason(
+            scene_description,
+            addressing_mode=addressing_mode,
+        )
     ):
         # 模组可见描述可能含未加引号的「你」；named_actor 下整段丢掉，不改写原文。
         scene_description = ""
-    scene_lines = [line for line in (scene_name, scene_description) if line]
+    # Authored public read-aloud is preserved verbatim, including its addressing.
+    # This deterministic branch does not exempt freely generated model prose.
+    scene_lines = (
+        [context.opening_text]
+        if context.opening_text
+        else [line for line in (scene_name, scene_description) if line]
+    )
     participant_labels = []
     for participant in context.participants:
         public_details = [
@@ -100,9 +110,9 @@ def deterministic_opening_narration(
             label = f"{label}（{'，'.join(public_details)}）"
         participant_labels.append(label)
     if len(participant_labels) == 1:
-        scene_lines.append(f"{participant_labels[0]}此刻就在这里。")
+        scene_lines.append(f"{participant_labels[0]}此刻位于{scene_name}。")
     else:
-        scene_lines.append(f"共同在场的调查员有：{'、'.join(participant_labels)}。")
+        scene_lines.append(f"此刻在{scene_name}的调查员有：{'、'.join(participant_labels)}。")
     return NarrationOutput(
         kind="narration",
         text="\n".join(scene_lines),

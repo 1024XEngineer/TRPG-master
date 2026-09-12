@@ -331,9 +331,7 @@ def _visible_entities(
             # Canon 物品的 ItemCustody 是权威位置，避免同一物品同时出现在背包和场景。
             if item.custody.kind == "actor_inventory":
                 continue
-            placed = (
-                item.custody.ref_id if item.custody.kind == "location" else None
-            )
+            placed = item.custody.ref_id if item.custody.kind == "location" else None
             carried = None
         else:
             placed = _optional_text(overrides.get("location_id")) or entity.located_in
@@ -391,10 +389,14 @@ def _public_entity_state(
 ) -> tuple[ProjectionObservableState, ...]:
     """只投影由公开标准效果登记过的状态键，避免把模组隐藏状态带给模型。"""
 
-    keys = state.public_entity_state_keys.get(entity_id, ())
+    keys = set(state.public_entity_state_keys.get(entity_id, ()))
+    # 随行是可见实体的公开关系，包括模组初始化时声明的值；不能等到第一次
+    # change_entity_state 才让主持人知道它。其余模组私有状态仍须显式公开。
+    if isinstance(values.get("accompanying"), bool):
+        keys.add("accompanying")
     return tuple(
         ProjectionObservableState(key=key, label=key, value=values[key])
-        for key in keys
+        for key in sorted(keys)
         if key in PUBLIC_STATE_KEYS and key in values
     )
 
@@ -495,10 +497,10 @@ def _known_information(
     for item in module.information:
         if not _override_allows(state, actor_id, "information", item.id):
             continue
-        if item.discovery.initial == "known":
-            scope = item.discovery.scope
-        elif item.id in party:
+        if item.id in party:
             scope = "party"
+        elif item.discovery.initial == "known":
+            scope = item.discovery.scope
         elif item.id in mine:
             scope = "actor"
         else:
@@ -518,6 +520,30 @@ def _known_information(
             )
         )
     return tuple(projected)
+
+
+def public_known_information(
+    module: ModuleContentV3, state: GameState
+) -> tuple[ProjectionKnownInformation, ...]:
+    """Facts shareable in room narration, respecting every bound actor's visibility.
+
+    Personal knowledge is never promoted to a public result merely because the
+    acting player can see it. Uses the same projection as the player information panel.
+    """
+    actor_ids = tuple(key for key, actor in state.actors.items() if actor.player_id)
+    if not actor_ids:
+        return ()
+    views = [
+        {
+            item.id: item
+            for item in _known_information(module, state, actor_id)
+            if item.scope == "party"
+        }
+        for actor_id in actor_ids
+    ]
+    return tuple(
+        item for key, item in views[0].items() if all(key in view for view in views)
+    )
 
 
 def _override_allows(
@@ -745,7 +771,7 @@ def _rule_candidates(
                         # 分支里有没有检定步，是 Agent 必须知道的；后果仍然不出服务端。
                         requires_check=(step := pending_check_for(rule, option.id)[0])
                         is not None,
-                        check_skill_id=_rule_check_skill_id(step, module.world_ref),
+                        check_skill_id=rule_check_skill_id(step, module.world_ref),
                     )
                     for option in trigger.options
                 ),
@@ -755,8 +781,13 @@ def _rule_candidates(
     return tuple(candidates)
 
 
-def _rule_check_skill_id(step: object, world_ref: str = "coc-7e") -> str | None:
-    """Resolve the rolled resource without exposing rule execution details."""
+def rule_check_skill_id(step: object, world_ref: str = "coc-7e") -> str | None:
+    """作者在这一步上规定要掷的技能/资源，没规定则 None。
+
+    投影用它把 `check_skill_id` 作为提示发给 Agent；提交期用同一个函数判断 Agent
+    报的候选对不对（#483）。两处必须同源，否则会出现「菜单上写着掷幸运、提交时却
+    按另一套标准判」。
+    """
 
     if not isinstance(step, CheckStep):
         return None

@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { RoomSocketServerError, TurnFailedError, type AdjudicationPendingPayload, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type CheckResultPayload, type EndingDraft, type NarrationPushPayload, type RoomActionStatePayload, type RoomConversationEvent, type RoomPlayerSummary, type SceneTransitionPendingPayload, type TimeAdvancePendingPayload } from 'trpg-sdk'
+import { RoomSocketServerError, TurnFailedError, type RoomSocketConnectionState, type AdjudicationPendingPayload, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type CheckResultPayload, type EndingDraft, type NarrationPushPayload, type RoomActionStatePayload, type RoomConversationEvent, type RoomPlayerSummary, type SceneTransitionPendingPayload, type TimeAdvancePendingPayload } from 'trpg-sdk'
 import { ArrowLeft, Users, Map, MapPin, BookOpen, ScrollText, Star, X, SendHorizontal, Plus, Save, FlagOff, Heart, Brain, Volume2, Pause, Play, Square, RotateCcw, Mic, LoaderCircle, Clock3, Check } from 'lucide-react'
 import { useCallback, useState, useRef, useEffect, useMemo, type Dispatch, type FormEvent, type SetStateAction } from 'react'
 import { useRoomStore } from '@/stores/room-store'
@@ -121,9 +121,16 @@ const checkDifficultyLabels: Record<string, string> = {
 
 function checkResultContent(payload: CheckResultPayload): string {
   const levelLabel = checkResultLevelLabels[payload.successLevel] ?? payload.result
-  const outcomeLabel = payload.passed
-    ? levelLabel
-    : `${levelLabel}（未通过${checkDifficultyLabels[payload.difficulty] ?? ''}检定）`
+  // 括号只在"够到了常规成功、但没够到这次要求的难度"时才有信息量（issue #505）。
+  // 判定本身已经是失败或大失败时再附一句「未通过困难检定」会误导——玩家会以为
+  // 只是差在难度档位上，实际连常规都没过（实测 侦察 43% 掷出 95 也带这个括号）。
+  const missedRequiredDifficultyOnly =
+    !payload.passed &&
+    payload.successLevel !== 'failure' &&
+    payload.successLevel !== 'fumble'
+  const outcomeLabel = missedRequiredDifficultyOnly
+    ? `${levelLabel}（未通过${checkDifficultyLabels[payload.difficulty] ?? ''}检定）`
+    : levelLabel
   const resolutionLabel =
     payload.resolutionKind === 'spend_luck' && payload.luckSpent
       ? ` · 消耗 ${payload.luckSpent} 点幸运 → ${outcomeLabel}`
@@ -222,6 +229,8 @@ interface Message {
   type: 'system' | 'narr' | 'player' | 'npc' | 'dice'
   channel?: 'action' | 'discussion'
   messageId?: string
+  /** 语音接口使用的权威事件 ID；与 UI 去重用的 messageId 分开保存。 */
+  speechMessageId?: string
   narrationId?: string
   sender?: string
   content: string
@@ -436,6 +445,12 @@ function conversationMessageId(type: RoomConversationEvent['type'], id: string):
   return `history:${type}:${id}`
 }
 
+function speechEventId(message: Message): string | undefined {
+  if (message.speechMessageId?.trim()) return message.speechMessageId
+  // 兼容热更新或旧客户端已经放入内存的消息；新消息会直接保存权威事件 ID。
+  return message.messageId?.replace(/^history:dialogue\.npc:/, '').replace(/^dialogue\.npc:/, '')
+}
+
 /**
  * 一条主持叙事正在渐进到达时的临时拼装状态（issue #203）。
  *
@@ -492,8 +507,9 @@ const REVEAL_TICK_MS = 30
 const REVEAL_MAX_MS = 2400
 
 function mergeHistoricalMessages(current: Message[], history: Message[]): Message[] {
-  const ids = new Set(current.flatMap((item) => (item.messageId ? [item.messageId] : [])))
-  return [...history.filter((item) => !item.messageId || !ids.has(item.messageId)), ...current]
+  // 已入库消息使用历史的顺序和时间；保留历史快照尚未包含的实时消息。
+  const ids = new Set(history.flatMap((item) => (item.messageId ? [item.messageId] : [])))
+  return [...history, ...current.filter((item) => !item.messageId || !ids.has(item.messageId))]
 }
 
 function appendLiveMessage(current: Message[], message: Message): Message[] {
@@ -628,6 +644,7 @@ function conversationEventToMessage(
       type: 'npc',
       channel: 'action',
       messageId: conversationMessageId(event.type, payload.messageId),
+      speechMessageId: payload.messageId,
       sender: payload.speakerName,
       speakerId: payload.speakerId,
       avatarUrl: payload.avatarUrl ?? undefined,
@@ -1446,6 +1463,7 @@ export default function RoomPage() {
   const { ruleset } = useRuleset()
   const roomInfo = useRoomPlayers(roomCode)
   const roomPlayers = roomInfo?.players ?? EMPTY_ROOM_PLAYERS
+  const singlePlayer = roomPlayers.length === 1
   const portraitVersionOverride = usePortraitGenerationStore((s) => roomId ? s.portraitVersions[roomId] : undefined)
   const clearPortraitVersion = usePortraitGenerationStore((s) => s.clearPortraitVersion)
   const portraitPlayers = useMemo(() => roomPlayers.map((player) => player.playerId === playerId && portraitVersionOverride
@@ -1459,6 +1477,7 @@ export default function RoomPage() {
   }, [roomId, playerId, roomPlayers, portraitVersionOverride, clearPortraitVersion])
   const hostSpeech = useHostSpeech({ roomId, reconnectToken, accountToken: getAuthToken() })
   const enqueueHostSpeech = hostSpeech.enqueue
+  const enqueueNpcSpeech = hostSpeech.enqueueNpc
   const markHostSpeechSeen = hostSpeech.markSeen
   const handleHostSpeechSettingsUpdated = hostSpeech.handleSettingsUpdated
   const isHost = roomInfo?.players.find((p) => p.playerId === playerId)?.isHost ?? false
@@ -1476,6 +1495,27 @@ export default function RoomPage() {
   const [selectedRecipient, setSelectedRecipient] = useState<SelectedRecipient | null>(null)
   const [recipientMenuOpen, setRecipientMenuOpen] = useState(false)
   const [recipientMenuIndex, setRecipientMenuIndex] = useState(0)
+  const recipientHintStorageKey = roomId && playerId
+    ? `aidm-recipient-hint:${roomId}:${playerId}`
+    : null
+  const [dismissedRecipientHintKey, setDismissedRecipientHintKey] = useState<string | null>(null)
+  const recipientHintPreviouslyDismissed = useMemo(() => {
+    if (!recipientHintStorageKey) return true
+    try {
+      return localStorage.getItem(recipientHintStorageKey) === 'dismissed'
+    } catch {
+      return false
+    }
+  }, [recipientHintStorageKey])
+  const dismissRecipientHint = useCallback(() => {
+    if (!recipientHintStorageKey) return
+    setDismissedRecipientHintKey(recipientHintStorageKey)
+    try {
+      localStorage.setItem(recipientHintStorageKey, 'dismissed')
+    } catch {
+      // 存储受限时仍能关闭当前提示，不影响消息输入。
+    }
+  }, [recipientHintStorageKey])
   const isActionChannel = channel === 'action'
   /**
    * 草稿按频道各存各的（issue #304）。
@@ -1563,6 +1603,11 @@ export default function RoomPage() {
     return cached?.room_id === roomId ? cached : null
   })
   const [progressLabel, setProgressLabel] = useState<string | null>(null)
+  const [wsConnectionState, setWsConnectionState] =
+    useState<RoomSocketConnectionState>('connecting')
+  const wsConnectionStateRef = useRef<RoomSocketConnectionState>('connecting')
+  /** 每次重连成功后 +1，用来重新拉取断线期间错过的会话历史。 */
+  const [historyReloadKey, setHistoryReloadKey] = useState(0)
   const [secondaryProgressLabel, setSecondaryProgressLabel] = useState<string | null>(null)
   const [streamingNarration, setStreamingNarration] = useState<StreamingNarration | null>(null)
   // 队列而不是单槽：揭示窗口最长 REVEAL_MAX_MS，这期间完全可能再来一条叙事
@@ -1616,6 +1661,11 @@ export default function RoomPage() {
   const showRoomActionBanner =
     roomActionState?.status === 'awaiting_player' && pendingAdjudication !== null
   const composerDisabled = suspended || (isActionChannel && roomInfo === null)
+  const showRecipientHint = isActionChannel && !composerDisabled && !recipientMenuOpen &&
+    !recipientHintPreviouslyDismissed && dismissedRecipientHintKey !== recipientHintStorageKey
+  const recipientHintText = singlePlayer
+    ? '@选择在场角色，单人游玩时直接输入即可与主持人对话'
+    : '@选择在场角色，多人游玩时不选择角色无法触发回复'
   const actionOwnerName = roomActionState?.playerId === playerId
     ? senderName
     : displayName(
@@ -1755,6 +1805,24 @@ export default function RoomPage() {
     if (roomInfo?.phase) setRoomPhase(roomInfo.phase)
   }, [roomInfo?.phase])
 
+  // 连接状态与断线恢复（issue #505）。
+  //
+  // 断线期间服务端的 narration.push / view.updated / turn.completed 全部投递失败
+  // （服务端日志里是 ws_send_dropped），这些帧不会补发。所以重连成功后必须重新
+  // 拉一次会话历史——这正是过去只能靠用户手动刷新页面才能做到的事。
+  useEffect(() => {
+    const previousStateRef = { current: wsConnectionStateRef.current }
+    return sdk.roomSocket.onConnectionChange((state) => {
+      const previous = previousStateRef.current
+      previousStateRef.current = state
+      wsConnectionStateRef.current = state
+      setWsConnectionState(state)
+      if (previous === 'reconnecting' && state === 'open') {
+        setHistoryReloadKey((key) => key + 1)
+      }
+    })
+  }, [])
+
   useEffect(() => {
     if (!roomId || !reconnectToken) return
     let cancelled = false
@@ -1768,6 +1836,14 @@ export default function RoomPage() {
           item.type === 'narr' && item.narrationId ? [item.narrationId] : [],
         ),
       )
+      markHostSpeechSeen(
+        restored.flatMap((item) =>
+          item.type === 'npc' && speechEventId(item)
+            ? [speechEventId(item)!]
+            : [],
+        ),
+        'npc',
+      )
       setMessages((current) => mergeHistoricalMessages(current, restored))
       if (
         restored.some(
@@ -1779,9 +1855,29 @@ export default function RoomPage() {
         setProgressLabel(null)
         setSecondaryProgressLabel(null)
       }
+      // 断线重连后补齐的历史里如果已经有这次行动的叙事，说明它在服务端早就结算
+      // 完了，本地那份"处理中/待结算"状态必须一起收掉，否则界面会继续等一个永远
+      // 不会再来的推送（issue #505 PR review）。
+      const inFlightActionId = pendingNarrationActionIdRef.current
+      if (
+        inFlightActionId &&
+        restored.some(
+          (item) =>
+            item.messageId === conversationMessageId('narration.push', inFlightActionId),
+        )
+      ) {
+        pendingNarrationActionIdRef.current = null
+        clearSettledAction(inFlightActionId)
+        setPendingAction((current) =>
+          current?.clientActionId === inFlightActionId ? null : current,
+        )
+        setTyping(false)
+        setProgressLabel(null)
+        setSecondaryProgressLabel(null)
+      }
     }).catch(() => {})
     return () => { cancelled = true }
-  }, [markHostSpeechSeen, roomId, reconnectToken, playerId, senderName])
+  }, [clearSettledAction, markHostSpeechSeen, roomId, reconnectToken, playerId, senderName, historyReloadKey])
 
   useEffect(() => {
     // ★ block: 'nearest' 很关键——默认的 scrollIntoView 会尝试把目标"居中"，
@@ -1971,10 +2067,12 @@ export default function RoomPage() {
       } else if (envelope.type === 'dialogue.npc') {
         setTyping(false)
         clearBackendProgress()
+        enqueueNpcSpeech(envelope.payload.messageId)
         setMessages((prev) => appendLiveMessage(prev, {
           type: 'npc',
           channel: 'action',
           messageId: conversationMessageId('dialogue.npc', envelope.payload.messageId),
+          speechMessageId: envelope.payload.messageId,
           sender: envelope.payload.speakerName,
           speakerId: envelope.payload.speakerId,
           avatarUrl: envelope.payload.avatarUrl ?? undefined,
@@ -2171,7 +2269,7 @@ export default function RoomPage() {
       setProgressLabel('守秘人正在生成开场叙事')
     }
     return off
-  }, [clearBackendProgress, clearSettledAction, enqueueHostSpeech, handleHostSpeechSettingsUpdated, openDiceForCheck, playerId, senderName, showBackendPhase])
+  }, [clearBackendProgress, clearSettledAction, enqueueHostSpeech, enqueueNpcSpeech, handleHostSpeechSettingsUpdated, openDiceForCheck, playerId, senderName, showBackendPhase])
 
   const submitPlayerAction = (action: {
     clientActionId: string
@@ -2237,6 +2335,7 @@ export default function RoomPage() {
 
   const selectRecipient = (recipient: SelectedRecipient) => {
     if (suspended) return
+    dismissRecipientHint()
     setChannel('action')
     setSelectedRecipient(recipient)
     setRecipientMenuOpen(false)
@@ -2314,7 +2413,6 @@ export default function RoomPage() {
       setActionError('请从 @ 菜单选择当前场景中的守秘人或 NPC')
       return
     }
-    const singlePlayer = roomInfo?.maxPlayers === 1
     if (hostRequest || singlePlayer) {
       submitPlayerAction({
         clientActionId: randomActionId(),
@@ -2532,6 +2630,8 @@ export default function RoomPage() {
           const isPlayer = msg.type === 'player' && msg.isSelf
           const isNarr = msg.type === 'narr'
           const isNpc = msg.type === 'npc'
+          const speechId = isNpc ? speechEventId(msg) : msg.narrationId
+          const isCurrentSpeechMessage = speechId === hostSpeech.currentMessageId
           const portraitUrl = msg.playerId ? portraitUrls[msg.playerId] : undefined
 
           return (
@@ -2567,7 +2667,7 @@ export default function RoomPage() {
                 </div>
                 <div className={`room-play__message-card ${isNarr ? 'room-play__narration-card' : ''} ${isNpc ? 'room-play__npc-card' : ''}`}>
                   <div className="room-play__narration-text whitespace-pre-wrap">
-                    {isNarr && msg.narrationId === hostSpeech.currentMessageId && hostSpeech.currentSentences.length > 0
+                    {isCurrentSpeechMessage && hostSpeech.currentSentences.length > 0
                       ? hostSpeech.currentSentences.map((sentence) => (
                           <span
                             key={sentence.index}
@@ -2581,13 +2681,16 @@ export default function RoomPage() {
                 </div>
                 <div className="room-play__message-meta">
                   <span>{msg.time}</span>
-                  {isNarr && (
+                  {(isNarr || isNpc) && (
                     <button
                       type="button"
                       aria-label="重新朗读"
                       title="重新朗读"
-                      disabled={!hostSpeech.available || !msg.narrationId}
-                      onClick={() => hostSpeech.replay(msg.narrationId)}
+                      disabled={!hostSpeech.available || (!msg.narrationId && !isNpc)}
+                      onClick={() => {
+                        if (isNarr) hostSpeech.replay(msg.narrationId)
+                        else hostSpeech.replay(speechEventId(msg), 'npc')
+                      }}
                     >
                       <RotateCcw aria-hidden="true" />
                       重播
@@ -2615,6 +2718,20 @@ export default function RoomPage() {
                 </div>
               </div>
               <div className="room-play__message-meta">生成中…</div>
+            </div>
+          </div>
+        )}
+
+        {/* 连接状态（issue #505）。断线必须可见：过去连接断了以后既不重连也不
+            提示，界面停在"处理中"的点点上，玩家只能猜要不要刷新页面。*/}
+        {isActionChannel && wsConnectionState !== 'open' && wsConnectionState !== 'connecting' && (
+          <div className="room-play__message room-play__message--narration">
+            <div className="room-play__typing">
+              <span className="text-[11px] text-text-muted">
+                {wsConnectionState === 'reconnecting'
+                  ? '连接已断开，正在重新连接…'
+                  : '连接已断开，请刷新页面重试'}
+              </span>
             </div>
           </div>
         )}
@@ -2966,22 +3083,39 @@ export default function RoomPage() {
             </button>
           )}
           {isActionChannel && (
-            <button
-              ref={mentionButtonRef}
-              type="button"
-              aria-label="选择消息接收者"
-              title="选择守秘人或 NPC"
-              aria-expanded={recipientMenuOpen}
-              aria-controls="dialogue-recipient-list"
-              onClick={() => {
-                setRecipientMenuIndex(0)
-                setRecipientMenuOpen((open) => !open)
-              }}
-              disabled={composerDisabled}
-              className={`room-play__composer-button room-play__host-mention-button${selectedRecipient ? ' is-active' : ''}`}
-            >
-              <span aria-hidden="true">@</span>
-            </button>
+            <div className="room-play__mention-anchor">
+              {showRecipientHint && (
+                <div role="note" aria-label="对话角色提示" className="room-play__recipient-hint">
+                  <span id="dialogue-recipient-hint" className="text-amber-700">{recipientHintText}</span>
+                  <button
+                    type="button"
+                    aria-label="关闭对话角色提示"
+                    onClick={dismissRecipientHint}
+                    className="room-play__recipient-hint-close"
+                  >
+                    <X size={14} aria-hidden="true" />
+                  </button>
+                </div>
+              )}
+              <button
+                ref={mentionButtonRef}
+                type="button"
+                aria-label="选择消息接收者"
+                title="选择守秘人或 NPC"
+                aria-describedby={showRecipientHint ? 'dialogue-recipient-hint' : undefined}
+                aria-expanded={recipientMenuOpen}
+                aria-controls="dialogue-recipient-list"
+                onClick={() => {
+                  dismissRecipientHint()
+                  setRecipientMenuIndex(0)
+                  setRecipientMenuOpen((open) => !open)
+                }}
+                disabled={composerDisabled}
+                className={`room-play__composer-button room-play__host-mention-button${selectedRecipient ? ' is-active' : ''}`}
+              >
+                <span aria-hidden="true">@</span>
+              </button>
+            </div>
           )}
           <textarea
             ref={composerInputRef}
@@ -3002,6 +3136,7 @@ export default function RoomPage() {
                 setSelectedRecipient(null)
               }
               if (isActionChannel && /^\s*@[^\s]*$/u.test(value) && !selectedRecipient) {
+                dismissRecipientHint()
                 setRecipientMenuIndex(0)
                 setRecipientMenuOpen(true)
               }
@@ -3037,7 +3172,7 @@ export default function RoomPage() {
               suspended
                 ? '游戏已挂起'
                 : isActionChannel
-                    ? '输入消息…'
+                    ? '输入消息'
                     : '输入行动…'
             }
             className="room-play__input"

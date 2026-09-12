@@ -323,6 +323,76 @@ async def _proposal(db: AsyncSession, room_id: str) -> SceneTransitionProposalRe
 
 
 @pytest.mark.asyncio
+async def test_narration_completion_marks_every_scene_proposal_for_parent_action(
+    db_session: AsyncSession,
+) -> None:
+    room, players, _ = await _start_room(
+        db_session,
+        room_number=5240,
+        player_count=2,
+        prepare_checkpoint=True,
+    )
+    session = await db_session.get(GameSession, room.id)
+    assert session is not None
+
+    async def create_approved(
+        action_id: str,
+        parent_action_id: str,
+    ) -> SceneTransitionProposalRecord:
+        await scene_transition.create_from_adjudication(
+            db_session,
+            _request(
+                room_id=room.id,
+                player_id=players[0].id,
+                revision=session.state_version,
+                action_id=action_id,
+            ),
+        )
+        record = await db_session.scalar(
+            select(SceneTransitionProposalRecord).where(
+                SceneTransitionProposalRecord.room_id == room.id,
+                SceneTransitionProposalRecord.action_request_id == action_id,
+            )
+        )
+        assert record is not None
+        await scene_transition.bind_parent_action(
+            db_session,
+            room_id=room.id,
+            proposal_id=record.proposal_id,
+            player_id=players[0].id,
+            parent_action_id=parent_action_id,
+        )
+        record.status = "approved"
+        await db_session.commit()
+        return record
+
+    first = await create_approved("scene-step-1-524", "scene-parent-524")
+    second = await create_approved("scene-step-2-524", "scene-parent-524")
+    unrelated = await create_approved("scene-other-524", "scene-other-parent-524")
+
+    await scene_transition.mark_narration_persisted(
+        db_session,
+        room_id=room.id,
+        parent_action_id="scene-parent-524",
+    )
+    await db_session.refresh(first)
+    await db_session.refresh(second)
+    await db_session.refresh(unrelated)
+    assert first.narration_persisted is True
+    assert second.narration_persisted is True
+    assert unrelated.narration_persisted is False
+
+    # 收尾可能在断线恢复中重放；重复调用必须保持幂等。
+    await scene_transition.mark_narration_persisted(
+        db_session,
+        room_id=room.id,
+        parent_action_id="scene-parent-524",
+    )
+    assert first.narration_persisted is True
+    assert second.narration_persisted is True
+
+
+@pytest.mark.asyncio
 async def test_engine_commit_before_proposal_commit_is_reconciled_as_approved(
     db_session: AsyncSession,
     engine_store_factory,

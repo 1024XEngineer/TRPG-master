@@ -7,14 +7,29 @@ from unittest.mock import AsyncMock
 import pytest
 from collaboration_framework.contracts import (
     ActionPlanPolicy,
+    AvailableExitView,
+    CommittedResult,
+    InventoryItemView,
+    KeeperCapabilityView,
+    KeeperEntityCapability,
+    KeeperInformationCapability,
     NarrationEvidence,
     PlayerInput,
+    PlayerView,
     PostRollDecisionRequest,
+    SceneView,
+    SelfActorView,
+    VisibleEntity,
 )
 from collaboration_framework.host.application import (
     ActionPlanNarrationValidationError,
+    ActionPlanNarrator,
 )
-from collaboration_framework.host.schemas import ActionPlanNarrationContext
+from collaboration_framework.host.schemas import (
+    ActionPlanNarrationContext,
+    ActionPlanNarrationOutput,
+    CompletedPlanStepSummary,
+)
 
 from app.adapters.structured_http import StructuredOutputError
 from app.core.action_plan_turn import ActionPlanTurnApplication
@@ -90,17 +105,26 @@ class _Orchestrator:
 
 
 class _NarrationContextStub:
-    def __init__(self, evidence: NarrationEvidence, termination_status: str) -> None:
+    def __init__(
+        self,
+        evidence: NarrationEvidence,
+        termination_status: str,
+        *,
+        interlocutor_id: str | None = None,
+        visible_entities: tuple[object, ...] = (),
+    ) -> None:
         self.narration_evidence = (evidence,)
         self.termination_status = termination_status
         self.narration_retry_hint: str | None = None
+        self.interlocutor_id = interlocutor_id
+        self.visible_entities = visible_entities
         self.player_input = SimpleNamespace(
             client_action_id="action-narration-test",
             utterance="",
-            interlocutor_id=None,
+            interlocutor_id=interlocutor_id,
         )
         self.player_view = SimpleNamespace(
-            scene=SimpleNamespace(visible_entities=()),
+            scene=SimpleNamespace(visible_entities=visible_entities),
         )
         self.completed_steps: tuple[object, ...] = ()
 
@@ -108,6 +132,8 @@ class _NarrationContextStub:
         copied = _NarrationContextStub(
             self.narration_evidence[0],
             self.termination_status,
+            interlocutor_id=self.interlocutor_id,
+            visible_entities=self.visible_entities,
         )
         copied.narration_retry_hint = cast(str | None, update["narration_retry_hint"])
         return copied
@@ -197,6 +223,7 @@ def test_clarification_fallback_points_to_visible_dead_body() -> None:
             scene=SimpleNamespace(
                 visible_entities=(
                     SimpleNamespace(
+                        id="melodias",
                         name="梅洛迪亚斯·杰弗逊",
                         observable_state=(SimpleNamespace(key="consciousness", value="dead"),),
                     ),
@@ -246,13 +273,18 @@ def test_partial_travel_success_fallback_keeps_the_arrival() -> None:
             SimpleNamespace(
                 outcome="success",
                 semantic_goal="前往旅馆",
-                committed_results=(),
+                committed_results=(
+                    CommittedResult(kind="location", target_id="inn", event_ref="arrived"),
+                ),
             ),
         ),
         player_view=SimpleNamespace(
             scene=SimpleNamespace(
+                id="inn",
                 name="镇上的旅店",
+                description="门厅亮着灯。",
                 visible_entities=(),
+                available_exits=(),
             ),
         ),
     )
@@ -260,7 +292,7 @@ def test_partial_travel_success_fallback_keeps_the_arrival() -> None:
     output = ActionPlanTurnApplication._deterministic_narration_fallback(cast(Any, context))
 
     assert output.kind == "clarification"
-    assert "已经抵达镇上的旅店" in output.text
+    assert "来到镇上的旅店" in output.text
     assert "后续行动" in output.text
     assert "没有" not in output.text
     assert "仍停留在原处" not in output.text
@@ -339,7 +371,7 @@ async def test_narration_retries_atmosphere_repeat_with_hint() -> None:
 
     assert narrate.await_count == 2
     retry_context = narrate.await_args_list[1].args[0]
-    assert "不得再用午后阳光、夜色、窗景等环境开场重铺" in retry_context.narration_retry_hint
+    assert "不要照抄上一段环境开场" in retry_context.narration_retry_hint
     assert narration.kind == "narration"
     assert "这次行动已经按当前可确认的结果完成" in narration.text
 
@@ -416,6 +448,264 @@ async def test_narration_retries_unknown_validation_with_generic_hint() -> None:
     assert "输出协议" in retry_hint
 
 
+class _ValidatingNarrator:
+    """两次调用都被拒的 Narrator 桩，另带真实的 validate 供句级降级复校验。"""
+
+    def __init__(self, error: ActionPlanNarrationValidationError) -> None:
+        self._error = error
+        self.narrate_calls = 0
+        self.validate_calls: list[str] = []
+
+    async def narrate(self, context):
+        self.narrate_calls += 1
+        raise self._error
+
+    def validate(self, context, candidate):
+        self.validate_calls.append(candidate.text)
+        return candidate
+
+
+def _rejection_with_span(text: str, start: int, end: int):
+    return ActionPlanNarrationValidationError(
+        "persistent_claim_without_evidence:inventory_acquisition",
+        output=ActionPlanNarrationOutput(text=text),
+        offending_spans=((start, end),),
+    )
+
+
+@pytest.mark.asyncio
+async def test_narration_drops_the_offending_sentence_instead_of_the_whole_prose() -> None:
+    """narrative_only 步骤的兜底素材恒为空，所以先剔除违规小句再考虑状态播报。"""
+    application = object.__new__(ActionPlanTurnApplication)
+    text = "你在门厅站定，四下打量。你把传单收进外套口袋。远处传来钟声。"
+    offending = "你把传单收进外套口袋。"
+    start = text.index(offending)
+    narrator = _ValidatingNarrator(_rejection_with_span(text, start, start + len(offending)))
+    application._narrator = narrator
+    context = cast(
+        ActionPlanNarrationContext,
+        _NarrationContextStub(
+            NarrationEvidence(
+                ref="evt-1",
+                kind="entity_discovered",
+                subject_id="x",
+                subject_name="公开结果",
+                description="环境恢复正常。",
+                required_in_narration=False,
+            ),
+            "resolved",
+        ),
+    )
+
+    narration = await application._narrate(context)
+
+    assert narrator.narrate_calls == 2
+    assert narration.text == "你在门厅站定，四下打量。远处传来钟声。"
+    assert narrator.validate_calls == ["你在门厅站定，四下打量。远处传来钟声。"]
+
+
+@pytest.mark.asyncio
+async def test_narration_falls_back_to_status_only_when_nothing_survives() -> None:
+    """整段都是违规内容时仍旧落到确定性兜底，不能拼出未校验的碎片。"""
+    application = object.__new__(ActionPlanTurnApplication)
+    text = "你把传单收进外套口袋。"
+    narrator = _ValidatingNarrator(_rejection_with_span(text, 0, len(text)))
+    application._narrator = narrator
+    context = cast(
+        ActionPlanNarrationContext,
+        _NarrationContextStub(
+            NarrationEvidence(
+                ref="evt-1",
+                kind="entity_discovered",
+                subject_id="x",
+                subject_name="公开结果",
+                description="环境恢复正常。",
+                required_in_narration=False,
+            ),
+            "resolved",
+        ),
+    )
+
+    narration = await application._narrate(context)
+
+    assert narration.text == "这次行动已经按当前可确认的结果完成。"
+    assert narrator.validate_calls == []
+
+
+@pytest.mark.asyncio
+async def test_narration_keeps_whole_prose_fallback_when_rejection_has_no_span() -> None:
+    """无法定位到具体句子的拒绝类别行为不变，仍走原有兜底。"""
+    application = object.__new__(ActionPlanTurnApplication)
+    narrate = AsyncMock(
+        side_effect=[
+            ActionPlanNarrationValidationError("subject_ownership"),
+            ActionPlanNarrationValidationError("subject_ownership"),
+        ]
+    )
+    application._narrator = SimpleNamespace(narrate=narrate)
+    context = cast(
+        ActionPlanNarrationContext,
+        _NarrationContextStub(
+            NarrationEvidence(
+                ref="evt-1",
+                kind="entity_discovered",
+                subject_id="x",
+                subject_name="公开结果",
+                description="环境恢复正常。",
+                required_in_narration=False,
+            ),
+            "resolved",
+        ),
+    )
+
+    narration = await application._narrate(context)
+
+    assert narration.text == "这次行动已经按当前可确认的结果完成。"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("reason", "expected"),
+    [
+        (
+            "persistent_claim_without_evidence:inventory_acquisition",
+            "claimed_inventory_ids",
+        ),
+        ("inventory_claim_scope", "claimed_inventory_ids"),
+        ("state_claim_scope", "claimed_state_changes"),
+    ],
+)
+async def test_narration_retry_hint_points_at_the_declaration_field(
+    reason: str,
+    expected: str,
+) -> None:
+    """申报类拒绝必须给出可操作的出路；通用提示在 narrative_only 上无从执行。"""
+    application = object.__new__(ActionPlanTurnApplication)
+    success = SimpleNamespace(kind="narration", text="环境恢复正常。", npc_replies=())
+    narrate = AsyncMock(side_effect=[ActionPlanNarrationValidationError(reason), success])
+    application._narrator = SimpleNamespace(narrate=narrate)
+    context = cast(
+        ActionPlanNarrationContext,
+        _NarrationContextStub(
+            NarrationEvidence(
+                ref="evt-1",
+                kind="entity_discovered",
+                subject_id="x",
+                subject_name="公开结果",
+                description="环境恢复正常。",
+                required_in_narration=False,
+            ),
+            "resolved",
+        ),
+    )
+
+    narration = await application._narrate(context)
+
+    assert narration is success
+    retry_hint = narrate.await_args_list[1].args[0].narration_retry_hint
+    assert expected in retry_hint
+
+
+def _evidence() -> NarrationEvidence:
+    return NarrationEvidence(
+        ref="evt-1",
+        kind="entity_discovered",
+        subject_id="x",
+        subject_name="公开结果",
+        description="环境恢复正常。",
+        required_in_narration=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_npc_dialogue_rejection_retries_with_an_actionable_hint() -> None:
+    """重试必须明确区分守秘人正文与 NPC 回复，避免原样重写后再次被拒。"""
+    application = object.__new__(ActionPlanTurnApplication)
+    success = SimpleNamespace(kind="narration", text="他简短地回答。", npc_replies=())
+    narrate = AsyncMock(
+        side_effect=[
+            ActionPlanNarrationValidationError("npc_dialogue_embedded_in_text"),
+            success,
+        ]
+    )
+    application._narrator = SimpleNamespace(narrate=narrate)
+    context = cast(ActionPlanNarrationContext, _NarrationContextStub(_evidence(), "resolved"))
+
+    narration = await application._narrate(context)
+
+    assert narration is success
+    retry_hint = narrate.await_args_list[1].args[0].narration_retry_hint
+    assert "NPC 台词" in retry_hint
+    assert "text" in retry_hint
+    assert "npc_replies" in retry_hint
+
+
+@pytest.mark.asyncio
+async def test_at_npc_fallback_still_produces_a_reply_bubble() -> None:
+    """玩家 @ 了 NPC 却连拒两次时，兜底也必须让那个 NPC 开口。"""
+    application = object.__new__(ActionPlanTurnApplication)
+    narrate = AsyncMock(
+        side_effect=[
+            ActionPlanNarrationValidationError("subject_ownership"),
+            ActionPlanNarrationValidationError("subject_ownership"),
+        ]
+    )
+    application._narrator = SimpleNamespace(narrate=narrate)
+    james = SimpleNamespace(id="james", kind="npc", name="詹姆斯·莱恩")
+    context = cast(
+        ActionPlanNarrationContext,
+        _NarrationContextStub(
+            _evidence(),
+            "resolved",
+            interlocutor_id="james",
+            visible_entities=(james,),
+        ),
+    )
+
+    narration = await application._narrate(context)
+
+    assert narration.text == "这次行动已经按当前可确认的结果完成。"
+    assert [reply.speaker_id for reply in narration.npc_replies] == ["james"]
+
+
+@pytest.mark.asyncio
+async def test_quoted_npc_line_is_dropped_sentence_wise_instead_of_the_whole_prose() -> None:
+    """守秘人正文里的引语被整段引区间剔除，其余叙事保留。"""
+    application = object.__new__(ActionPlanTurnApplication)
+    text = "詹姆斯抬起头。他说：“我是詹姆斯。你们别担心。”窗外传来蛙鸣。"
+    quoted_start = text.index("他说")
+    quoted_end = text.index("窗外")
+    narrator = _ValidatingNarrator(
+        ActionPlanNarrationValidationError(
+            "npc_dialogue_embedded_in_text",
+            output=ActionPlanNarrationOutput(text=text),
+            offending_spans=((quoted_start, quoted_end),),
+        )
+    )
+    application._narrator = narrator
+    context = cast(ActionPlanNarrationContext, _NarrationContextStub(_evidence(), "resolved"))
+
+    narration = await application._narrate(context)
+
+    assert narration.text == "詹姆斯抬起头。窗外传来蛙鸣。"
+    assert "你们别担心" not in narration.text
+
+
+def test_disclosure_source_maps_index_without_leaking_the_term() -> None:
+    """命中禁词只还原成来源 id；禁词字面值是未公开剧情，绝不能落盘。"""
+    from app.core.action_plan_turn import _disclosure_source
+
+    sources = ("information:frog_resort_flyer:title", "entity:messenger:name")
+    hit = ActionPlanNarrationValidationError("hidden_disclosure", disclosure_term_index=1)
+    assert _disclosure_source(hit, sources) == "entity:messenger:name"
+
+    # 越界或缺失时安静返回 None，不能让诊断字段本身把日志写崩。
+    for index in (None, -1, 2):
+        exc = ActionPlanNarrationValidationError("hidden_disclosure", disclosure_term_index=index)
+        assert _disclosure_source(exc, sources) is None
+    assert _disclosure_source(hit, ()) is None
+
+
 def test_required_evidence_fallback_omits_second_person_description_in_named_actor() -> None:
     context = SimpleNamespace(
         addressing_mode="named_actor",
@@ -482,8 +772,8 @@ async def test_required_evidence_fallback_never_changes_clarification_scope() ->
     narration = await application._narrate(context)
 
     assert narration.kind == "clarification"
-    assert evidence.subject_name not in narration.text
-    assert narration.claimed_evidence_refs == ()
+    assert evidence.subject_name in narration.text
+    assert narration.claimed_evidence_refs == (evidence.ref,)
     assert narrate.await_count == 2
 
 
@@ -557,3 +847,248 @@ async def test_cancel_retry_reconciles_resolved_engine_after_crash_before_plan_w
     assert engine.post_roll_requests == []
     assert len(orchestrator.resume_calls) == 1
     assert orchestrator.resume_calls[0]["parent_action_id"] == run.parent_action_id
+
+
+@pytest.mark.parametrize("last_error", ["atmosphere_repeat", "outer_schema", "structured"])
+@pytest.mark.parametrize("status", ["resolved", "needs_clarification"])
+async def test_confirmed_information_survives_retry_exhaustion(last_error, status):
+    evidence = NarrationEvidence(
+        ref="evt-information",
+        kind="information_revealed",
+        subject_id="refusal",
+        subject_name="拒绝离开",
+        description="你听见明确的答复：“今晚不能离开，必须等到明天。”",
+        required_in_narration=True,
+    )
+    errors = [ActionPlanNarrationValidationError("required_evidence_missing")]
+    errors.append(
+        StructuredOutputError("invalid")
+        if last_error == "structured"
+        else ActionPlanNarrationValidationError(last_error)
+    )
+    app = object.__new__(ActionPlanTurnApplication)
+    app._narrator = SimpleNamespace(narrate=AsyncMock(side_effect=errors))
+    context = cast(ActionPlanNarrationContext, _NarrationContextStub(evidence, status))
+    output = await app._narrate(context)
+    assert evidence.description in output.text
+    assert output.claimed_evidence_refs == (evidence.ref,)
+    assert output.kind == ("clarification" if status == "needs_clarification" else "narration")
+    assert app._narrator.narrate.await_count == 2
+
+
+def test_travel_intent_with_success_but_no_location_result_does_not_claim_arrival():
+    context = SimpleNamespace(
+        termination_status="needs_clarification",
+        player_input=SimpleNamespace(utterance="去旅店", client_action_id="no-travel"),
+        completed_steps=(
+            SimpleNamespace(outcome="success", semantic_goal="前往旅店", committed_results=()),
+        ),
+        player_view=SimpleNamespace(
+            scene=SimpleNamespace(id="street", name="街道", visible_entities=())
+        ),
+    )
+    output = ActionPlanTurnApplication._deterministic_narration_fallback(cast(Any, context))
+    assert "抵达" not in output.text
+
+
+@pytest.mark.parametrize(
+    ("text", "claimed_inventory_ids", "accepted"),
+    [
+        pytest.param("你握着铅笔刀，仔细查看挂画。", ("pencil_knife",), True, id="carried-item"),
+        pytest.param("床下藏着一把备用钥匙。", (), False, id="undiscovered-item"),
+        pytest.param("你把暗格钥匙收进背包。", ("wall_key",), False, id="visible-but-not-owned"),
+        pytest.param("铅笔刀的刀柄里藏着密文。", (), False, id="carried-item-secret"),
+        pytest.param("同伴口袋里有一枚铜哨。", (), False, id="other-actor-private-item"),
+    ],
+)
+async def test_narration_treats_inventory_as_public_without_releasing_hidden_content(
+    text: str, claimed_inventory_ids: tuple[str, ...], accepted: bool
+) -> None:
+    player_input = PlayerInput(
+        room_id="inventory-narration",
+        player_id="player-1",
+        actor_id="actor-1",
+        client_action_id="inspect-painting",
+        utterance="仔细查看挂画",
+    )
+    view = PlayerView(
+        room_id=player_input.room_id,
+        player_id=player_input.player_id,
+        actor_id=player_input.actor_id,
+        background="调查员正在密室中寻找线索。",
+        scene_id="room",
+        phase="playing",
+        revision="13",
+        self_actor=SelfActorView(id="actor-1", name="调查员"),
+        scene=SceneView(
+            id="room",
+            name="密室",
+            description="墙上挂着一幅画。",
+            visible_entities=(
+                VisibleEntity(
+                    id="wall_key", kind="object", name="暗格钥匙", description="暗格中的钥匙。"
+                ),
+            ),
+        ),
+        inventory=(
+            InventoryItemView(
+                id="pencil_knife", name="铅笔刀", quantity=1, condition="intact", version=1
+            ),
+        ),
+    )
+    capabilities = KeeperCapabilityView(
+        room_id=player_input.room_id,
+        actor_id=player_input.actor_id,
+        revision=view.revision,
+        entities=(
+            KeeperEntityCapability(
+                id="pencil_knife",
+                name="铅笔刀",
+                kind="object",
+                origin="canon",
+                holder_actor_id="actor-1",
+            ),
+            KeeperEntityCapability(id="wall_key", name="暗格钥匙", kind="object", origin="canon"),
+            KeeperEntityCapability(id="bed_key", name="备用钥匙", kind="object", origin="canon"),
+            KeeperEntityCapability(
+                id="whistle",
+                name="铜哨",
+                kind="object",
+                origin="canon",
+                holder_actor_id="actor-2",
+            ),
+        ),
+        information=(
+            KeeperInformationCapability(
+                id="knife_secret",
+                title="刀柄密文",
+                summary="刀柄中的秘密",
+                content="铅笔刀的刀柄里藏着密文。",
+                related_entities=("pencil_knife",),
+            ),
+        ),
+    )
+    context = ActionPlanNarrationContext(
+        background=view.background,
+        player_input=player_input,
+        plan_goal=player_input.utterance,
+        termination_status="resolved",
+        player_view=view,
+    )
+    safe_retry = "你继续查看挂画。"
+    generate = AsyncMock(
+        side_effect=[
+            {"text": text, "claimed_inventory_ids": claimed_inventory_ids},
+            {"text": safe_retry},
+        ]
+    )
+
+    class Model:
+        async def generate(self, context: ActionPlanNarrationContext) -> object:
+            return await generate(context)
+
+    application = object.__new__(ActionPlanTurnApplication)
+    application._narrator = ActionPlanNarrator(Model())
+    application._keeper_capabilities = AsyncMock(return_value=capabilities)
+    application._memory_source = None
+    application._recent_history_enabled = False
+    application._recent_history_source = SimpleNamespace()
+
+    output = await application._narrate(context)
+
+    assert generate.await_count == (1 if accepted else 2)
+    assert output.text == (text if accepted else safe_retry)
+    assert output.claimed_inventory_ids == (claimed_inventory_ids if accepted else ())
+
+
+@pytest.mark.parametrize("keep_literal_source", [False, True])
+def test_sentence_degradation_rechecks_information_after_removing_model_claims(
+    keep_literal_source: bool,
+) -> None:
+    fact = NarrationEvidence(
+        ref="map-revealed",
+        kind="information_revealed",
+        subject_id="map",
+        subject_name="楼层地图",
+        description="楼上有八间客房，进入需要许可。",
+        required_in_narration=True,
+    )
+    player_input = PlayerInput(
+        room_id="room",
+        player_id="player",
+        actor_id="actor",
+        client_action_id="arrival",
+        utterance="进入大厅",
+    )
+    view = PlayerView(
+        room_id="room",
+        player_id="player",
+        actor_id="actor",
+        background="调查旅店。",
+        scene_id="hall",
+        phase="playing",
+        revision="2",
+        self_actor=SelfActorView(id="actor", name="调查员"),
+        scene=SceneView(
+            id="hall",
+            name="接待大厅",
+            description="大厅有前台和地图。",
+            visible_entities=(
+                VisibleEntity(id="clerk", kind="npc", name="接待员", description=""),
+                VisibleEntity(id="map", kind="object", name="楼层地图", description=""),
+            ),
+            available_exits=(AvailableExitView(id="upstairs", name="二楼客房"),),
+        ),
+    )
+    step = CompletedPlanStepSummary(
+        step_index=0,
+        semantic_goal="进入大厅",
+        outcome="success",
+        view_revision="2",
+        event_refs=("arrived", fact.ref),
+        narration_evidence=(fact,),
+        committed_results=(
+            CommittedResult(kind="location", target_id="hall", event_ref="arrived"),
+        ),
+    )
+    context = ActionPlanNarrationContext(
+        background=view.background,
+        player_input=player_input,
+        plan_goal="进入大厅",
+        termination_status="resolved",
+        player_view=view,
+        completed_steps=(step,),
+        narration_evidence=(fact,),
+        allowed_evidence_refs=step.event_refs,
+    )
+    prefix = "你走进接待大厅。" + (fact.description if keep_literal_source else "")
+    removed = "楼上的八间房都需要获准才能进入，有人喊：“快走！”"
+    candidate = ActionPlanNarrationOutput(text=prefix + removed, claimed_evidence_refs=(fact.ref,))
+    error = ActionPlanNarrationValidationError(
+        "npc_dialogue_embedded_in_text",
+        output=candidate,
+        offending_spans=((len(prefix), len(candidate.text)),),
+    )
+    app = object.__new__(ActionPlanTurnApplication)
+    app._narrator = ActionPlanNarrator(cast(Any, None))
+    output = app._sentence_degraded_narration(context, error)
+    if keep_literal_source:
+        assert output is not None
+        assert output.text == prefix
+        assert output.claimed_evidence_refs == (fact.ref,)
+    else:
+        assert output is None
+        fallback = app._deterministic_narration_fallback(context)
+        for required in (
+            view.scene.name,
+            "前台",
+            "接待员",
+            "楼层地图",
+            "二楼客房",
+            fact.description,
+        ):
+            assert required in fallback.text
+        assert set(fallback.claimed_evidence_refs) == {"arrived", fact.ref}
+        assert "周围可见：" not in fallback.text
+        assert "可见出口：" not in fallback.text
+        assert "\n\n" in fallback.text

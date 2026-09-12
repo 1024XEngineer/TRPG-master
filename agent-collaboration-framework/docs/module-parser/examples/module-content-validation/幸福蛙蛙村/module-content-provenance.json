@@ -1,9 +1,30 @@
 {
   "_comment": "来源段落为 python-docx Document.paragraphs 的 0-based 索引，供人工逐项核验。",
   "source": "模组幸福蛙蛙村.docx",
+  "opening_text": {
+    "paragraph_indices": [
+      51,
+      53,
+      55,
+      57
+    ],
+    "index_base": 0,
+    "selection": "默认起始路径的公开原文；保留作者措辞与单位，排除 KP 指导和其它分支。"
+  },
+  "opening_key_facts": {
+    "source_field": "opening_text",
+    "selection": "仅从同路径 opening_text 提取公开任务、线索、数量、时间和条件；运行时作为改写提醒，不替代原文。"
+  },
   "paragraph_numbering": "python-docx Document.paragraphs 0-based index",
+  "source_images": [
+    {
+      "paragraph_index": 199,
+      "docx_part": "word/media/image4.jpeg",
+      "usage": "楼层、八间客房和门锁布局；住客秘密不进入公开地图信息。"
+    }
+  ],
   "module_id": "happy-frog-village",
-  "version": "3.0.8",
+  "version": "3.0.14",
   "locations": {
     "lane_manor": [
       47,
@@ -49,33 +70,75 @@
       308
     ],
     "resort_ground_floor": [
-      138,
-      140,
-      146,
-      148,
+      196,
+      199,
       206,
-      207,
-      212,
-      213
+      301,
+      308
     ],
     "resort_second_floor": [
-      195,
+      196,
+      199,
       201,
       203,
       204,
-      301,
-      305,
-      308
+      305
     ],
     "resort_reception": [
-      131,
       138,
       140,
       146,
-      148
+      196,
+      199
+    ],
+    "guest_corridor": [
+      196,
+      199
     ],
     "guest_room": [
-      195,
+      199,
+      201,
+      203,
+      204
+    ],
+    "guest_room_2": [
+      199,
+      201,
+      203,
+      204
+    ],
+    "guest_room_3": [
+      199,
+      201,
+      203,
+      204
+    ],
+    "guest_room_4": [
+      199,
+      201,
+      203,
+      204
+    ],
+    "guest_room_5": [
+      199,
+      201,
+      203,
+      204
+    ],
+    "guest_room_6": [
+      199,
+      201,
+      203,
+      204
+    ],
+    "guest_room_7": [
+      199,
+      201,
+      203,
+      204
+    ],
+    "guest_room_8": [
+      199,
       201,
       203,
       204
@@ -110,15 +173,19 @@
       450
     ],
     "staff_area": [
+      199,
       301,
       302,
       303
     ],
     "storage_room": [
+      199,
+      302,
       305,
       306
     ],
     "messenger_bedroom": [
+      199,
       308,
       309,
       310
@@ -154,6 +221,22 @@
       57,
       69,
       70
+    ],
+    "resort_grounds_seen": [
+      131,
+      132,
+      133,
+      138,
+      140,
+      146,
+      239
+    ],
+    "resort_map_layout": [
+      196,
+      199
+    ],
+    "storage_key_found": [
+      302
     ],
     "flyer_is_hand_drawn": [
       41
@@ -537,6 +620,34 @@
       301,
       302,
       303
+    ],
+    "find_storage_key": [
+      302
+    ],
+    "infiltrate_messenger_bedroom": [
+      308,
+      309
+    ],
+    "read_resort_map": [
+      196,
+      199
+    ],
+    "see_resort_grounds": [
+      131,
+      132,
+      133,
+      138,
+      140,
+      146,
+      239
+    ],
+    "see_reception_map": [
+      196,
+      199
+    ],
+    "learn_locations_from_map": [
+      196,
+      199
     ],
     "read_staff_notes": [
       301,

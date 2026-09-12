@@ -424,3 +424,107 @@ async def test_latest_published_narration_includes_opening_across_scenes(
         exclude_correlation_id="current",
     )
     assert later == "你离开书房，走向公共墓地。"
+
+
+async def test_structured_npc_dialogue_is_recent_history_for_its_frozen_audience(
+    db_session, recent_history_source
+):
+    import uuid
+
+    from app.models.event import EventAudience
+    from tests.test_memory_system import _create_memory_room
+
+    room, player, actor = await _create_memory_room(db_session, 717)
+    other = Player(id=str(uuid.uuid4()), room_id=room.id, nickname="未在场玩家")
+    start = datetime(2026, 9, 1, tzinfo=UTC)
+    question = Event(
+        id=str(uuid.uuid4()),
+        room_id=room.id,
+        player_id=player.id,
+        actor_id=actor,
+        event_type="dialogue.player",
+        visibility="scene_scoped",
+        correlation_id="social:player",
+        scene_id="study",
+        view_revision="1",
+        created_at=start,
+        payload={
+            "clientActionId": "social",
+            "utterance": "你能带路吗？",
+            "participantIds": [actor, "npc"],
+        },
+    )
+    answer = Event(
+        id=str(uuid.uuid4()),
+        room_id=room.id,
+        player_id=player.id,
+        actor_id="npc",
+        event_type="dialogue.npc",
+        visibility="scene_scoped",
+        correlation_id="social:followup-npc:0",
+        scene_id="study",
+        view_revision="1",
+        created_at=start + timedelta(seconds=1),
+        payload={
+            "sourceActionId": "social",
+            "text": "可以，我答应带路。",
+            "speakerName": "向导",
+            "listenerIds": [actor],
+        },
+    )
+    narration = Event(
+        id=str(uuid.uuid4()),
+        room_id=room.id,
+        player_id=player.id,
+        actor_id=actor,
+        event_type="narration.push",
+        visibility="public",
+        correlation_id="social",
+        scene_id="study",
+        view_revision="1",
+        created_at=start + timedelta(seconds=2),
+        payload={"text": "向导点头答应。"},
+    )
+    db_session.add_all(
+        [
+            other,
+            question,
+            answer,
+            narration,
+            EventAudience(event_id=question.id, player_id=player.id),
+            EventAudience(event_id=answer.id, player_id=player.id),
+        ]
+    )
+    await db_session.commit()
+    player_input, view = current_scope(room.id, player.id)
+    history = await recent_history_source.read(
+        player_input=player_input,
+        player_view=view,
+        exclude_correlation_id="current",
+        budget=RecentHistoryBudget(),
+    )
+    assert len(history.turns) == 1
+    turn = history.turns[0]
+    assert turn.correlation_id == "social"
+    assert turn.player_utterance.text == "你能带路吗？"
+    assert turn.npc_replies[0].speaker_id == "npc"
+    assert turn.npc_replies[0].text.text == "可以，我答应带路。"
+    assert turn.npc_replies[0].listener_ids == (actor,)
+    assert turn.published_narration.text == "向导点头答应。"
+    limited = await recent_history_source.read(
+        player_input=player_input,
+        player_view=view,
+        exclude_correlation_id="current",
+        budget=RecentHistoryBudget(max_chars=2),
+    )
+    assert len(limited.turns[0].player_utterance.text) == 1
+    assert len(limited.turns[0].npc_replies[0].text.text) == 1
+    assert limited.turns[0].published_narration is None
+    other_input, other_view = current_scope(room.id, other.id)
+    hidden = await recent_history_source.read(
+        player_input=other_input,
+        player_view=other_view,
+        exclude_correlation_id="current",
+        budget=RecentHistoryBudget(),
+    )
+    assert not hidden.turns

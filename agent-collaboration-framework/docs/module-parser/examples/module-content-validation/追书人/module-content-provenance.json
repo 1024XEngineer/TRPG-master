@@ -1,0 +1,17 @@
+{
+  "module_id": "paper-chase-zh-coc7",
+  "version": "3.0.12",
+  "source": "追书人.pdf",
+  "opening_text": {
+    "pages": [
+      1
+    ],
+    "heading": "玩家信息",
+    "normalization": "合并 PDF 自动换行，保留两个段落和原文用字。"
+  },
+  "opening_key_facts": {
+    "source_field": "opening_text",
+    "selection": "仅从同路径 opening_text 提取公开任务、线索、数量、时间和条件；运行时作为改写提醒，不替代原文。",
+    "review_note": "原文“最近过世”与“一年前失踪、是否尚在人世”冲突；保留原文待审阅，清单按调查目标保留生死未知，不确认死亡。"
+  }
+}

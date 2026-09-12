@@ -13,8 +13,8 @@ PREVIOUS_REVISION = "1a02058345ee"
 ENGINE_IDENTITY_PREVIOUS_REVISION = "9c4e7a2b1d6f"
 # PR2 NPC 对话迁移（d1e2f3a4b5c6）接在 PR1 输入路由 head 后面；#398 的检定唯一
 # 约束放宽（b8c9d0e1f2a3）再接在它之后，最后是模组快照的死字段剥离。
-# 时间点回填与摘要复合游标各自形成分支后，由空迁移重新汇合为单一 head。
-HEAD_REVISION = "j3k4l5m6n7o8"
+# 复合规则循环接在已发布的记忆与摘要收据迁移之后。
+HEAD_REVISION = "l5m6n7o8p9q0"
 
 
 def _run_alembic(database: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -100,6 +100,8 @@ def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None
         "memory_entries",
         "conversation_summaries",
         "memory_projection_cursors",
+        "memory_projection_receipts",
+        "conversation_summary_receipts",
         "turn_run_cutover",
         "scene_transition_proposals",
         "host_action_queue",
@@ -205,12 +207,20 @@ def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None
     assert ("room_id", "event_type", "correlation_id") in _unique_column_sets(database, "events")
     assert "source_created_at" in _column_names(database, "memory_entries")
     assert "audience_player_ids" in _column_names(database, "memory_entries")
+    assert "projection_version" in _column_names(database, "memory_projection_cursors")
     assert {
         "through_event_created_at",
         "through_event_id",
         "pending_event_created_at",
         "pending_event_id",
+        "projection_version",
     }.issubset(_column_names(database, "conversation_summaries"))
+    assert {"room_id", "source_kind", "source_id"} == _column_names(
+        database, "memory_projection_receipts"
+    )
+    assert {"summary_id", "event_id", "consumed_chars", "complete"} == _column_names(
+        database, "conversation_summary_receipts"
+    )
 
     downgrade = _run_alembic(database, "downgrade", PREVIOUS_REVISION)
     assert downgrade.returncode == 0, downgrade.stdout + downgrade.stderr
@@ -738,3 +748,51 @@ def test_summary_cursor_migration_preserves_scene_audience_and_pending_target(
             """
         ).fetchone()
     assert cursor == (event_ids[1], event_ids[2])
+
+
+def test_rule_loop_migration_preserves_single_rules_and_stops_partial_loops(tmp_path: Path) -> None:
+    database = tmp_path / "host-loop-live-rows.db"
+    _upgrade_or_fail(database, "k4l5m6n7o8p9")
+    _upgrade_or_fail(database, "head")
+    with sqlite3.connect(database) as connection:
+        for index, (route, status) in enumerate(
+            [
+                ("rule_once", "queued"),
+                ("composite_rule", "processing"),
+                ("composite_rule", "completed"),
+            ]
+        ):
+            connection.execute(
+                """INSERT INTO host_action_queue (
+                    room_id, item_id, client_action_id, player_id, actor_id, utterance,
+                    recipient_kind, recipient_explicit, execution_route, position, status,
+                    attempt_count, result_event_ids, lease_owner, lease_expires_at,
+                    rule_request_json, rule_loop_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, '交谈', 'keeper', 1, ?, 1, ?, 1, '["confirmed"]', ?, ?,
+                          '{"rule_id":"r1"}', '{}', '2026-09-12', '2026-09-12')""",
+                (
+                    f"room-{index}",
+                    f"item-{index}",
+                    f"action-{index}",
+                    f"player-{index}",
+                    f"actor-{index}",
+                    route,
+                    status,
+                    "worker" if status == "processing" else None,
+                    "2026-09-13" if status == "processing" else None,
+                ),
+            )
+    result = _run_alembic(database, "downgrade", "k4l5m6n7o8p9")
+    assert result.returncode == 0, result.stdout + result.stderr
+    with sqlite3.connect(database) as connection:
+        rows = connection.execute(
+            "SELECT execution_route, status, result_event_ids, rule_request_json, lease_owner "
+            "FROM host_action_queue ORDER BY item_id"
+        ).fetchall()
+    assert rows == [
+        ("rule_once", "queued", '["confirmed"]', '{"rule_id":"r1"}', None),
+        ("delegate_to_legacy", "failed", '["confirmed"]', '{"rule_id":"r1"}', None),
+        ("delegate_to_legacy", "completed", '["confirmed"]', '{"rule_id":"r1"}', None),
+    ]
+    assert "rule_loop_json" not in _column_names(database, "host_action_queue")
+    _upgrade_or_fail(database, "head")

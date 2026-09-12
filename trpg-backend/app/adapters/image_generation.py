@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 import httpx
 from PIL import Image, ImageDraw
 
+from app.adapters.structured_http import model_http_timeout
 from app.service.portrait_generation import (
     ImageGenerationControl,
     ImageGenerationOutput,
@@ -100,7 +101,10 @@ class DashScopeImageProvider:
         try:
             async with httpx.AsyncClient(
                 headers=headers,
-                timeout=min(self._timeout_seconds, 30.0),
+                # 保留单次请求 30 秒的上限：DashScope 是异步任务 + 轮询，
+                # `self._timeout_seconds` 是整轮预算（上面的 deadline 在管），不是
+                # 单次 HTTP 的预算。这里只把建连从这 30 秒里拆出来。
+                timeout=model_http_timeout(min(self._timeout_seconds, 30.0)),
                 transport=self._transport,
             ) as client:
                 response = await client.post(
@@ -138,7 +142,7 @@ class DashScopeImageProvider:
         """尽力取消仍处于等待态的 DashScope 任务；运行中任务可能拒绝取消。"""
         async with httpx.AsyncClient(
             headers={"Authorization": f"Bearer {self._api_key}"},
-            timeout=min(self._timeout_seconds, 30.0),
+            timeout=model_http_timeout(min(self._timeout_seconds, 30.0)),
             transport=self._transport,
         ) as client:
             response = await client.post(f"{self._base_url}/tasks/{task_id}/cancel")
@@ -248,7 +252,7 @@ class SufyImageProvider:
         try:
             async with httpx.AsyncClient(
                 headers=headers,
-                timeout=self._timeout_seconds,
+                timeout=model_http_timeout(self._timeout_seconds),
                 transport=self._transport,
             ) as client:
                 response = await client.post(

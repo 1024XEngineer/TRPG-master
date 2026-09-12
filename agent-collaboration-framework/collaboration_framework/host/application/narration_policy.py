@@ -21,7 +21,9 @@ _NARRATION_FIELD = (
 _QUOTED_NARRATION_FIELD = rf"""(?:"|')?{_NARRATION_FIELD}(?:"|')?"""
 _STRUCTURED_VALUE = r"(?:\[[\s\S]*?\]|\{[\s\S]*?\}|null)"
 _QUOTED_STRING_VALUE = r"""(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')"""
-_NARRATION_FIELD_VALUE = rf"(?:{_STRUCTURED_VALUE}|{_QUOTED_STRING_VALUE}|narration|clarification)"
+_NARRATION_FIELD_VALUE = (
+    rf"(?:{_STRUCTURED_VALUE}|{_QUOTED_STRING_VALUE}|narration|clarification)"
+)
 
 _STANDALONE_NARRATION_FIELD_RE = re.compile(
     rf"""
@@ -123,7 +125,9 @@ _NARRATION_PIECE_RE = re.compile(
 _MIN_CHUNK_CHARS = 6
 
 
-def split_narration_chunks(text: str, *, min_chars: int = _MIN_CHUNK_CHARS) -> tuple[str, ...]:
+def split_narration_chunks(
+    text: str, *, min_chars: int = _MIN_CHUNK_CHARS
+) -> tuple[str, ...]:
     """Split already-validated narration text at sentence boundaries.
 
     Only for progressive delivery of text that has *already* passed
@@ -176,29 +180,23 @@ def narration_text_rejection_reason(
 
     if _SCHEMA_MARKER_RE.search(candidate):
         field_tokens = {
-            match.group(1).casefold() for match in _NARRATION_FIELD_TOKEN_RE.finditer(candidate)
+            match.group(1).casefold()
+            for match in _NARRATION_FIELD_TOKEN_RE.finditer(candidate)
         }
         if len(field_tokens) >= 2:
             return "schema_fragment"
 
     field_keys = {
-        match.group("field").casefold() for match in _NARRATION_FIELD_KEY_RE.finditer(candidate)
+        match.group("field").casefold()
+        for match in _NARRATION_FIELD_KEY_RE.finditer(candidate)
     }
     if len(field_keys) >= 2:
         return "protocol_tail"
     return None
 
 
-def narration_subject_rejection_reason(
-    text: str,
-    *,
-    addressing_mode: Literal["second_person", "named_actor"] = "second_person",
-) -> Literal["subject_ownership"] | None:
-    """Reject first-person ownership in prose while preserving quoted speech.
-
-    In named_actor mode, also reject unquoted second-person references to the
-    acting character. Quoted dialogue may still contain 你/您.
-    """
+def unquoted_narration_text(text: str) -> str:
+    """Mask quoted text with spaces, preserving offsets into the original."""
 
     quoted = [False] * len(text)
     for opening, closing in _QUOTED_SPAN_DELIMITERS.items():
@@ -219,7 +217,23 @@ def narration_subject_rejection_reason(
                 quoted[start : index + 1] = [True] * (index + 1 - start)
                 start = None
 
-    prose = "".join(character for index, character in enumerate(text) if not quoted[index])
+    return "".join(
+        " " if quoted[index] else character for index, character in enumerate(text)
+    )
+
+
+def narration_subject_rejection_reason(
+    text: str,
+    *,
+    addressing_mode: Literal["second_person", "named_actor"] = "second_person",
+) -> Literal["subject_ownership"] | None:
+    """Reject first-person ownership in prose while preserving quoted speech.
+
+    In named_actor mode, also reject unquoted second-person references to the
+    acting character. Quoted dialogue may still contain 你/您.
+    """
+
+    prose = unquoted_narration_text(text)
     if _FIRST_PERSON_RE.search(prose):
         return "subject_ownership"
     if addressing_mode == "named_actor" and _SECOND_PERSON_RE.search(prose):
@@ -280,13 +294,13 @@ def _atmosphere_keys(text: str) -> frozenset[str]:
 def narration_atmosphere_rejection_reason(
     text: str,
     previous_published_narration: str | None,
+    *,
+    scene_changed: bool = False,
 ) -> Literal["atmosphere_repeat"] | None:
     """Reject recopying or paraphrasing the previous turn's scene-setting opening.
 
-    Callers pass None when there is no prior published narration; this then
-    returns None so an opening or first arrival can establish the shot. Quoted
-    speech is not stripped: an atmospheric opener is wrong even if it later
-    quotes an NPC.
+    An authoritative arrival may share time/light categories with the previous
+    location. Literal recopying remains rejected, and previous prose stays available.
     """
 
     if not previous_published_narration or not text.strip():
@@ -299,6 +313,8 @@ def narration_atmosphere_rejection_reason(
         shorter, longer = sorted((new_first, old_first), key=len)
         if len(shorter) >= _ATMOSPHERE_OPENING_MIN_CHARS and longer.startswith(shorter):
             return "atmosphere_repeat"
+    if scene_changed:
+        return None
     new_open = _opening_window(text, sentences=2)
     old_open = _opening_window(previous_published_narration, sentences=3)
     shared = _atmosphere_keys(new_open) & _atmosphere_keys(old_open)

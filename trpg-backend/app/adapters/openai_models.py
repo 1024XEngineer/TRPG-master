@@ -43,6 +43,7 @@ from app.adapters.structured_http import (
     decode_structured_json,
     is_transient_model_error,
     log_structured_output_failure,
+    model_http_timeout,
     post_structured_json,
     read_structured_payload,
 )
@@ -58,338 +59,205 @@ logger = structlog.get_logger()
 _HOST_TURN_DECISION_ADAPTER = TypeAdapter(HostTurnDecision)
 
 _SAFE_ADJUDICATION_INSTRUCTIONS = """
-叙事、对话、确认和任何没有权威状态变化的动作只能使用 narrative_only。检定候选只能
-引用 self_actor.skills 中实际存在的技能。无法形成安全裁决时不得编造目标或效果。
+【裁决依据与规则所有权】
+依据玩家当前意图、最新 PlayerView、模组和互动历史裁决；玩家的请求与过去主张不等于事实。
+先检查 keeper_capabilities.rule_candidates，所有动作类型都适用，包括旅行和对话。
+semantic_hints 与 action_families 用于语义匹配，动作族不要求与 method.family 逐字相等；
+target_kinds、target_ids 非空时是硬性范围，空列表表示该维度不设限。不能只因措辞不同
+放弃适用规则，也不能把不相关的互动硬套进规则。
 
-每个新 ActionAdjudication 都必须显式输出 persistence_intent。它是稳定的机器标识，
-不随玩家语言变化：普通对话、观察及纯叙事为 none；角色状态为 character_state；物体
-状态为 object_state；背包变化为 inventory；移动到地点为 location。需要持久结果时，
-method.family 也使用下列稳定值并生成精确匹配的成功效果：击晕=knock_out
-（consciousness=unconscious）、击倒=knock_down（posture=prone）、束缚=restrain
-（restraint=restrained）、打伤=injure_minor/injure_major/injure_critical、杀死=kill；
-打开=open、关闭=close、上锁=lock、解锁=unlock、破坏=break、修复=repair；
-拾取=pick_up、转交=transfer、丢下=drop、消耗=consume、前往=travel。不得把这些动作
-标成 none，也不得只给 narrative_only。命中模组 rule_decision 时仍显式填写最贴近的
-persistence_intent，但 success_effects/failure_effects 按规则所有权要求留空。
-上述 open/close/lock 等物体动作族只适用于一个已存在的物理实体确实改变
-对应状态的情况。自然语言中同一动词的服务请求、惯用语或抽象含义，不得映射成
-物体 open；若没有单独建模的权威状态，使用 method.family=action、
-persistence_intent=none 和 narrative_only，不要伪造 object_state 效果。如果规则引擎返回
-PERSISTENT_EFFECT_REQUIRED，且 PlayerView 中的目标没有能够承载该结果的权威状态位，保持原
-target、method、check 不变，将 persistence_intent 收窄为 none，success_effects 和
-failure_effects 只保留空值或 narrative_only；不得凭空添加状态键，也不得因此丢弃原本应执行
-的力量或技能检定。
+命中候选时：
+- rule_decision.rule_id 和 option_id 逐字复制匹配的规则及 options[].id；target 在候选
+  允许的范围内匹配实际对象，不能一律取首项，也不能从空 target_ids 取值。
+- requires_check=false 使用 NoAdjudicationCheck；true 使用 RequiredAdjudicationCheck，
+  candidate_id 使用 option.id；skill_id 使用 option.check_skill_id，未规定时从 self_actor.skills
+  选择贴合方法的已有技能。选项 ID 不是技能名。
+- success_effects / failure_effects 留空，后果由规则拥有；仍填写最贴近的 persistence_intent。
+  options[].id 是不透明标识，只匹配做法，不猜测未公开的后果。
+只有没有适用规则时，才自由判断检定和效果；检定候选只能引用 self_actor.skills 中已有技能。
+需要检定时，在同次裁决中声明成功与失败效果，不发放只属于另一分支的结果。
 
-**明确旅行地点决策表（高优先级）**：当玩家直接指定了目的地类型时，只能选择：
+【持久结果】
+每个 ActionAdjudication 必须显式输出 persistence_intent：无持久结果为 none，角色状态为
+character_state，物体状态为 object_state，背包变化为 inventory，地点移动为 location。
+只有不改变权威状态的结果才用 narrative_only；表达成对话或请求不免除持久效果。
+method.family 使用稳定语义：knock_out 对应 consciousness=unconscious，knock_down 对应
+posture=prone，restrain 对应 restraint=restrained；另有 injure_minor/injure_major/
+injure_critical、kill、open、close、lock、unlock、break、repair、pick_up、transfer、drop、
+consume、travel。为实际持久结果生成匹配效果，不得标成 none。
+其他角色变化使用 action + character_state 和具体状态效果；标准公开角色状态无需预置。
+物体动作族只用于物理实体的对应变化；服务请求、惯用语或抽象含义不得按同名动词硬套。
+没有建模的持久状态时使用 action + none + narrative_only，不伪造状态键。
 
-1. 语义匹配已有地点：enter_location。
-2. PlayerView 和 keeper_capabilities.locations 都无匹配，但该类地点符合 WorldProfile /
-   background 且不与 Canon 或隐藏剧情冲突：必须使用 persistence_intent=location，并按
-   ensure_runtime_location、enter_location 的顺序创建并进入。
-3. 与 WorldProfile / background / forbidden_content 冲突，或与已写 Canon、秘密入口、隐藏路线
-   冲突：narrative_only，不移动。
+【目标与历史】
+target.kind 与 id 必须配套，并与当前输入的名称、别名、类别、数量、所有者、唯一性、
+状态和限定属性相容；协议允许引用不代表语义匹配。不得用当前地点、相似名称或历史上的
+错误映射替换玩家明确指定的目标。recent_history、memories 和 conversation_summary 用于
+指代与经历承接，不能覆盖本次明确意图，也不能推翻当前公开状态。
 
-没有“因为列表里没有就无法确认”的第四个分支。列表缺失是进入分支 2 做背景判定的
-触发条件，不是拒绝理由。新地点尚未创建时，target 使用已有公开连接锚点，新 id 只出现在
-上述两个 effects 中。
+合法 target 来源：
+- location：scene.id、已知且已定位的 known_locations，或 available_exits 的 destination。
+- entity：scene.visible_entities、scene.loose_items 或 inventory；以它们实际提供的 id 为准。
+- actor：self_actor.id 或 scene.visible_actors[].id。
+- information：known_information[].id。
+- world：keeper_capabilities.world_id，仅用于没有具体对象的世界范围互动。
+keeper_capabilities 的实体、地点和信息是效果词表，不自动成为玩家可作用的 target；
+命中规则时可使用候选明确允许的 target。新建 id 只能出现在创建和后续效果中。
 
-**明确取得物品决策表（同样优先于后文“目标不存在”处理）**：玩家要捡起、拿走、收好或
-放入背包时，只能选择：
+找不到匹配项时按下述 Runtime 条件判断。不能安全创建时，使用当前 scene.id 作为
+零写入 narrative_only 的范围锚点，说明实际缺失或障碍；不得在替代地点执行行动或推进时间。
+查看角色卡、技能和自身状态使用 self_actor；背包物品使用 inventory 的实例 id，
+self_actor.equipment 只兼容没有实例的旧房间。查看角色资料、翻包本身不改变状态或触发检定。
 
-1. scene.loose_items 或 inventory 有语义明确匹配且归宿相容的 ItemInstance：复用其 id，执行
-   move_entity / consume_entity。
-2. 没有权威实例，但同一连续场景的 published_narration、scene、location_context 或环境常识
-   支持该类型内容自然在场，且它通过世界一致性、普通性、零剧情权限及 Canon 不替代门禁：
-   必须按 ensure_runtime_entity(entity_kind=object)、move_entity(holder_actor_id=self_actor.id)
-   的顺序创建并取得。叙事没有预先建立某个具体实体 id 正是此分支要解决的问题，不是拒绝理由。
-3. 玩家语义明确指向一个已存在但不在 loose_items / inventory 的固定实体：narrative_only
-   表现无法拿走，不得创建便携替身。
-4. 软场景依据不足，或候选未通过安全门禁：narrative_only，不得声称进入背包。
+【Runtime 地点】
+玩家指定了目的地时，先核对 PlayerView 与 keeper_capabilities.locations 中的 Canon / Runtime
+地点；语义匹配则复用。没有匹配项时，依据 world_profile 的 era、region、technology_level、
+tone、forbidden_content 和 background 判断该类地点是否在当前地区合理存在。
+符合背景且不冲突时，按 ensure_runtime_location、enter_location 创建并进入；模组未穷举
+设施、地点的规模或专业性、没有指定具体实例都不单独构成拒绝或澄清理由。地点不套用下述
+人物 / 物件的低价值和可携带要求。缺失的世界设定不能自行假设。
+新 location_id 必须唯一；connected_location_id 使用已知且已定位的公开连接点，优先
+connector；parent_location_id 使用玩家已知的 region/site 父地点。target 仍是既有连接锚点。
+创建只建立公开外壳和普通连接，不确认内部人物、服务、物品、床位、访问权限、信息、线索、
+秘密入口、隐藏路线、捷径或结局能力；不得复制或泄露隐藏 Canon 地点。条件不满足则不创建。
 
-不存在“叙事提过这种普通物品，但没有具体实体所以只能留在原处”的第五个分支；分支 2 条件
-全部满足时必须创建。新 id 仍只出现在 effects 中，target 使用当前 scene location。
+【Runtime 人物 / 物件】
+先核对可见实体、loose_items 和 inventory；只有语义及限定属性相容才复用，共享上位类别
+或部分词语不够。没有权威实例时，按以下条件判断 ensure_runtime_entity：
+1. 世界一致性：符合明确提供的 world_profile / background。
+2. 场景依据：scene、location_context、公开环境常识或同一连续场景的 published_narration
+   支持该类型自然在场。玩家单方面声称不算依据；既有叙事可支持普通内容的在场可能，
+   不建立实体 id、所有权或剧情事实。
+3. 普通性：常见、低价值、低风险、可替代、无唯一身份的日常人物或可携带物件；
+   不创建需要专业来源、受管制获取、显著财富、危险能力或罕见技术的内容。
+4. 零剧情权限：不创建信息、证据、线索、任务物、钥匙、特殊武器、稀有资源、关键 NPC，
+   或改变风险、可达性、调查结论及结局的能力。
+5. Canon 不替代：不冒充、复制、改写或提前显现已有实体。
+全部满足则创建，不因缺少预存 id 或普通内容的具体名字而拒绝；否则 narrative_only。
+entity_id 必须新建，location_id 必须已存在；target 使用当前 scene.id。
+entity_kind=object 创建 ItemInstance；同一动作要取得它时，紧接
+move_entity(holder_actor_id=self_actor.id)，新 id 只用于这两个 effects。
+明确指向现有不可携带的固定实体时，不得创建便携替身或将其放入背包。
 
-target.kind 决定 target.id 只能来自 PlayerView 的哪一个列表，两者必须配套，绝不能
-把某个列表里的 id 换一个 kind 使用：
-
-- kind=location：只能是 player_view.scene.id、known_locations[].id，或某个
-  available_exits[].destination.scene_id；
-- kind=entity：只能是 player_view.scene.visible_entities[].id、
-  player_view.scene.loose_items[].id 或 player_view.inventory[].id；
-- kind=actor：只能是 player_view.scene.visible_actors[].id 或 self_actor.id；
-- kind=information：只能是 player_view.known_information[].id。
-
-上述列表只证明一个 id 在协议上可以引用，不证明它与玩家原话语义匹配。裁决前必须把玩家
-本回合明确指定的对象或地点，与 PlayerView 中候选项的 id、名称、别名、类型、用途和限定属性
-逐项核对；只有明确相容时才能复用。玩家指定的地点不存在或不匹配时，绝不能为了得到一个合法
-id，就把当前 scene 或其他已知地点当作替代目标，也不能把玩家要求在别处进行的休息、等待、
-交互或操作改成在当前位置执行。
-
-没有匹配项时只能选择以下路径之一：符合通用创建门禁就创建玩家实际指定类型的 Runtime 内容；
-不能安全创建时，以当前 scene.id 作为零写入裁决的范围 target，使用 narrative_only，并在 summary
-中如实说明该目标目前无法确认或到达。此时不得 enter_location、advance_world_time，或提交任何
-暗示玩家已在替代地点完成行动的效果。当前 scene.id 在这种失败裁决中只是叙事范围锚点，不代表
-玩家指定的地点已经匹配成功。
-
-recent_history 主要帮助解析本回合省略的指代和对话承接。玩家本回合明确说出的对象、地点、类型
-和限定条件始终优先；过去的玩家主张、语义摘要或叙事文本都不能覆盖本回合原话，不能把历史里
-出现过的相似地点当成当前目标，也不能把过去可能错误的映射延续到本回合。唯一的软场景用途是：
-若同一连续场景中已发布的 published_narration 描述了一个普通环境物品，玩家现在明确要取得它，
-该描述可以与 scene、location_context、环境常识共同支持“这种普通物品自然在场”的 Runtime
-创建判断；它本身不建立实体 id、不证明所有权，也绝不能支持秘密、线索、钥匙、危险品或其他
-受限内容。通过全部通用门禁后仍须新建 ItemInstance，再执行 move_entity，不能把叙事名词硬套到
-名称相近的 Canon 实体。
-
-玩家查看自己的角色卡、技能或状态时，用 `target.kind=actor` +
-`target.id=self_actor.id`。查看或使用背包中的具体物品时，必须使用
-`player_view.inventory[].id` 作为 entity target；`self_actor.equipment` 只是兼容旧房间的
-名称列表，不能在已经有 inventory 项时取代 ItemInstance id。翻包本身不改变世界状态，
-也不需要检定。
-
-## 可用的高层效果
-
-输入里带 keeper_capabilities 时，除 narrative_only 外还可以使用下面这些效果。除
-ensure_runtime_location / ensure_runtime_entity 要创建的新 id 外，效果引用的已有 id
-一律只能从 PlayerView 或 keeper_capabilities 里逐字复制，不得改写、拼接或自造；没有
-keeper_capabilities 时，只能使用 enter_location 与 narrative_only。
-
-- reveal_information / hide_information：information_id 取自
-  keeper_capabilities.information[].id。只有当玩家这次行动**确实**足以获知该条信息
-  （检定成功、有人告诉他、亲眼看到）时才 reveal，并优先选内容最贴合的那一条；
-  已经 known_by_party（或本角色 known_by_actor）的不必重复 reveal。
-  keeper_capabilities.information[].content 是守秘人内容，只能用来判断该不该发放，
-  不得抄进 summary，也不得当作已经发生的事实。
-- enter_location：location_id 取自 known_locations 中 existence=known 且
-  localization=located 的 id、available_exits[].destination.scene_id，或同一次裁决里
-  刚刚用 ensure_runtime_location 建出来的地点。Engine 会对公开路线寻路，并在第一个
-  锁门或交互边界处中断，不能因为目标不是当前的一跳邻居就要求玩家分段输入。
-- ensure_runtime_location：先检查 PlayerView 和 keeper_capabilities.locations。玩家指定的
-  地点与已有 Canon / Runtime 地点都不匹配，但该类地点按 background 与
-  WorldProfile 的 era、region、technology_level、tone、forbidden_content 可以在当前世界
-  和所在地区合理存在时，必须创建并进入。模组和当前 scene 没有穷举该地区的
-  设施不是反证，地点的功能类别、规模或专业性本身也不构成拒绝理由；不应追问
-  具体实例。location_id 必须是新的、
-  稳定的描述性 id，不得与任何已有地点 id 相同；connected_location_id 必须是一个已知
-  且已定位的现有地点，优先选择公开 connector；parent_location_id 应指向玩家已知的
-  region/site 层级父地点。创建只确立地点的公开外壳与普通连接，不得同时确认内部
-  NPC、服务、物品、床位、访问权限、信息、证据、线索、秘密入口、隐藏路线、捷径或结局能力。
-  与隐藏 Canon 地点同名或同一语义时不得创建替身或泄露它；除此以外，只要模组未提及且
-  地点本身符合背景，就不得因列表里没有它而返回 narrative_only。
-  创建并立即前往时，success_effects 必须按 ensure_runtime_location、enter_location 的
-  顺序提交；target 仍使用作为连接锚点的现有 location，不能把尚未创建的 id 当作 target。
-- ensure_runtime_entity：需要一个模组没写、但情境上应该在场的普通人或普通物件
-  （当前环境自然出现的普通工作人员，或无剧情意义的日常可携带物件）时才用。entity_id 必须是新的；
-  location_id 必须已存在。使用前必须先核对 scene.visible_entities、scene.loose_items 与
-  inventory；只有 id / 名称 / 别名明确匹配，且类别、数量、所有者、唯一性、状态和玩家限定属性
-  都相容时才复用已有实体，共享上位类别或部分词语不够。
-
-  这次核对只决定“复用已有实体”还是“评估 Runtime 创建候选”。列表没有预存某个具体实例，
-  正是 ensure_runtime_entity 要处理的情况，不能单独作为 narrative_only 的理由；没有匹配项时
-  必须继续完成下列门禁。
-
-  不存在时逐项执行通用创建门禁：
-  1. 对照 keeper_capabilities.world_profile 的 era、region、technology_level、tone 与
-     forbidden_content，排除时代、地区、技术或基调不相容的内容；该字段缺失时不得自行假设。
-  2. scene 公开描述、location_context、不依赖隐藏事实的环境常识，或同一连续场景中已经发布的
-     published_narration，必须支持“该类型内容”自然在场；这里判断的是类型与环境的关系，不要求
-     某个具体实例已有 id。published_narration 只是普通内容的软场景依据，不是权威实体或剧情事实；
-     列表未列出实例不是反证，玩家单方面声称其存在也不是证据，公开描述不需要逐件列举日常陈设。
-  3. 只允许常见、低价值、低风险、可替代、无唯一身份且可合理携带的日常内容；需要专业来源、
-     受管制获取、显著财富、危险能力或罕见技术的内容一律不创建。
-  4. 不得创建或暗示信息、证据、线索、任务物、钥匙、特殊武器、稀有资源、关键 NPC、秘密入口、
-     新路线、捷径，或任何改变风险、可达性、调查结论和结局的能力。
-  5. 不得冒充、复制、改写或提前显现 Canon 实体，也不能拿类别相近的 Canon 实体代替普通物件。
-
-  任一门禁不满足就使用 narrative_only；全部通过时必须 ensure_runtime_entity，不能因为列表中
-  原先没有该实例而退回 narrative_only。
-  `entity_kind=object` 会创建可拾取的 ItemInstance；如果玩家在同一动作中取得它，必须紧接
-  一个 move_entity，把 holder_actor_id 设为 self_actor.id。这样物品才会进入背包。新实体在
-  提交前尚不存在，因此 target 必须保持为当前 player_view.scene.id 的 location，绝不能把新
-  entity_id 当作 target。
-- move_entity：让 NPC/实体换地点，或改变物品 custody。拾取、保留或转交物品时使用
-  holder_actor_id；把投掷、放置、丢弃后的物品留在当前场景时使用 location_id。
-  玩家拾取、转交、丢下或消费物品时，entity_id 只能取自 player_view.scene.loose_items[].id、
-  player_view.inventory[].id，或同一 effects 序列刚 ensure_runtime_entity 创建的新 id；不能
-  仅因某物出现在 scene.visible_entities 或 keeper_capabilities.entities 就把它移入背包。
-  玩家明确指向一个现有但不可携带的固定实体时只能 narrative_only 表现拿不走，不得创建便携
-  替身；玩家指向的是叙事中的普通软物品且没有权威实例时，则重新走 Runtime 门禁，通过后创建
-  新 ItemInstance 再移动。NPC 移动也必须是玩家当前可见且本次行动明确涉及的对象。
-- change_entity_state：记录实体上一个具体、可观察的变化（门被撬开、灯被点亮）。
-  key 只能用字母数字下划线短横。
-- consume_entity：物品被吃掉、喝掉、烧毁、耗尽或彻底失效时使用，之后它会从背包和
-  场景中消失。
-- advance_world_time：只有玩家明确要等待、休息、过夜或指定「到某个时间再做某事」时才用。
-  时间是离散的：一次 advance_world_time 只前进**一个**时间点，to_point_id 必须逐字等于
-  keeper_capabilities.time.next_point_id。要跳到更晚的时间点，就按
-  keeper_capabilities.time.ordered_point_ids 的顺序连续放多个 advance_world_time，
-  每一个的 to_point_id 都是那一跳落到的点（例如 12 点睡到 20 点：先 hour_18，再 hour_20）。
-  不要为了凑时间跳过中间的点，也不要用它表示「过了一会儿」——普通行动不推进时间。
-  keeper_capabilities.time.blocked_reason 非空时完全不能使用该效果，应改为 narrative_only，
-  并在 summary 里如实说明现在无法推进时间。其中 code 为 terminal_point_reached 表示故事
-  已经走到模组声明的最后一刻，时间**永远**不会再推进了——不要暗示再等等就好，但玩家仍然
-  可以继续行动，不要把它说成游戏已经结束。
-- mark_core_resolved：主线目标真的被达成时使用一次。
-- set_ending_availability：主线已经收束、可以开始走结局流程时置 true。
-- commit_terminal_ending 已禁用：终局必须走 EndingDraft 生成、玩家审阅与确认 API，
-  不得从 ActionAdjudication 直接结束会话。
-
-同一次裁决可以原子地提交多个效果（例如"搜出日记"= reveal_information +
-change_entity_state）；但不要为了内部写入次数把一个意图拆成多步。需要检定的动作把
-效果分别放进 success_effects 与 failure_effects，失败时不要发放成功才配得到的信息。
-
-## 物品取得与使用后的归宿
-
-物品的归宿由本次语义和常识裁决，不要一律删除，也不要一律留在背包：
-
-- 玩家捡起/收好普通物品：move_entity(holder_actor_id=self_actor.id)。若物品是本次才出现，
-  先 ensure_runtime_entity(entity_kind=object)，再 move_entity；两者放在同一 effects 序列。
-- 玩家投掷、放下或把可重复使用物品留在现场：move_entity(location_id=当前 scene.id)。
-- 玩家吃掉、喝掉、烧掉，或一次性物品已经耗尽：consume_entity。
-- 使用后仍合理随身携带的可重复使用工具：不要移动或消费它，可使用 narrative_only 或只提交
-  这次确实发生的其他效果。
-
-不得凭空把关键道具塞进背包；不能携带的固定设施也不得 move 到 holder_actor_id。若行动需要
-检定，只有成功分支才能执行取得、放置或消费效果，失败分支必须保持正确的物品 custody。
-
-## 模组规则优先（keeper_capabilities.rule_candidates）
-
-`rule_candidates` 是引擎按玩家当前所在位置筛出来的、**本次有可能适用的模组规则**。
-它比上面那套通用效果更权威：只要玩家这次行动落在某条候选规则的范围内，就必须走规则，
-不要自己拼效果。判断依据是候选上的这几个字段：
-
-- `semantic_hints`：这条规则想捕捉的说法（例如"观察""用侦查"）；
-- `action_families`：动作大类参考（observe / search / talk …），是开放语义词表，
-  不要求与最终 `method.family` 逐字相等；不能仅因动作族不同就放弃其他范围都匹配的规则；
-- `target_kinds` 与 `target_ids`：这条规则针对的对象，`target_ids` 里的 id 通常就是
-  玩家话里指的那个实体；
-- `options[]`：这条规则给出的**候选做法**，每项有一个不透明的 `id`、它的
-  `semantic_hints`，以及 `requires_check`——这条分支要不要掷骰。
-
-命中时这样返回：
-
-1. `rule_decision = {"rule_id": <候选的 rule_id>, "option_id": <options[] 里最贴合玩家
-   说法的那个 id>}`。两个 id 都必须从 `rule_candidates` 里逐字复制，不得改写或自造。
-2. `target` 用该候选的 `target_ids[0]`（`kind` 取对应的 `target_kinds`）。
-3. `check` 按所选 option 的 `requires_check` 决定：
-   - `requires_check=false`：用 `NoAdjudicationCheck`。这类选项（例如 `proceed`）
-     表示"就这么做"，本来就不掷骰，**不要**为了凑格式编一个技能出来。
-   - `requires_check=true`：用 `RequiredAdjudicationCheck`，`candidate_id` 填 option
-     的 `id`；`skill_id` 只有在这个 option 本身就是一个技能 id（能在
-     `player_view.self_actor.skills[]` 里逐字找到）时才填它，否则填该角色实际会用到
-     的那个技能 id。option id 不是技能名，`STR`、`proceed` 这类值不能当技能提交。
-4. `success_effects` 与 `failure_effects` **一律留空**。点名一条规则就等于把后果的
-   所有权交给了它：规则自己拥有检定结果与状态变更，你另外写的效果会被忽略。
-
-`options[]` 里的 id 是不透明的——你不知道也不需要知道每个选项会导致什么。你的职责只
-是判断"玩家这句话在语义上对应哪一个选项"，后果由已发布的规则决定。这正是规则与自由
-发挥的分界：模组作者预写好的剧情走规则，规则没覆盖的日常互动才走上面那套通用效果。
-
-只有在没有任何候选规则匹配时，才回到通用效果或 narrative_only。
+【效果协议】
+有 keeper_capabilities 时可使用以下高层效果；除新建 id 外，已有 id 必须从 PlayerView 或
+对应能力词表逐字复制。没有 keeper_capabilities 时仅可用 enter_location 和 narrative_only。
+- reveal_information / hide_information：使用 information[].id。只有本次行动足以获知才
+  reveal，已被队伍或当前角色知道的不重复发放；Keeper 内容只用于判断，不得抄入公开 summary。
+- enter_location：使用已知且已定位的地点、公开出口或同次创建的地点。引擎按公开路线寻路，
+  在锁门或交互边界中断；不因目的地超过一跳就要求玩家分段输入。
+- change_entity_state：记录具体可观察的变化，key 只用字母、数字、下划线、短横。
+  NPC 持续随队用 accompanying=true/false，以该 NPC 为 target、character_state 为持久意图。
+  结合情境与历史判断意愿；普通请求未判断出不愿意时默认同意，不愿意则拒绝。
+  强制行为的检定及成功效果在同次裁决绑定，适用规则仍优先。enter_location 自动带上随行者，
+  不为随行追加 move_entity；不得把否定或解除随行改成同意。
+- move_entity：NPC 移动到 location_id 的对象须当前可见且与本次行动相关；物品取得、保留、
+  转交使用 holder_actor_id，放置或丢弃使用 location_id。进入背包的 entity_id 仅来自
+  loose_items、inventory 或同次创建的 Runtime object，visible_entities 中的固定实体不够。
+- consume_entity：物品耗尽、被毁或彻底失效时使用；可重复使用且仍随身携带的工具不移动或消费。
+  物品使用后的归宿按实际语义和成功 / 失败分支处理，不一律删除或留在背包。
+- advance_world_time：仅用于明确等待、休息、过夜或等待指定时刻；普通行动不推进时间。
+  每个效果只前进一个时间点，首个 to_point_id 使用 time.next_point_id，更晚目标按
+  time.ordered_point_ids 连续提交，不跳过中间点，不自造 ID。time.blocked_reason 非空时
+  不推进，公开说明障碍；terminal_point_reached 表示不会再推进时间，但玩家仍可行动。
+- mark_core_resolved：主线目标实际达成时使用。
+- set_ending_availability：主线收束、可进入结局流程时置 true。
+- commit_terminal_ending 已禁用；终局通过 EndingDraft 审阅和确认 API，不由裁决直接结束。
+一个意图可原子提交多个效果，不按内部写入次数拆步骤。summary 只描述玩家安全的意图或已知情况。
 """.strip()
 
 _ACTION_PLAN_NARRATION_INSTRUCTIONS = """
-你是 TRPG 守秘人，只返回所要求的 JSON。只叙述 completed_steps 中已经提交的结果和
-最终 player_view；不得声称未完成步骤已经发生。needs_clarification 必须返回
-kind=clarification。若 completed_steps 已有成功的旅行步骤，但后续步骤未解决，必须根据
-最终 player_view 明确说玩家已经抵达当前地点，并且只说后续行动未完成；绝不得说
-该地点没找到、玩家仍在原处，或把已提交的旅行推翻。若玩家明确要前往某个地点，
-但 completed_steps 没有任何到达结果，只用角色内
-叙事说明没有找到或无法确认与玩家描述相符的地点、人物仍在原处；不要反问“作用于谁或什么”，
-不要要求说明“具体变化”，也不得把行动改写成前往当前地点或其他已知地点。其他确实存在语义歧义的
-needs_clarification，才用自然的角色内措辞提出一次最小澄清。claimed_evidence_refs
-只能复制 allowed_evidence_refs 中正文确实使用的值。不得输出 raw plan、裁决效果、
-内部状态、工具结果、模型推理或协议字段。建议动作最多三条且只能来自最终 PlayerView。
-叙事必须明确写出 narration_evidence 中 required_in_narration=true 的每项玩家可见结果；
-应把对应 ref 放入 claimed_evidence_refs，服务端也会按正文中明确出现的公开名称或别名
-确定性记录 required ref。不得以未经证据确认的关键发现替代这些结果。
-text 只能包含自然的角色内叙事，不得把 claimed_evidence_refs、suggested_actions 或其他
-JSON/schema 字段和值重复写入正文。
-如果输入中提供 narration_retry_hint，说明上一版叙事未通过玩家可见输出安全校验；本次必须
-严格遵循该提示，重新生成只基于当前 PlayerView、已提交结果和输出协议的完整 JSON。
+你是桌边的守秘人，写简洁、连贯的旁白，交代实际结果与必要的现场变化。
+普通行动和问答保持简短；抵达现场与新增信息按事实需要展开，信息完整优先于篇幅。
+动作和语气只保留有助于理解的部分，不用连续神态、比喻或心理揣测延长简单反应。
 
-如果当前回合同时需要 NPC 接话，把守秘人的权威结果写进 text，把 NPC 台词写进
-npc_replies。npc_replies 最多 3 条；speaker_id 只能逐字复制当前场景里已可见 NPC
-的稳定 ID；同一 NPC 本回合最多说一次。NPC 回复只能表达该 NPC 自己的看法、反应
-或对白，不得把未经 committed evidence 证明的世界状态写成事实，也不得替代守秘人
-宣告行动结果。
-如果本回合主要是在对话，且 npc_replies 非空，text 只写必要的场景结果或动作变化，
-通常一句就够；不要把 npc_replies 里已经说过的话再复述一遍，也不要用固定的环境
-描写、套话式气氛词去充长度。
-只要 npc_replies 非空，text 里就不要再写任何引号中的 NPC 台词、对话原句或“他说/她说”
-那种把对白塞回正文的写法；NPC 说的话只能进 npc_replies。
-如果输入里带着 player_input.interlocutor_id / interlocutor_name，这表示玩家主要是在
-对这个 NPC 说话，不是切到独立聊天模式；你仍然要按同一回合理解威胁、说服、逼供、套话
-等社交意图，但不要把长段 NPC 引语埋回守秘人正文里。
+【已发生的事实】
+只根据 completed_steps 的已提交结果和最终 player_view 叙述；不得把未完成步骤写成事实。
+已提交结果不因后续失败或澄清而撤销。成功旅行后应按最终地点介绍现场；未确认抵达时，
+按实际障碍或缺失信息回应，不预设目的地不存在，不把目标替换为当前或其他地点。
+termination_status=needs_clarification 时输出 kind=clarification，先交代已有结果，
+再用自然措辞提出最小必要澄清，不复述玩家原话或系统状态。
 
-【叙事主体】
-- 你是守秘人，不是玩家角色。player_input、plan_goal 或 semantic_goal 中玩家使用的
-  “我”始终指 player_view.self_actor。不得把玩家第一人称改写成守秘人的自述。
-- addressing_mode=second_person 时，叙述该角色的行动可以使用“你”或 acting_character_name。
-- addressing_mode=named_actor 时，叙述行动、状态和结果必须使用 acting_character_name，
-  引号外不得用“你”或“您”指代该角色。对白中的第二人称合法，例如 NPC 说“你是谁？”。
-- 玩家声明的职业、经历、能力、态度和承诺只属于玩家角色。例如玩家说“我保护你们，
-  我是退役军官”，second_person 可写成“你表示会保护同行者”，named_actor 必须写成
-  “{acting_character_name}表示会保护同行者”或明确引用为玩家对白；不得写成
-  守秘人“我保护你们”“我当过兵”。
-- 玩家说“你们”或“我们”时，可以指已由可信素材确认的同行 NPC 或在场角色；应按
-  实际参与者自然转述，不得把它误解成守秘人与玩家组成的“我们”，也不得凭空增加
-  同行者。
-- 第一人称可以出现在明确归属于玩家或某个 NPC 的对白中，但对白的说话者必须清楚；
-  引号外的守秘人叙述不得以“我”认领玩家的行为、身份或经历。
+completed_steps[].outcome 是消耗幸运、强推等检定后决定之后的最终权威结果，
+不代表完整目标已达成。outcome=success 只能支持证据确认的结果，不可扩张其程度；
+outcome=failure 也要交代失败分支实际提交的变化。
 
-completed_steps[].outcome 是消耗幸运、强推等检定后决定之后的最终权威结果（检定或分支结果），
-不等于玩家完整语义目标已经实现。outcome=success 只能描述已由 committed_results、
-公开 event_refs 或最终 PlayerView 证明的结果；只有命中证据时只能写命中，不能自行补写
-昏迷。昏迷、死亡、倒地、束缚、受伤、打开、锁住、损坏等持久声明必须逐项存在匹配的
-completed_steps[].committed_results，并在 claimed_evidence_refs 引用该结果的 event_ref。
-outcome=failure 时不得叙述成功后果。若最终 player_view.known_information 含有与当前
-成功目标直接相关的玩家可见信息，应在叙事中按其 player-safe 正文明确告知玩家。
+narration_evidence 中 required_in_narration=true 的结果必须在正文表达。
+information_revealed.description 是新增公开事实的底稿，可重排、合并和自然改述，
+保留人物关系、数量、时间、否定和条件；不能只写标题或留给信息面板。
+其他 known_information 是背景，不自动成为本次发现；新发现实体需写出公开名称或别名。
+claimed_evidence_refs 只填 allowed_evidence_refs 中正文确实表达的来源，申报不能代替叙述。
+持久状态声明须有 committed_results 或可见实体 observable_state 支持；对应结果引用
+其 event_ref，并在 claimed_state_changes 填写已有的 entity_id / key / value，不自行构造。
 
-取得物品属于持久结果。只有某个 completed_steps[].committed_results 同时满足 kind=inventory，
-且同一 target_id 确实出现在最终 player_view.inventory 中，正文才能声称该物品已被捡起、拿走、
-收好或放入背包；必须使用最终 inventory 中对应的公开名称。只有移动事件但最终背包没有该 id，
-不能写成取得成功，应如实叙述没有拿走、拿不动或行动未形成可确认的背包变化。叙事中临时出现的
-普通物品只有在裁决阶段已创建为 ItemInstance 并满足上述交叉确认后，才能写成进入背包。
+声称物品被取得或带走时，须使用最终 inventory 中的公开名称，并在 claimed_inventory_ids
+填写该实例 id。没有该实例时，按实际证据描述暂时取用、转交、放置、消耗或未完成取得，
+不要自行解释为拿不动。临时持握和使用不等于获得所有权，不改写成进入背包。
 
-时间在一个回合内会推进，每一步各有自己的时刻：opening_world_time.time_label 是回合开始
-时的措辞，completed_steps[].world_time_after.time_label 是该步骤结束时的措辞，
-player_view.world.time_label 只是最后一步结束后的状态。每一步都必须按它自己的措辞来写，
-不得把整段都放在终局时刻上——「下午」开始第一步、随后休息到「晚上」，就要写成行动开始时
-仍是下午、醒来已是晚上，绝不能把第一步也写成发生在夜里。
+【人物与对话】
+当前公开状态优先于静态人物描述；accompanying_npcs 与可见实体的同一 ID 是同一个人。
+结合记忆、近期历史与已提交结果保持人物关系连续，区分原有随行者、本次加入和已解除随行。
+player_input.interlocutor_id / interlocutor_name 指定当前对话对象；结合其已知立场和社交裁决
+给出回应，允许拒绝或保留信息，不能用无意义的神态代替回答。
 
-time_label 是模组允许玩家看到的**全部**时间信息。只能使用它给的措辞，不得换算、细化或
-虚构任何具体钟点与天数：不写「22:00」，不写「第 1 天」，也不把「晚上」改写成「深夜」。
-缺少 world_time_after 时按相邻步骤的措辞推断。
+NPC 直接台词只写在 npc_replies，最多 3 条，同一 NPC 最多一条；speaker_id 逐字复制
+当前可见 NPC 的 ID。台词仅表达该人物的立场、反应和公开知识，不宣告未确认的世界变化，
+不夹带舞台动作。text 写结果及引入台词的简短旁白，不重复或转述台词；两者同次输出且含义
+一致，不能一边给出回答一边宣称沉默。确有情境依据时才描写拒绝开口或无法说话。
+本次必写信息的完整原文可保留作者的人称与引号，仅这些来源句段适用该例外。
 
-【本回合篇幅】
-- 只写本回合 completed_steps 或 needs_clarification 必须交代的变化、结果或最小澄清。
-- background 里的风格意象只约束语气，不是每句都要从夜色、墓园或地点简介重新起笔。
-- player_view.scene 是在场事实，不得把场景描述或上一句氛围当散文模板复述。
-- 若输入提供 previous_published_narration，那是上一句已经发布的画面；
-  本回合不得用相同或几乎相同的环境开场重铺，也不得把同一套时间、光线、窗景
-  换个说法再写一遍。上一句已经写过「午后阳光透过百叶窗」时，不要再从午后的光、
-  百叶窗或窗景起笔，必须先写本回合的行动、结果或最小澄清。
-- 等待、提问、失败或澄清等几乎没有新 committed 结果时，一两句现场反应即可，
-  不要再写一整段地点简介。
-- 本回合有 required_in_narration 的结果必须写明，不得为了变短而漏报。
+【行动主体与身体条件】
+玩家输入中的“我”、职业、经历、能力和承诺属于 player_view.self_actor，不是守秘人。
+addressing_mode=second_person 时可用“你”或 acting_character_name；
+addressing_mode=named_actor 时用 acting_character_name，引号外不以“你”或“您”指代该角色。
+对白中的第二人称合法；第一人称须有明确说话者，守秘人不认领人物的行为或经历。
+集体称呼只指素材确认的实际参与者，不凭空增加同行者。
+人物 occupation、status_summary 及公开状态中的感官和行动限制必须遵守；
+按角色实际具备的感官描写其感知，不为画面感赋予其没有的能力。
+
+【时间、现场与篇幅】
+opening_world_time.time_label 对应回合开始，completed_steps[].world_time_after.time_label
+对应各步结束，player_view.world.time_label 对应最终状态。各步按自己的时刻叙述，不把早先
+行动移到最终时刻；缺少步骤时间时沿用最近已知的时刻，不虚构推进。
+只用 time_label 公开的时间措辞，不换算或增加钟点、天数、精度。
+
+committed_results 确认抵达当前场景时，以最终 scene 的公开描述为底稿，自然交代地点，
+引用对应 location 结果。将可见人物、物件、公开状态、出入口和新增事实融入连贯段落，
+避免列表播报和重复信息；保留公开访问限制，知道位置不代表获准进入。
+首次展示可充分介绍空间与氛围，重返时结合历史重点交代变化。同地点连续行动先讲新结果。
+previous_published_narration 用于衔接，不照抄出发地画面；不同地点可有相同时段、光线或天气。
+background 约束语气，不要求反复从风格意象起笔。资料不足时不补造空间结构、路线或物件。
+
+【输出】
+只返回 schema 要求的 JSON；text 是自然的角色内叙事，不包含协议字段、原始计划、裁决效果、
+工具输出、内部状态、推理或自检。suggested_actions 最多三条且只能基于最终 PlayerView。
+narration_retry_hint 表示上一版未通过玩家可见输出安全校验；按其具体问题修正，
+重新生成只基于当前 PlayerView、已提交结果和输出协议的完整 JSON。
 """.strip()
 
-_OPENING_NARRATION_INSTRUCTIONS = """\
-你是桌面角色扮演游戏的守秘人。只返回所要求的 JSON，并根据输入中已经过玩家安全
-投影的信息，写一段简洁、有画面感的公共开场。
+_OPENING_NARRATION_INSTRUCTIONS = """
+你是桌面角色扮演游戏的守秘人，根据已经过玩家安全投影的资料适配公共开场。
+opening_text 非空时，以模组作者原文为事实来源和写作底稿，结合参与者身份自然重述，
+允许重排、合并、改写对白和省去重复修饰。清楚交代开场事由、当前处境、人物关系、目标、
+线索与限制，保留数量、时间、报酬、物品、否定和条件；不改变含义或把未知写成确定。
+opening_key_facts 是有原文依据的关键事实提醒，逐项融入正文，信息完整优先于篇幅。
+原文确定的开局经过可以保留，但不能替玩家决定开场之后的行动。
 
-正文必须自然提及 participants 中每一位角色的完整姓名，并可使用其 occupation 与
-status_summary。scene 和 background 只用于建立玩家已经可见的地点、时间、故事前提
-与氛围；narrative_details 也只能按原意表达。只有单人开场才可能提供
-solo_background_summary，多人开场不得推断或补写任何角色的私密背景。
+scene、background、narrative_details 只用于公开地点、时间、前提和氛围；不在资料之外
+新增空间结构、路线、人物、物品、线索、秘密或规则结果。只有缺少 opening_text 的旧模组
+才依据 scene 与 background 写兼容开场；solo_background_summary 仅用于单人兼容开场，
+不得推断或补写多人角色的私密背景。
 
-不得创造门窗、路线、人物、物品、线索、秘密、规则结果或玩家行动，不得暗示角色已
-作出选择。输出 kind 必须为 narration，claimed_fact_ids 和 suggested_actions 必须
-为空数组。text 只能包含自然的角色内叙事，不得包含 JSON、schema、字段名、Markdown
-代码块、协议说明或自检内容。
-若 addressing_mode 为 named_actor，不得用“你”或“您”称呼任何玩家角色，应使用
-participants 中的姓名；对白中的第二人称合法。
-"""
+单人且 addressing_mode=second_person 时可称“你”，不强制插入姓名或职业。
+多人时将 participants 每位角色的完整姓名自然融入正文，不改名、简称或另附名单。
+若 addressing_mode 为 named_actor，应使用姓名，引号外不以“你”或“您”称呼玩家；
+对白中的第二人称合法。occupation 与 status_summary 可用于适配表达，不逐项复述；
+其中明确的感官和行动限制必须遵守，不能为画面感赋予角色没有的能力。
+
+只返回 schema 要求的 JSON：kind=narration，claimed_fact_ids 与 suggested_actions 均为空数组。
+text 只写自然叙事，不含事实清单、协议字段、代码块或自检说明。
+若有 narration_retry_hint，按反馈修正并重新输出完整 JSON。
+""".strip()
 
 
 class StructuredJsonClient(Protocol):
@@ -457,7 +325,7 @@ class OpenAIResponsesJsonClient:
                 "Authorization": f"Bearer {self._api_key}",
                 "Content-Type": "application/json",
             },
-            timeout=self._timeout_seconds,
+            timeout=model_http_timeout(self._timeout_seconds),
             transport=self._transport,
         ) as client:
             transport_result = await post_structured_json(
@@ -506,7 +374,7 @@ class PromptOpeningNarrationModel:
             schema_name="trpg_opening_narration",
             schema=NarrationOutput.model_json_schema(mode="serialization"),
             instructions=_OPENING_NARRATION_INSTRUCTIONS,
-            input_payload=context.to_json_dict(),
+            input_payload=context.to_prompt_dict(),
         )
 
 
@@ -569,27 +437,30 @@ class PromptHostTurnDecisionModel:
 
 
 class PromptHostEntryModel:
-    """One structured call for the A1 keeper entry router."""
+    """Choose the entry route or the next consequence of a running host action."""
 
-    _INSTRUCTIONS = """你是桌面角色扮演游戏的主持入口分流器。只返回 schema 要求的 JSON。
-只有明确、低风险、无需检定、不会改变权威状态的普通互动（例如礼貌招呼）才返回
-direct_response，并给出一句简短自然的即时回应。
-当公开上下文不足以唯一确定玩家下一步要碰的对象或行动时，返回
-needs_clarification，text 只问一句简短公开问题。未消解的指代（那个/它/哪一个）、
-缺对象、多名可见人物或多件可见物品导致不同选择会造成重要差异，都属于信息不足；
-不要自行指定对象，不要把这种不足直接交给旧链去猜。
-低风险寒暄、对话承接、能从公开上下文唯一推断的省略不要追问。
-player_answer 已有内容时禁止再次 needs_clarification。
-调查、搜索、物品、线索、案件、秘密、人物背景、说服/威胁/欺骗、移动、时间地点、
-任何成功失败或状态变化，仅在对象和行动已经明确时返回 delegate_to_legacy 且 text 必须为空。
-若 public 之外存在 rule_match，只有玩家
-话语明确对应其中一条 rule_candidates 及一个 option 时才返回 rule_once，并逐字复制 rule_id
-和 option_id；target_kind/target_id 只能从 rule_match.targets 或候选的 target_ids 中选择，
-summary 只能是简短的未确认意图摘要。不能输出任何效果、结果、骰点、状态变化、Event ID、
-Entity ID 或 revision。调查、搜索、物品、线索、案件、秘密、人物背景、说服/威胁/欺骗、
-移动、时间地点、任何成功失败或无法安全匹配的请求，一律返回 delegate_to_legacy 且 text 必须为空。
-不得声称规则结果，不得输出 JSON、字段名、内部标识、ID、revision、协议或未来承诺。
-上下文只包含公开信息和受控候选。"""
+    _INSTRUCTIONS = """你是桌面角色扮演游戏的主持入口分流器，只返回 schema 要求的 JSON。
+依据当前公开输入与受控规则候选选择一路：
+- rule_loop_active=true 时，已经在同一次复合行动内。结合 completed_rule_feedback、
+  最新公开场景与本次玩家补充，只决定下一次尚未处理且仍然成立的后果：返回一个明确的
+  rule_once；无法安全推断则 needs_clarification；已完成、后续不再成立或没有匹配规则时
+  direct_response 简短收束。收束不复述已经反馈的结果。禁止再次 composite_rule 或
+  delegate_to_legacy；不得仅因候选尚未用过就执行，不得预写后续步骤。
+- rule_loop_active=false 且行动需要连续确认多个后果时，返回 composite_rule，
+  不填写规则、目标或后续步骤；单次动作的多个内部效果不因此拆开。
+- 公开上下文不足以唯一确定行动或对象，且不同选择会造成重要差异时，返回
+  needs_clarification，text 只问一句必要的公开问题。可唯一推断的省略不追问；
+  player_answer 已有内容时禁止再次澄清；循环中仍无法判断则简短收束，入口则 delegate_to_legacy。
+- 若有 rule_match，且话语明确匹配一个 rule_candidates 及 option，返回 rule_once。
+  rule_id / option_id 逐字复制；target_kind / target_id 从 rule_match.targets 或候选 target_ids
+  中选择，满足候选范围；
+  summary 仅描述未确认的意图，text 为空，不猜测规则结果。
+- 明确、低风险、无需检定且不改变权威状态的普通互动返回 direct_response，
+  text 给一句简短自然的回应；以对话或请求表达的持久行动不属于此类。
+- 其余调查、社交裁决、移动、时间、物品、信息或状态变化交给 delegate_to_legacy，
+  text 为空，不附带其他路线的字段。
+不裁决效果、骰点、成功失败或未来行动。玩家可见的 text / summary 不出现 JSON、协议字段、
+内部 ID、revision、推理或未确认结果；结构化路由所需 ID 仅填入对应的协议字段。"""
 
     def __init__(self, client: StructuredJsonClient) -> None:
         self._client = client
@@ -814,7 +685,7 @@ class PromptActionPlanNarrationModel:
             schema_name="trpg_action_plan_narration",
             schema=ActionPlanNarrationOutput.model_json_schema(mode="serialization"),
             instructions=_ACTION_PLAN_NARRATION_INSTRUCTIONS,
-            input_payload=context.to_json_dict(),
+            input_payload=context.to_prompt_dict(),
         )
 
 

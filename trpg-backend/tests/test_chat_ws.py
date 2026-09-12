@@ -291,11 +291,14 @@ def test_npc_recipient_bypasses_keeper_processing(sync_client: TestClient) -> No
     )
 
 
-def test_single_player_accepts_implicit_keeper_recipient(sync_client: TestClient) -> None:
-    """单人模式允许前端明确提交 implicit Keeper，但 recipient 字段本身仍然必填。"""
+@pytest.mark.parametrize("max_players", [1, 2])
+def test_single_player_accepts_implicit_keeper_recipient(
+    sync_client: TestClient, max_players: int
+) -> None:
+    """实际只有一名成员时，单人或多人容量的房间均可直接触发主持回复。"""
 
     token = register_and_login(sync_client, "implicit_keeper_single")
-    room = create_room(sync_client, token, max_players=1)
+    room = create_room(sync_client, token, max_players=max_players)
     advance_to_building(sync_client, room)
     complete_character(sync_client, room["roomId"], room["reconnectToken"])
     start_game(sync_client, room, token)
@@ -314,18 +317,25 @@ def test_single_player_accepts_implicit_keeper_recipient(sync_client: TestClient
             }
         )
         echo = receive_until(ws, lambda item: item.get("type") == "action.broadcast")[0]
+        narration = receive_until(ws, lambda item: item.get("type") == "narration.push")[0]
 
     assert echo["payload"]["clientActionId"] == "implicit-keeper-1"
+    assert narration["payload"]["text"]
 
 
 def test_multiplayer_rejects_implicit_keeper_recipient(sync_client: TestClient) -> None:
-    """多人模式必须明确 @守秘人，服务端不能信任客户端路由。"""
+    """实际有两名成员时仍需明确 @守秘人，队友断线也不能绕过服务端校验。"""
 
     token = register_and_login(sync_client, "implicit_keeper_multi")
     room = create_room(sync_client, token, max_players=2)
+    guest = join_as(sync_client, room["roomCode"], "implicit_keeper_guest")
     advance_to_building(sync_client, room)
     complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    complete_character(sync_client, room["roomId"], guest["reconnectToken"], name="林探员")
     start_game(sync_client, room, token)
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={guest['authToken']}") as ws:
+        _join_ws(ws, guest, started=True)
 
     with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
         _join_ws(ws, room, started=True)
@@ -341,8 +351,14 @@ def test_multiplayer_rejects_implicit_keeper_recipient(sync_client: TestClient) 
             }
         )
         error = receive_until(ws, lambda item: item.get("type") == "error")[0]
+        _submit_action(ws, room, "查看托马斯")
+        echo = receive_until(ws, lambda item: item.get("type") == "action.broadcast")[0]
+        narration = receive_until(ws, lambda item: item.get("type") == "narration.push")[0]
 
     assert error["payload"]["code"] == "BAD_REQUEST"
+    assert error["payload"]["correlationId"] == "implicit-keeper-multi-1"
+    assert echo["payload"]["utterance"] == "查看托马斯"
+    assert narration["payload"]["text"]
 
 
 # ── action.plan.submit：原话广播 + 叙事回复 ───────────

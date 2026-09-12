@@ -20,7 +20,7 @@ MemoryKind = Literal[
 MemoryEpistemicStatus = Literal[
     "confirmed", "experienced", "heard", "asserted", "presentation"
 ]
-MemoryVisibility = Literal["public", "player_scoped", "entity_scoped"]
+MemoryVisibility = Literal["public", "player_scoped", "scene_scoped", "entity_scoped"]
 
 
 class MemoryEntry(ContractModel):
@@ -31,7 +31,10 @@ class MemoryEntry(ContractModel):
     subject_id: str = Field(min_length=1)
     object_id: str | None = None
     kind: MemoryKind
-    content: str = Field(min_length=1, max_length=2000)
+    # Preserve the source; readers, not storage, enforce model input budgets.
+    content: str = Field(min_length=1)
+    # 阅读端预算生成的摘录；完整原文仍保留在来源事件和记忆存储中。
+    content_truncated: bool = False
     epistemic_status: MemoryEpistemicStatus
     visibility: MemoryVisibility
     participants: tuple[str, ...] = ()

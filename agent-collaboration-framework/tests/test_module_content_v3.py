@@ -204,9 +204,7 @@ def module_payload() -> dict[str, Any]:
             "players_max": 4,
             "difficulty": 2,
             "estimated_duration": "4-6 小时",
-            "player_intro_pages": [
-                {"title": "委托", "content": "托马斯请你找回叔叔的藏书。"}
-            ],
+            "player_intro_pages": [{"title": "委托", "content": "托马斯请你找回叔叔的藏书。"}],
         },
         "initial_state": {
             "start_location_id": "arnoldsburg",
@@ -223,6 +221,51 @@ def mutate(**changes: Any) -> dict[str, Any]:
 
 
 class ModuleContentV3ContractTests(unittest.TestCase):
+    def test_opening_facts_require_source_and_preserve_legacy_serialization(self):
+        legacy = ModuleContentV3.model_validate(module_payload()).to_json_dict()
+        self.assertNotIn("opening_text", legacy)
+        self.assertNotIn("opening_key_facts", legacy)
+        self.assertEqual(ModuleContentV3.model_validate(legacy).to_json_dict(), legacy)
+        with self.assertRaises(ValidationError):
+            ModuleContentV3.model_validate({**legacy, "opening_key_facts": ["桌上有三封信。"]})
+        source = "你来到门厅，桌上有三封信。"
+        for facts in ([""], ["   "]):
+            with self.subTest(facts=facts), self.assertRaises(ValidationError):
+                ModuleContentV3.model_validate(
+                    {**legacy, "opening_text": source, "opening_key_facts": facts}
+                )
+        authored = ModuleContentV3.model_validate(
+            {
+                **legacy,
+                "opening_text": source,
+                "opening_key_facts": ["桌上有三封信。"],
+            }
+        )
+        self.assertEqual(authored.opening_key_facts, ("桌上有三封信。",))
+        self.assertEqual(ModuleContentV3.model_validate(authored.to_json_dict()), authored)
+
+    def test_voice_profile_is_supported_for_npc(self) -> None:
+        payload = module_payload()
+        payload["entities"][0]["kind"] = "npc"
+        payload["entities"][0]["voice"] = {
+            "provider": "doubao",
+            "resource_id": "seed-tts-2.0",
+            "voice_type": "voice-a",
+        }
+        content = ModuleContentV3.model_validate(payload)
+        self.assertEqual(content.entities[0].voice.voice_type, "voice-a")
+
+    def test_voice_profile_is_rejected_for_object(self) -> None:
+        payload = module_payload()
+        payload["entities"][0]["kind"] = "object"
+        payload["entities"][0]["voice"] = {
+            "provider": "doubao",
+            "resource_id": "seed-tts-2.0",
+            "voice_type": "voice-a",
+        }
+        with self.assertRaises(ValidationError):
+            ModuleContentV3.model_validate(payload)
+
     def test_reference_module_validates(self) -> None:
         report = validate_module_v3(module_payload())
         self.assertEqual(report.status, "pass", report.errors)
@@ -319,9 +362,7 @@ class ReferenceIntegrityTests(unittest.TestCase):
 class RuleGraphTests(unittest.TestCase):
     def test_agent_match_hint_equal_to_family_is_rejected(self) -> None:
         payload = mutate()
-        payload["rules"][0]["trigger"]["question"]["semantic_hints"] = [
-            " Research "
-        ]
+        payload["rules"][0]["trigger"]["question"]["semantic_hints"] = [" Research "]
         report = validate_module_v3(payload)
         self.assertEqual(
             [issue.code for issue in report.errors],
@@ -334,9 +375,7 @@ class RuleGraphTests(unittest.TestCase):
 
     def test_agent_match_hint_equal_to_option_id_is_rejected(self) -> None:
         payload = mutate()
-        payload["rules"][0]["trigger"]["question"]["semantic_hints"] = [
-            " by_date "
-        ]
+        payload["rules"][0]["trigger"]["question"]["semantic_hints"] = [" by_date "]
         report = validate_module_v3(payload)
         self.assertEqual(
             [issue.code for issue in report.errors],

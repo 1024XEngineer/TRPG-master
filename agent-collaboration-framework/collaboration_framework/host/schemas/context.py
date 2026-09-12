@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
 from collaboration_framework.contracts import (
     ContractModel,
+    JsonObject,
     NarrativeDetailView,
 )
 
@@ -38,10 +39,37 @@ class OpeningNarrationContext(ContractModel):
         min_length=1,
         description="玩家可知的时代、地点、故事前提与叙事基调。",
     )
+    opening_text: str | None = Field(default=None, min_length=1)
+    opening_key_facts: tuple[Annotated[str, Field(min_length=1)], ...] = ()
     scene: OpeningSceneContext
     participants: tuple[OpeningParticipant, ...] = Field(min_length=1)
     solo_background_summary: str = ""
     addressing_mode: Literal["second_person", "named_actor"] = "second_person"
+    # 上一版开场被玩家可见输出安全校验拒绝后，重试时告诉模型问题出在哪
+    # （issue #505）。与回合叙事的 ActionPlanNarrationContext 用法一致。
+    narration_retry_hint: str | None = Field(default=None, max_length=500)
+
+    def to_prompt_dict(self) -> JsonObject:
+        """Keep scene constraints, but omit internal IDs and unrelated biography.
+
+        The full context remains available to fallback rendering. Authored openings
+        already supply the story premise; only legacy openings need background.
+        """
+
+        payload = self.model_dump(
+            mode="json",
+            exclude={
+                "participants": {"__all__": {"actor_id"}},
+                "scene": {"id"},
+            },
+            exclude_none=True,
+            exclude_defaults=True,
+        )
+        if self.opening_text:
+            payload.pop("background", None)
+            payload.pop("solo_background_summary", None)
+        payload["addressing_mode"] = self.addressing_mode
+        return payload
 
     @model_validator(mode="after")
     def validate_public_scope(self) -> OpeningNarrationContext:
@@ -50,4 +78,6 @@ class OpeningNarrationContext(ContractModel):
             raise ValueError("OpeningNarrationContext participant actor_id 必须唯一")
         if len(self.participants) > 1 and self.solo_background_summary:
             raise ValueError("多人公共开场不得包含单人背景摘要")
+        if self.opening_key_facts and not self.opening_text:
+            raise ValueError("opening_key_facts 必须有 opening_text 作为来源")
         return self

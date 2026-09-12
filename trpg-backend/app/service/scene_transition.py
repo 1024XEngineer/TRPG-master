@@ -302,18 +302,18 @@ async def mark_narration_persisted(
     room_id: str,
     parent_action_id: str,
 ) -> None:
-    record = await db.scalar(
-        select(SceneTransitionProposalRecord)
-        .where(
-            SceneTransitionProposalRecord.room_id == room_id,
-            SceneTransitionProposalRecord.parent_action_id == parent_action_id,
-            SceneTransitionProposalRecord.narration_persisted.is_(False),
+    records = (
+        await db.scalars(
+            select(SceneTransitionProposalRecord).where(
+                SceneTransitionProposalRecord.room_id == room_id,
+                SceneTransitionProposalRecord.parent_action_id == parent_action_id,
+                SceneTransitionProposalRecord.narration_persisted.is_(False),
+            )
         )
-        .order_by(SceneTransitionProposalRecord.created_at.desc())
-        .limit(1)
-    )
-    if record is not None:
-        record.narration_persisted = True
+    ).all()
+    if records:
+        for record in records:
+            record.narration_persisted = True
         await db.commit()
 
 

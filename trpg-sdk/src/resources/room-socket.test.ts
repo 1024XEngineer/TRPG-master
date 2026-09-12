@@ -756,3 +756,261 @@ test('未连接时 submitPlannedAction reject RoomSocketTransportError', async (
       error.message === 'WebSocket is not connected'
   );
 });
+
+/**
+ * 心跳与断线重连（issue #505）。
+ *
+ * 预览环境的链路是「浏览器 ↔ 网关 ↔ Caddy ↔ 后端」，网关会在空闲时静默切断，
+ * 两端都收不到 FIN——服务端 6 小时内记录了 20 次 connection open、0 次
+ * connection closed。所以既要主动发心跳把链路填满，也要在心跳失败时自己发现
+ * 并重连，不能干等 TCP。
+ */
+class HeartbeatFakeWebSocket {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static instances: HeartbeatFakeWebSocket[] = [];
+
+  readyState = HeartbeatFakeWebSocket.OPEN;
+  onmessage: ((event: { data: string }) => void) | null = null;
+  onclose: (() => void) | null = null;
+  onopen: (() => void) | null = null;
+  sent: string[] = [];
+  closed = false;
+
+  constructor(readonly url: string) {
+    HeartbeatFakeWebSocket.instances.push(this);
+  }
+
+  send(data: string) {
+    this.sent.push(data);
+  }
+
+  close() {
+    this.closed = true;
+    this.onclose?.();
+  }
+
+  addEventListener() {}
+
+  emit(value: unknown) {
+    this.onmessage?.({ data: JSON.stringify(value) });
+  }
+
+  sentTypes(): string[] {
+    return this.sent.map((raw) => (JSON.parse(raw) as { type: string }).type);
+  }
+}
+
+async function withHeartbeatSocketAsync(
+  run: (socket: RoomSocket) => Promise<void>,
+): Promise<void> {
+  const original = globalThis.WebSocket;
+  HeartbeatFakeWebSocket.instances = [];
+  Object.defineProperty(globalThis, 'WebSocket', {
+    configurable: true,
+    value: HeartbeatFakeWebSocket,
+  });
+  try {
+    const socket = new RoomSocket('ws://example.test');
+    await run(socket);
+    socket.disconnect();
+  } finally {
+    Object.defineProperty(globalThis, 'WebSocket', {
+      configurable: true,
+      value: original,
+    });
+  }
+}
+
+/** mock timers 是同步 tick，promise 的 then 排在微任务里——断言前必须冲一次。 */
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+function withHeartbeatSocket(run: (socket: RoomSocket) => void): void {
+  const original = globalThis.WebSocket;
+  HeartbeatFakeWebSocket.instances = [];
+  Object.defineProperty(globalThis, 'WebSocket', {
+    configurable: true,
+    value: HeartbeatFakeWebSocket,
+  });
+  try {
+    const socket = new RoomSocket('ws://example.test');
+    run(socket);
+    socket.disconnect();
+  } finally {
+    Object.defineProperty(globalThis, 'WebSocket', {
+      configurable: true,
+      value: original,
+    });
+  }
+}
+
+test('心跳：连接打开后按间隔发出 ping，收到 pong 不判定掉线', (t) => {
+  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+  withHeartbeatSocket((socket) => {
+    const transport = socket.connect('room-1', 'token') as unknown as HeartbeatFakeWebSocket;
+    socket.joinRoom('player-1', { reconnectToken: 'rt' } as never);
+    transport.onopen?.();
+
+    t.mock.timers.tick(20_000);
+    assert.ok(transport.sentTypes().includes('ping'), '到间隔后应发出 ping');
+
+    transport.emit({ type: 'pong', payload: {} });
+    // pong 之后即使走过心跳超时点，也不该把连接关掉。
+    t.mock.timers.tick(10_000);
+    assert.equal(transport.closed, false, '收到 pong 后不应判定掉线');
+  });
+});
+
+test('心跳：ping 之后拿不到 pong，超时即关闭连接触发重连', (t) => {
+  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+  withHeartbeatSocket((socket) => {
+    const transport = socket.connect('room-1', 'token') as unknown as HeartbeatFakeWebSocket;
+    socket.joinRoom('player-1', { reconnectToken: 'rt' } as never);
+    transport.onopen?.();
+
+    t.mock.timers.tick(20_000);
+    assert.ok(transport.sentTypes().includes('ping'));
+    // 不回 pong，走过心跳超时。
+    t.mock.timers.tick(10_000);
+    assert.equal(transport.closed, true, '心跳超时后应主动关闭失效连接');
+  });
+});
+
+test('重连：掉线后按退避重建连接，并自动重发 room.join', (t) => {
+  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+  withHeartbeatSocket((socket) => {
+    const first = socket.connect('room-1', 'token') as unknown as HeartbeatFakeWebSocket;
+    socket.joinRoom('player-1', { reconnectToken: 'rt' } as never);
+    first.onopen?.();
+    assert.equal(HeartbeatFakeWebSocket.instances.length, 1);
+
+    first.onclose?.();
+    // 首次退避 1s。
+    t.mock.timers.tick(1_000);
+    assert.equal(HeartbeatFakeWebSocket.instances.length, 2, '掉线后应重建连接');
+
+    const second = HeartbeatFakeWebSocket.instances[1]!;
+    // 浏览器在连接就绪时触发 open；重发 room.join 挂在这个事件上。
+    second.onopen?.();
+    assert.ok(
+      second.sentTypes().includes('room.join'),
+      '重连后必须重新 room.join，否则服务端不会把广播发给这条连接'
+    );
+  });
+});
+
+test('重连：从未 room.join 的连接掉线后不重连', (t) => {
+  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+  withHeartbeatSocket((socket) => {
+    const only = socket.connect('room-1', 'token') as unknown as HeartbeatFakeWebSocket;
+    only.onopen?.();
+    only.onclose?.();
+    t.mock.timers.tick(60_000);
+    assert.equal(
+      HeartbeatFakeWebSocket.instances.length,
+      1,
+      '没有房间状态需要恢复时不应重连'
+    );
+  });
+});
+
+test('连接状态：掉线进入 reconnecting，主动断开进入 disconnected', (t) => {
+  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+  const original = globalThis.WebSocket;
+  HeartbeatFakeWebSocket.instances = [];
+  Object.defineProperty(globalThis, 'WebSocket', {
+    configurable: true,
+    value: HeartbeatFakeWebSocket,
+  });
+  try {
+    const socket = new RoomSocket('ws://example.test');
+    const states: string[] = [];
+    socket.onConnectionChange((state) => states.push(state));
+
+    const transport = socket.connect('room-1', 'token') as unknown as HeartbeatFakeWebSocket;
+    socket.joinRoom('player-1', { reconnectToken: 'rt' } as never);
+    transport.onopen?.();
+    transport.onclose?.();
+    assert.ok(states.includes('reconnecting'), '掉线后要让界面知道正在重连');
+
+    socket.disconnect();
+    assert.equal(states.at(-1), 'disconnected');
+  } finally {
+    Object.defineProperty(globalThis, 'WebSocket', {
+      configurable: true,
+      value: original,
+    });
+  }
+});
+
+test('重连：可恢复的掉线不清 pending action，重连后仍能被 turn.completed 结算', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+  await withHeartbeatSocketAsync(async (socket) => {
+    const first = socket.connect('room-1', 'token') as unknown as HeartbeatFakeWebSocket;
+    socket.joinRoom('player-1', { reconnectToken: 'rt' } as never);
+    first.onopen?.();
+
+    let settled: unknown = null;
+    void socket
+      .submitPlannedAction('player-1', {
+        clientActionId: completedEvent.correlation_id,
+      } as never)
+      .then((value) => {
+        settled = value;
+      })
+      .catch((error: unknown) => {
+        settled = error;
+      });
+
+    // 掉线：行动在服务端是 durable 的，这里不能把它判失败。
+    first.onclose?.();
+    t.mock.timers.tick(1_000);
+    const second = HeartbeatFakeWebSocket.instances[1]!;
+    second.onopen?.();
+
+    // 服务端按恢复路径重投结果。
+    second.emit(completedEvent);
+    await flushMicrotasks();
+    assert.notEqual(settled, null, 'turn.completed 应当结算那条被保住的 pending action');
+    assert.ok(!(settled instanceof Error), `不应以错误收敛，实际是 ${String(settled)}`);
+  });
+});
+
+/** 与实现保持一致；实现里的常量不导出，这里显式重复一份并在断言中体现其含义。 */
+const RECONNECT_MAX_ATTEMPTS = 8;
+
+test('重连：放弃重连时才把 pending action 判失败', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+  await withHeartbeatSocketAsync(async (socket) => {
+    const first = socket.connect('room-1', 'token') as unknown as HeartbeatFakeWebSocket;
+    socket.joinRoom('player-1', { reconnectToken: 'rt' } as never);
+    first.onopen?.();
+
+    let failure: unknown = null;
+    void socket
+      .submitPlannedAction('player-1', { clientActionId: 'act-lost' } as never)
+      .catch((error: unknown) => {
+        failure = error;
+      });
+
+    // 每次重连出来的连接都连不上（不触发 onopen，直接 close），这样重连计数才会
+    // 累积——一次成功的 onopen 会把计数清零，那是正常恢复，不该走到放弃这一步。
+    let current = first;
+    for (let attempt = 0; attempt < RECONNECT_MAX_ATTEMPTS + 2; attempt += 1) {
+      current.onclose?.();
+      t.mock.timers.tick(30_000);
+      const next = HeartbeatFakeWebSocket.instances.at(-1)!;
+      if (next === current) break;
+      current = next;
+    }
+
+    await flushMicrotasks();
+    assert.ok(
+      failure instanceof RoomSocketTransportError,
+      `重连到顶后必须让调用方拿到失败，实际是 ${String(failure)}`
+    );
+  });
+});

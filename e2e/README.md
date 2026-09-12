@@ -19,7 +19,7 @@ npm run test:e2e
 
 **不需要先手动起后端**——`scripts/run-e2e.ts` 会起后端、等就绪、跑测试、收摊，本地和 CI 走同一条路径（两套流程迟早分叉，然后出现「CI 绿本地红」）。
 
-前置条件只有一个：`trpg-backend` 已经 `uv sync`（脚本直接调 `.venv/bin/` 里的可执行文件），以及 `trpg-sdk` 已经 `npm run build`。
+使用与 CI 一致的 **Node.js 22**（提供 WebSocket、SQLite 和测试文件通配符支持）。另外需要 `trpg-backend` 已经 `uv sync`（脚本直接调 `.venv/bin/` 里的可执行文件），以及 `trpg-sdk` 已经 `npm run build`。
 
 后端跑在 **8099**（不是开发用的 8000），且**端口被占用会直接报错退出**，不会退化成「连到别人的后端上」。需要换端口用 `E2E_PORT=xxxx`。
 
@@ -33,6 +33,7 @@ E2E_ONLY=tests/character-build.e2e.ts npm run test:e2e
 
 | 文件 | 内容 |
 |---|---|
+| `accompanying.e2e.ts` | #516/#518：莱恩夫妇可见且分别回复；强行带离詹姆斯后回庄园、连续移动与重连仍随行；门禁不分离、否定不解除、明确解除后不再跟随。使用已发布蛙蛙村，不直接注入游戏状态 |
 | `character-build.e2e.ts` | ruleset 契约（9 属性 / `pointBuy` 标志 / 点数购买约束 / 年龄区间）、建卡全流程（草稿→保存→**读回**→完成）、**属性点预算按生成方法分流**、**掷骰来源被伪造时退回点数购买法**、年龄区间、信用必填、角色卡隐私 |
 | `multiplayer-ws.e2e.ts` | 三客户端加入、行动串行与私有视图隔离、全员时间确认、断线重连，以及追书人首场景→托马斯→图书馆→旧报检定→PlayerView 更新的完整纵切 |
 | `not-implemented.e2e.ts` | 钉住目前还是桩的接口（复盘摘要 / 常用卡库），并确认 replay 是真实现 |

@@ -39,6 +39,11 @@ CHARACTER_STATE_VALUES: dict[str, tuple[JsonValue, ...]] = {
     "posture": ("standing", "prone"),
     "restraint": ("free", "restrained"),
     "injury": ("none", "minor", "major", "critical"),
+    # 随行必须可见，否则主持人无法判断「他还该不该跟着」：谁在队伍里走是一件
+    # 玩家当场就看得见的事，模型却读不到，只能靠猜或者干脆不提（#516）。进了
+    # 这份白名单，它同时成为叙事可以引用的权威结果——「詹姆斯跟着你走出接待
+    # 大厅」这句话背后有一条已提交的状态，而不是模型自己编的。
+    "accompanying": (True, False),
 }
 OBJECT_STATE_VALUES: dict[str, tuple[JsonValue, ...]] = {
     "open": (True, False),
@@ -284,6 +289,8 @@ def is_public_standard_state(effect: ActionEffect) -> bool:
 
 def committed_results_from_events(
     events: tuple[DomainEvent, ...],
+    *,
+    item_ids: frozenset[str] = frozenset(),
 ) -> tuple[CommittedResult, ...]:
     """只从公开、已应用的高层 DomainEvent 生成玩家安全证据摘要。"""
 
@@ -319,7 +326,11 @@ def committed_results_from_events(
                     event_ref=event.event_id,
                 )
             )
-        elif event.type == "entity.moved" and isinstance(payload.get("entity_id"), str):
+        elif (
+            event.type == "entity.moved"
+            and isinstance(payload.get("entity_id"), str)
+            and payload.get("entity_id") in item_ids
+        ):
             entity_id = payload.get("entity_id")
             assert isinstance(entity_id, str)
             results.append(
@@ -341,11 +352,23 @@ def committed_results_from_events(
                     event_ref=event.event_id,
                 )
             )
-        elif event.type == "location.entered" and isinstance(
-            payload.get("location_id"), str
-        ):
-            location_id = payload.get("location_id")
-            assert isinstance(location_id, str)
+        elif event.type in {
+            "travel.resolved",
+            "travel.interrupted",
+            "location.entered",
+        }:
+            field = {
+                "travel.resolved": "destination_id",
+                "travel.interrupted": "current_location_id",
+                "location.entered": "location_id",
+            }[event.type]
+            location_id = payload.get(field)
+            path = payload.get("path")
+            # The authoritative path starts at the origin, including on no-op travel.
+            # A blocked trip reports the reached boundary, never the requested target.
+            origin = path[0] if isinstance(path, list) and path else None
+            if not isinstance(location_id, str) or location_id == origin:
+                continue
             results.append(
                 CommittedResult(
                     kind="location",

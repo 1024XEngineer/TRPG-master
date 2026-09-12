@@ -37,9 +37,11 @@ from app.models.engine import (
 )
 from app.models.event import CheckResult, Event, EventAudience
 from app.models.memory import (
+    ConversationSummaryReceipt,
     ConversationSummaryRecord,
     MemoryEntryRecord,
     MemoryProjectionCursor,
+    MemoryProjectionReceipt,
 )
 from app.models.replay import ModuleImportJob, RoomSummary
 from app.models.room import Character, CharacterPortrait, Note, Player, Room
@@ -90,6 +92,8 @@ __all__ = [
     "UserSession",
     "World",
     "ConversationSummaryRecord",
+    "ConversationSummaryReceipt",
     "MemoryEntryRecord",
     "MemoryProjectionCursor",
+    "MemoryProjectionReceipt",
 ]

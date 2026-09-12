@@ -1,7 +1,7 @@
 {
   "content_schema_version": 3,
   "module_id": "paper-chase-zh-coc7",
-  "version": "3.0.10",
+  "version": "3.0.12",
   "world_ref": "coc-7e",
   "background": "时代与地点为美国禁酒令时期的密歇根州阿诺兹堡。调查员受托马斯·金博尔委托，从五本失窃的旧书和叔叔道格拉斯一年前的失踪案入手，走访旧宅、图书馆与公共墓地。叙事应保持安静、克制而带哥特气息，以夜色、旧书、墓园和孤独感作为反复意象；面对异常时不要急于渲染纯粹敌意，应为同情、选择与淡淡哀伤保留空间。任何尚未由线索确认的真相都不得提前告知玩家。",
   "information": [
@@ -218,6 +218,11 @@
         "委托人"
       ],
       "description": "道格拉斯·金博尔的侄子，现住在叔叔的旧居。他希望找回五本失窃藏书，并确认叔叔的下落。",
+      "voice": {
+        "provider": "doubao",
+        "resource_id": "seed-tts-2.0",
+        "voice_type": "zh_male_dayi_saturn_bigtts"
+      },
       "located_in": "thomas_office",
       "state": {
         "case_open": true,
@@ -236,6 +241,11 @@
         "夜行者"
       ],
       "description": "夜色中一条瘦削的人影，怀里似乎夹着一本书。",
+      "voice": {
+        "provider": "doubao",
+        "resource_id": "seed-tts-2.0",
+        "voice_type": "zh_male_xuanyijieshuo_uranus_bigtts"
+      },
       "located_in": "crypt",
       "state": {
         "alive": true,
@@ -306,6 +316,11 @@
         "邻居"
       ],
       "description": "道格拉斯旧居附近的一名邻居，记得他失踪前的一些生活习惯。",
+      "voice": {
+        "provider": "doubao",
+        "resource_id": "seed-tts-2.0",
+        "voice_type": "zh_female_vv_uranus_bigtts"
+      },
       "located_in": "neighborhood",
       "state": {
         "interviewed": false
@@ -325,6 +340,11 @@
         "看守"
       ],
       "description": "公共墓地的看守，穿着一件旧外套，看起来有些紧张。",
+      "voice": {
+        "provider": "doubao",
+        "resource_id": "seed-tts-2.0",
+        "voice_type": "zh_male_ruyayichen_saturn_bigtts"
+      },
       "located_in": "cemetery",
       "state": {
         "impressed": false,
@@ -344,6 +364,11 @@
         "失眠症邻居"
       ],
       "description": "一位已经搬去底特律的老妇人，曾向报社留下关于墓地的陈述。",
+      "voice": {
+        "provider": "doubao",
+        "resource_id": "seed-tts-2.0",
+        "voice_type": "zh_female_santongyongns_saturn_bigtts"
+      },
       "located_in": "newspaper_office",
       "state": {},
       "visibility": "public",
@@ -3874,5 +3899,15 @@
     "forbidden_content": [
       "提前揭示道格拉斯的食尸鬼身份"
     ]
-  }
+  },
+  "opening_text": "一位名叫托马斯·金博尔的人联系了调查员。他的房屋似乎遭了贼，失窃的是他最近过世的叔叔珍藏的五本书。这些书并不怎么值钱——只有他的叔叔会将它们视作珍宝。但他的叔叔一年前就已经失踪，没有留下任何痕迹。\n\n托马斯·金博尔希望调查员找到偷窃书籍的贼人，尽可能追回这些书籍，并调查他的叔叔道格拉斯·金博尔是否尚在人世。",
+  "opening_key_facts": [
+    "托马斯·金博尔联系调查员，提出调查委托。",
+    "托马斯的房屋疑似遭窃，失窃物是叔叔珍藏的五本书。",
+    "这些书不怎么值钱，但叔叔非常珍视。",
+    "叔叔名叫道格拉斯·金博尔，是托马斯的叔叔。",
+    "道格拉斯一年前失踪，没有留下痕迹。",
+    "委托要求找到偷书的人，尽可能追回失窃书籍。",
+    "还要查明道格拉斯是否尚在人世，不能预先断言其死亡已得到证实。"
+  ]
 }

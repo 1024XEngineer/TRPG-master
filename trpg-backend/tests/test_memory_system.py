@@ -190,6 +190,7 @@ def test_listener_projection_skips_unproven_listener() -> None:
 def test_summary_reads_broadcast_utterance() -> None:
     """action.broadcast 的 utterance 也必须进入摘要字符和内容输入。"""
     event = SimpleNamespace(
+        event_type="action.broadcast",
         payload={"utterance": "告诉托马斯钟摆停在第三声之后。"},
     )
     assert _event_text(cast(Event, event)) == "告诉托马斯钟摆停在第三声之后。"

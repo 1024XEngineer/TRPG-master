@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.core.host_rule_loop import RuleLoopState
 from app.dto.ws import ActionRecipientPayload, RoomActionQueueItemPayload
@@ -279,17 +280,55 @@ async def save_execution_route(
 async def save_rule_loop(db: AsyncSession, item: HostActionQueueItem, state: RuleLoopState) -> None:
     """Persist a validated composite-action cursor atomically with the queue row."""
 
-    if state.client_action_id != item.client_action_id or state.player_id != item.player_id:
+    if (
+        state.client_action_id != item.client_action_id
+        or state.player_id != item.player_id
+        or state.actor_id != item.actor_id
+    ):
         raise HostActionQueueError("RULE_LOOP_SCOPE", "规则循环不属于当前队列项")
-    item.rule_loop_json = state.dump()
+    previous = (item.rule_loop_json or {}).get("cursor_version")
+    cursor = HostActionQueueItem.rule_loop_json["cursor_version"].as_integer()
+    now = datetime.now(UTC)
+    payload = {**state.dump(), "cursor_version": state.cursor_version + 1}
+    lease = now + timedelta(seconds=180) if item.status == "processing" else None
+    result = await db.execute(
+        update(HostActionQueueItem)
+        .where(
+            HostActionQueueItem.room_id == item.room_id,
+            HostActionQueueItem.item_id == item.item_id,
+            HostActionQueueItem.status == item.status,
+            HostActionQueueItem.lease_owner == item.lease_owner,
+            cursor.is_(None)
+            if previous is None and state.cursor_version == 0
+            else cursor == state.cursor_version,
+        )
+        .values(rule_loop_json=payload, updated_at=now, lease_expires_at=lease)
+        .returning(HostActionQueueItem.item_id)
+        .execution_options(synchronize_session=False)
+    )
+    if result.scalar_one_or_none() is None:
+        await db.rollback()
+        await db.refresh(item)
+        raise HostActionQueueError("RULE_LOOP_CONFLICT", "复合行动已由另一个恢复任务推进")
     await db.commit()
+    state.cursor_version = payload["cursor_version"]
+    set_committed_value(item, "rule_loop_json", payload)
+    set_committed_value(item, "updated_at", now)
+    set_committed_value(item, "lease_expires_at", lease)
 
 
 def load_rule_loop(item: HostActionQueueItem) -> RuleLoopState | None:
     if not item.rule_loop_json:
         return None
     try:
-        return RuleLoopState.model_validate(item.rule_loop_json)
+        state = RuleLoopState.model_validate(item.rule_loop_json)
+        if (
+            state.client_action_id != item.client_action_id
+            or state.player_id != item.player_id
+            or state.actor_id != item.actor_id
+        ):
+            return None
+        return state
     except ValidationError:
         # Recovery callers treat a malformed cursor as a fail-closed composite
         # action. Returning no cursor lets the queue finalizer persist a safe stop

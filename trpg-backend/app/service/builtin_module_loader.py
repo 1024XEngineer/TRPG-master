@@ -42,37 +42,41 @@ class BuiltinModuleSpec:
     source_path: Path
     display_name: str
     world_id: str | None = None
+    requires_opening_text: bool = False
 
 
 PAPER_CHASE_SPEC = BuiltinModuleSpec(
     scenario_id="00000000-0000-0000-0000-000000000003",
     module_id="paper-chase-zh-coc7",
-    version="3.0.10",
+    version="3.0.12",
     world_ref="coc-7e",
     source_path=MODULE_FIXTURE_ROOT / "追书人" / "module-content-v3.json",
     display_name="追书人",
+    requires_opening_text=True,
     world_id="00000000-0000-0000-0000-000000000004",
 )
 SILVER_LOCK_SPEC = BuiltinModuleSpec(
     scenario_id="00000000-0000-0000-0000-000000000005",
     module_id="silver-lock",
-    version="3.0.2",
+    version="3.0.4",
     world_ref="coc-7e",
     source_path=MODULE_FIXTURE_ROOT / "银之锁" / "module-content-v3.json",
     display_name="银之锁",
+    requires_opening_text=True,
 )
 HAPPY_FROG_VILLAGE_SPEC = BuiltinModuleSpec(
     scenario_id="00000000-0000-0000-0000-000000000006",
     module_id="happy-frog-village",
-    version="3.0.8",
+    version="3.0.14",
     world_ref="coc-7e",
     source_path=MODULE_FIXTURE_ROOT / "幸福蛙蛙村" / "module-content-v3.json",
     display_name="幸福蛙蛙村",
+    requires_opening_text=True,
 )
 CONSTANT_DARKNESS_BOX_SPEC = BuiltinModuleSpec(
     scenario_id="00000000-0000-0000-0000-000000000007",
     module_id="constant-darkness-box-zh-coc7",
-    version="3.0.0",
+    version="3.0.1",
     world_ref="coc-7e",
     source_path=MODULE_FIXTURE_ROOT / "常暗之厢" / "module-content-v3.json",
     display_name="常暗之厢",
@@ -169,6 +173,8 @@ async def load_builtin_module(
                 + (f": {issues}" if issues else "")
             )
         content = ModuleContentV3.model_validate_json(payload)
+        if spec.requires_opening_text and not content.opening_text:
+            raise BuiltinModuleLoadError(f"{spec.display_name}发布版本缺少开场原文")
         capability_issues = audit_runtime_capabilities(content)
         if capability_issues:
             rendered = "; ".join(

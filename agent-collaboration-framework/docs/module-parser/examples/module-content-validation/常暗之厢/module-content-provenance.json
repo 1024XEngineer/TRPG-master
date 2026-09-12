@@ -265,15 +265,6 @@
     "spot_rear_maw": [
       3
     ],
-    "sync_attendant_to_driver_cab": [
-      6,
-      12
-    ],
-    "sync_attendant_to_lead_car": [
-      6,
-      10,
-      11
-    ],
     "sync_key_bag_to_driver_cab": [
       7,
       12
@@ -292,5 +283,5 @@
   },
   "source": "常暗之厢（7版规则，简体修正版）(1).pdf",
   "source_title": "常暗之箱",
-  "version": "3.0.0"
+  "version": "3.0.1"
 }

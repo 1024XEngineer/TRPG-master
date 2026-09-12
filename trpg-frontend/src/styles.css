@@ -53,6 +53,19 @@
       border: 8px solid #2c2416;
       height: 820px;
       box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+      transform-origin: top center;
+    }
+  }
+
+  @media (min-width: 1200px) and (min-height: 960px) {
+    #root {
+      transform: translateZ(0) scale(1.1);
+    }
+  }
+
+  @media (min-width: 1600px) and (min-height: 1040px) {
+    #root {
+      transform: translateZ(0) scale(1.2);
     }
   }
 

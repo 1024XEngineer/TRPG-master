@@ -35,6 +35,7 @@ from collaboration_framework.contracts.module_v3 import (
     RuleSpecV3,
     RuleStepSpec,
 )
+from collaboration_framework.registry import effects as effect_registry
 from collaboration_framework.registry import predicates as predicate_registry
 from collaboration_framework.registry import rule_steps as rule_step_registry
 from collaboration_framework.registry import rulesets as ruleset_registry
@@ -133,6 +134,7 @@ def _semantic_issues(content: ModuleContentV3) -> list[ValidationIssue]:
             "MODULE_V3_LOCATION_NOT_FOUND",
             f"entities.{index}.located_in",
         )
+        issues.extend(_accompanying_issues(entity.state, f"entities.{index}.state"))
         for relation_index, relation in enumerate(entity.relations):
             if (
                 relation.target_id not in entity_ids
@@ -256,6 +258,12 @@ def _semantic_issues(content: ModuleContentV3) -> list[ValidationIssue]:
             "MODULE_V3_ENTITY_NOT_FOUND",
             f"initial_state.entity_state.{entity_id}",
         )
+        issues.extend(
+            _accompanying_issues(
+                content.initial_state.entity_state[entity_id],
+                f"initial_state.entity_state.{entity_id}",
+            )
+        )
     start_point = content.initial_state.start_time_point_id
     if start_point is not None and start_point not in time_point_ids:
         issues.append(
@@ -268,6 +276,38 @@ def _semantic_issues(content: ModuleContentV3) -> list[ValidationIssue]:
         )
 
     return issues
+
+
+def _accompanying_value_issues(value: Any, path: str) -> list[ValidationIssue]:
+    """`accompanying` 是引擎保留键，只接受布尔值（#516）。
+
+    引擎把移动语义挂在了这个键上：为 True 的实体在队伍换场景时被一并带走。写成
+    `"yes"` 之类的真值字符串在结构上完全合法，运行时却永远等不到那个 `is True`
+    ——随行静默失效，和这个键存在之前没有区别。这正是 #347 要求登记表在发布期拦下
+    的那一类问题：引擎认识这个名字但内容写错了，发布期报错，而不是运行期无声地
+    什么都不做。
+    """
+
+    if isinstance(value, bool):
+        return []
+    key = effect_registry.ACCOMPANYING_STATE_KEY
+    return [
+        ValidationIssue(
+            severity="error",
+            code="MODULE_V3_ACCOMPANYING_NOT_BOOLEAN",
+            path=path,
+            message=f"引擎保留键 {key} 只接受布尔值: {value!r}",
+        )
+    ]
+
+
+def _accompanying_issues(values: dict[str, Any], path: str) -> list[ValidationIssue]:
+    """检查一份实体状态声明里的 `accompanying` 初始值。"""
+
+    key = effect_registry.ACCOMPANYING_STATE_KEY
+    if key not in values:
+        return []
+    return _accompanying_value_issues(values[key], f"{path}.{key}")
 
 
 def _location_cycle_issues(content: ModuleContentV3) -> list[ValidationIssue]:
@@ -559,6 +599,10 @@ def _effect_issues(step: EffectStep, path: str, known: dict[str, set[str]]) -> l
     if getattr(effect, "type", "").startswith("ensure_runtime"):
         return []
     issues: list[ValidationIssue] = []
+    if getattr(effect, "key", None) == effect_registry.ACCOMPANYING_STATE_KEY:
+        issues.extend(
+            _accompanying_value_issues(getattr(effect, "value", None), f"{path}.value")
+        )
     for field, (collection, code) in _EFFECT_REFERENCES.items():
         value = getattr(effect, field, None)
         if isinstance(value, str) and value not in known[collection]:

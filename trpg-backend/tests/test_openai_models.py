@@ -29,6 +29,9 @@ from collaboration_framework.engine import (
     RuleEngineService,
 )
 from collaboration_framework.host.application import PlayerViewProjector, TurnExecutionError
+from collaboration_framework.host.application.narration_policy import (
+    narration_atmosphere_rejection_reason,
+)
 from collaboration_framework.host.ports import ActionPlanStepFailure
 from collaboration_framework.host.schemas import (
     ActionPlanStepContext,
@@ -56,6 +59,7 @@ from app.adapters.structured_http import (
     ModelClientRetryPolicy,
     StructuredOutputError,
     is_transient_model_error,
+    model_http_timeout,
 )
 from app.core.action_plan_turn import (
     build_action_plan_turn_application,
@@ -63,6 +67,7 @@ from app.core.action_plan_turn import (
     semantic_planner_selected,
 )
 from app.core.config import Settings, model_client_retry_policy
+from app.core.host_entry import HostEntryContext, HostPublicContext
 from app.core.turn import _configured_opening_models
 from app.service.character_background import build_character_background_service
 from app.service.portrait_generation import build_portrait_generation_service
@@ -74,8 +79,8 @@ def test_host_entry_instructions_clarify_when_information_is_insufficient() -> N
     text = PromptHostEntryModel._INSTRUCTIONS
     assert "needs_clarification" in text
     assert "不足以唯一确定" in text
-    assert "都属于信息不足" in text
-    assert "不要把这种不足直接交给旧链去猜" in text
+    assert "player_answer" in text
+    assert "rule_once" in text and "delegate_to_legacy" in text
 
 
 def test_action_plan_narration_uses_final_post_roll_outcome() -> None:
@@ -129,7 +134,9 @@ def test_semantic_planner_route_preserves_fast_path_for_clear_single_steps(
 
 def test_semantic_planner_rollout_requires_independent_configuration() -> None:
     with pytest.raises(ValidationError, match="TURN_PLANNER_PROVIDER"):
-        Settings(host_model_provider="fake", turn_planner_rollout_percent=1)
+        Settings(
+            host_model_provider="fake", turn_planner_provider=None, turn_planner_rollout_percent=1
+        )
     settings = Settings(
         host_model_provider="fake",
         turn_planner_provider="fake",
@@ -149,15 +156,21 @@ def test_opening_narration_mentions_named_actor_mode() -> None:
 
 
 def test_action_plan_narration_preserves_completed_travel_before_clarification() -> None:
-    assert "completed_steps 已有成功的旅行步骤" in (_ACTION_PLAN_NARRATION_INSTRUCTIONS)
-    assert "绝不得说\n该地点没找到" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
+    assert "已提交结果不因后续失败或澄清而撤销" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
+    assert "不预设目的地不存在" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
 
 
-def test_action_plan_narration_forbids_repeating_previous_atmosphere() -> None:
-    assert "previous_published_narration" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
-    assert "不得用相同或几乎相同的环境开场重铺" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
-    assert "把同一套时间、光线、窗景" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
-    assert "不要再写一整段地点简介" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
+@pytest.mark.parametrize("scene_changed", [False, True])
+def test_action_plan_narration_atmosphere_depends_on_scene_change(scene_changed: bool) -> None:
+    previous = "下午的阳光透过门厅的窗户。调查员站在桌旁。"
+    current = "下午的阳光照亮了客房的窗台。"
+    assert narration_atmosphere_rejection_reason(
+        current, previous, scene_changed=scene_changed
+    ) == (None if scene_changed else "atmosphere_repeat")
+    assert (
+        narration_atmosphere_rejection_reason(previous, previous, scene_changed=scene_changed)
+        == "atmosphere_repeat"
+    )
 
 
 def test_action_plan_narration_retry_hint_covers_all_safety_rejections() -> None:
@@ -1104,13 +1117,21 @@ def test_configured_retry_policy_reaches_every_structured_client() -> None:
     assert _retry_policy_of(plan_application._planner) == expected
 
 
-def test_opening_narration_client_does_not_retry() -> None:
-    """开场路径显式不重试。
+def test_opening_narration_client_retries_transport_failures_once() -> None:
+    """开场路径按传输层错误重试一次。
 
-    开场整段被 `anyio.fail_after(opening_narration_timeout_seconds)` 包住，那是
-    总预算；单次请求预算是 `deepseek_timeout_seconds`。两者默认都是 30 秒，第一次
-    请求耗尽预算时外层 deadline 同时到期，退避与第二次尝试会被取消。与其配一个
-    永远不生效的策略，不如如实地不重试——开场有确定性模板兜底。
+    这条测试原来钉的是"显式不重试"，理由是外层总预算与单次请求预算都是 30 秒，
+    第一次请求耗尽预算时外层 deadline 同时到期，第二次尝试必然被取消。那个前提
+    已经不成立：
+
+    - 外层预算是 45 秒（#505）。
+    - 失败形态也不是"生成太慢"。预览环境实测到 error_type=ConnectTimeout、
+      duration_ms=30215、transport_attempts=1——握手就没成功，整份预算烧在建连上。
+      `model_http_timeout()` 把建连收紧到 5 秒后，一次连不上的尝试只花 5 秒，
+      45 秒装得下"快速失败 + 退避 + 一次完整生成"。
+
+    重试次数固定为 2，不跟随 `model_client_max_attempts`：开场的总预算是固定的，
+    让它被一个通用配置项放大，就会重新回到"重试永远来不及"的状态。
     """
 
     settings = Settings.model_validate(
@@ -1121,7 +1142,7 @@ def test_opening_narration_client_does_not_retry() -> None:
         }
     )
     model, _ = _configured_opening_models(settings)
-    assert _retry_policy_of(model).max_attempts == 1
+    assert _retry_policy_of(model).max_attempts == 2
 
 
 async def test_outer_deadline_equal_to_request_timeout_cancels_the_retry() -> None:
@@ -1437,3 +1458,88 @@ async def test_openai_non_json_http_body_is_classified() -> None:
     )
     with pytest.raises(StructuredOutputError):
         await _generate(client)
+
+
+def test_model_http_timeout_keeps_connect_short_while_read_holds_the_budget() -> None:
+    """建连和等生成是两件事，不能共用一个标量。
+
+    httpx 的 `timeout=<float>` 会把同一个值套到 connect / read / write / pool 四个
+    阶段上。预览环境因此出现过整份预算全烧在建连上的情况：开场叙事记录为
+    duration_ms=30215、transport_attempts=1、error_type=ConnectTimeout——30 秒耗尽、
+    请求根本没发出去、也没剩下时间重试。
+    """
+
+    timeout = model_http_timeout(30.0)
+
+    assert timeout.read == 30.0, "等模型出结果的预算应当原样落在 read 上"
+    # 建连必须单独收紧，否则连不上的调用会吃掉整份预算。
+    assert timeout.connect == 5.0
+    assert timeout.write == 10.0
+    assert timeout.pool == 5.0
+
+
+def test_model_http_timeout_never_widens_a_tighter_budget() -> None:
+    """调用方显式给了更短的预算时，分阶段上限不能反而把它放宽。"""
+
+    timeout = model_http_timeout(2.0)
+
+    assert timeout.read == 2.0
+    assert timeout.connect == 2.0
+    assert timeout.write == 2.0
+    assert timeout.pool == 2.0
+
+
+def test_no_production_http_client_passes_a_scalar_timeout() -> None:
+    """所有生产 HTTP 客户端都必须用分阶段超时（issue #510）。
+
+    这条是防漏网的：#510 第一版只扫了 `timeout=self._timeout_seconds` 这一种写法，
+    漏掉了 DashScope 的 `min(self._timeout_seconds, 30.0)`（review 抓到）和
+    portrait_image 的下载客户端。标量 timeout 会被 httpx 同时套到 connect 上，
+    这正是本 issue 要消除的形态，所以用源码扫描把它钉住。
+    """
+
+    import re
+    from pathlib import Path
+
+    backend_root = Path(__file__).resolve().parents[1] / "app"
+    offenders: list[str] = []
+    for path in sorted(backend_root.rglob("*.py")):
+        source = path.read_text(encoding="utf-8")
+        for match in re.finditer(r"httpx\.AsyncClient\((.*?)\)", source, re.DOTALL):
+            block = match.group(1)
+            timeout_match = re.search(r"timeout=([^,\n]+)", block)
+            if timeout_match is None:
+                continue
+            expression = timeout_match.group(1).strip()
+            if not expression.startswith("model_http_timeout("):
+                line = source[: match.start()].count("\n") + 1
+                offenders.append(f"{path.relative_to(backend_root.parent)}:{line} -> {expression}")
+
+    assert not offenders, (
+        "这些 httpx 客户端还在用标量 timeout，连不上时会把整份预算耗在建连上：\n"
+        + "\n".join(offenders)
+    )
+
+
+async def test_host_entry_provider_receives_loop_phase_and_committed_feedback() -> None:
+    calls = []
+
+    class Client:
+        async def generate(self, **kwargs):
+            calls.append(kwargs)
+            return {"route": "direct_response", "text": "就先聊到这里。"}
+
+    context = HostEntryContext(
+        public=HostPublicContext(
+            current_keeper_text="先打招呼，再询问往事",
+            rule_loop_active=True,
+            loop_step_index=1,
+            completed_rule_feedback=("他愿意与你交谈。",),
+        )
+    )
+    decision = await PromptHostEntryModel(Client()).generate(context)
+    assert decision["route"] == "direct_response"
+    assert calls[0]["input_payload"]["public"]["rule_loop_active"] is True
+    assert calls[0]["input_payload"]["public"]["completed_rule_feedback"] == ["他愿意与你交谈。"]
+    assert "rule_loop_active=true" in calls[0]["instructions"]
+    assert "禁止再次 composite_rule" in calls[0]["instructions"]

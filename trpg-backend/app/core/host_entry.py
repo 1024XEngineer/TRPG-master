@@ -127,6 +127,7 @@ class HostPublicContext(BaseModel):
     player_answer: str | None = Field(default=None, max_length=2000)
     completed_rule_feedback: tuple[str, ...] = Field(default=(), max_length=8)
     loop_step_index: int = Field(default=0, ge=0, le=8)
+    rule_loop_active: bool = False
 
     def to_model_payload(self) -> dict[str, object]:
         """Return the exact allow-listed payload sent to a model."""
@@ -215,6 +216,7 @@ class HostPublicContextProjector:
         player_answer: str | None = None,
         completed_rule_feedback: Sequence[str] = (),
         loop_step_index: int = 0,
+        rule_loop_active: bool = False,
     ) -> HostPublicContext:
         scene = player_view.scene
         scene_parts = [
@@ -307,6 +309,7 @@ class HostPublicContextProjector:
                 if isinstance(value, str) and _strip_internal_tokens(value).strip()
             )[-8:],
             loop_step_index=max(0, min(loop_step_index, 8)),
+            rule_loop_active=rule_loop_active,
         )
 
 
@@ -320,6 +323,11 @@ class DeterministicHostEntryModel:
     """Offline fake model.  It is injectable and intentionally conservative."""
 
     async def generate(self, context: HostPublicContext | HostEntryContext) -> Mapping[str, object]:
+        public = context.public if isinstance(context, HostEntryContext) else context
+        if public.rule_loop_active:
+            # Offline execution requires an explicit scripted rule choice. Never
+            # turn the ordering of available candidates into a player decision.
+            return {"route": "direct_response", "text": "这次行动到此为止。"}
         text = context.current_keeper_text.strip()
         answer = (context.player_answer or "").strip()
         if answer:
@@ -412,6 +420,12 @@ class HostEntryRouter:
             try:
                 raw = await self.model.generate(context)
                 decision = HostEntryDecision.model_validate(raw)
+                public = context.public if isinstance(context, HostEntryContext) else context
+                if public.rule_loop_active and decision.route in {
+                    "composite_rule",
+                    "delegate_to_legacy",
+                }:
+                    raise ValueError("规则循环只能选择当前一次规则、必要追问或结束")
                 validated = self.safety_policy.validate(decision)
                 if validated.route == "direct_response":
                     provenance = "model_direct"

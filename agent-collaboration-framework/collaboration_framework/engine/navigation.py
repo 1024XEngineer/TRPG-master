@@ -487,7 +487,9 @@ def _overlay_knowledge(
             if explicit.localization != "unknown"
             else inferred.localization
         ),
-        access=explicit.access if explicit.access != "unknown" else inferred.access,
+        # 门锁、钥匙等条件会变化；曾经受阻或可达的记录不能覆盖当前路线。
+        # 显式存在性/定位仍控制地点是否公开，无法推导路线时才沿用旧通行知识。
+        access=inferred.access if inferred.access != "unknown" else explicit.access,
         visited=explicit.visited or inferred.visited,
         known_connection_ids=tuple(
             sorted(

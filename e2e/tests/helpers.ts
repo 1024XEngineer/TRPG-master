@@ -38,7 +38,11 @@ export interface TestRoom {
 }
 
 /** 建一个已经选好内置模组的房间，回到「可以开始建卡」的状态。 */
-export async function createRoomWithModule(prefix = 'e2e', maxPlayers = 1): Promise<TestRoom> {
+export async function createRoomWithModule(
+  prefix = 'e2e',
+  maxPlayers = 1,
+  moduleId = maxPlayers === 1 ? 'paper-chase-zh-coc7' : 'e2e-multiplayer-coc7',
+): Promise<TestRoom> {
   const host = await registerPlayer(prefix)
   const room = await host.sdk.rooms.create(
     {
@@ -54,9 +58,7 @@ export async function createRoomWithModule(prefix = 'e2e', maxPlayers = 1): Prom
       module.status === 'ready' &&
       module.playersMin <= maxPlayers &&
       maxPlayers <= module.playersMax &&
-      (maxPlayers === 1
-        ? module.id === 'paper-chase-zh-coc7'
-        : module.id === 'e2e-multiplayer-coc7')
+      module.id === moduleId
   )
   if (!selectedModule) {
     throw new Error(`后端模组目录没有支持 ${maxPlayers} 人的 E2E 发布模组`)

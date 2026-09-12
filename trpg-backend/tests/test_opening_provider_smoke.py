@@ -88,7 +88,7 @@ def test_configured_provider_generates_one_authoritative_opening() -> None:
 
         assert any(message.get("type") == "opening.started" for message in progress)
         assert opening["payload"]["messageId"] == "game-opening"
-        assert "陈探员" in opening["payload"]["text"]
+        assert opening["payload"]["text"].strip()
         assert not any(
             message.get("type") in {"opening.started", "narration.push"}
             for message in retry_progress

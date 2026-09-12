@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import json
 import unittest
+
+from pydantic import ValidationError
 from pathlib import Path
 
 from collaboration_framework.contracts import (
@@ -43,7 +45,11 @@ from collaboration_framework.engine import (
     InMemoryEngineStore,
 )
 from collaboration_framework.engine.dice import DiceRoller, SequenceDiceSource
-from collaboration_framework.engine.models import WorldTimePoint, WorldTimeState
+from collaboration_framework.engine.models import (
+    RuleCheckOrigin,
+    WorldTimePoint,
+    WorldTimeState,
+)
 from tests.time_fixtures import NIGHT_LATCH_RULE, day_cycle_module
 
 FIXTURE = (
@@ -606,3 +612,44 @@ class RuleOwnedCheckAuthorityTests(unittest.IsolatedAsyncioTestCase):
             execution.rule_failure_code, "rule_check_actor_binding_unsupported"
         )
         self.assertEqual(store.inspect_state(ROOM).rule_agendas, {})
+
+
+class RuleCheckOriginTests(unittest.TestCase):
+    """出处与恢复游标是两件事（#483）。
+
+    这两半原本是揉在一起的五个必填字段，于是「有出处」和「要回 Agenda」变成了同一
+    个判断（`_settle_check` 的 `rule_origin is not None`）。`agent_match` 提交路径
+    有出处但没有 Agenda——它结算的是父动作——所以一旦给它补上出处，就会被当成被动
+    检定路由到 `_resume_rule_check`，按不存在的游标恢复。
+    """
+
+    def test_provenance_alone_does_not_resume_an_agenda(self) -> None:
+        """主动路径：记得住自己出自哪条规则，但结算不回 Agenda。"""
+
+        origin = RuleCheckOrigin(rule_id="r", branch_id="b", step_id="s")
+        self.assertFalse(origin.resumes_agenda)
+        self.assertIsNone(origin.agenda_id)
+
+    def test_a_passive_origin_still_carries_its_resume_cursor(self) -> None:
+        """被动路径行为不变：游标齐全，结算回 Agenda 走 result_routes。"""
+
+        origin = RuleCheckOrigin(
+            rule_id="r",
+            branch_id="b",
+            step_id="s",
+            agenda_id="agenda-1",
+            source_event_id="event-1",
+        )
+        self.assertTrue(origin.resumes_agenda)
+
+    def test_half_a_resume_cursor_is_refused(self) -> None:
+        """游标要么齐、要么没有。
+
+        只有一半的话 `_resume_rule_check` 会在半路上拿到 None，那种失败离构造点很
+        远、很难查——在这里当场拒绝。
+        """
+
+        for partial in ({"agenda_id": "agenda-1"}, {"source_event_id": "event-1"}):
+            with self.subTest(**partial):
+                with self.assertRaises(ValidationError):
+                    RuleCheckOrigin(rule_id="r", branch_id="b", step_id="s", **partial)

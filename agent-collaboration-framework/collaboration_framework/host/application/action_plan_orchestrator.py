@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 from uuid import uuid4
@@ -49,6 +50,7 @@ from collaboration_framework.host.schemas import (
     ActionPlanStepContext,
     ActionPlanStepRun,
     CompletedPlanStepSummary,
+    MemoryContext,
     RecentHistoryBudget,
     RecentTurnContext,
 )
@@ -65,44 +67,38 @@ logger = logging.getLogger(__name__)
 #
 # 这里刻意只放**与具体 id 无关的静态指引**：拒绝理由里的 id 是模型自己编的，
 # 但它同批次的其它字段未必是，逐字回显等于给自己开一条把引擎内部命名回灌进
-# 提示词的口子。要定位对象，模型手上本来就有 KeeperCapabilityView。
+# 提示词的口子。合法目标以 PlayerView 和候选明确允许的范围为准。
 _REPAIR_HINTS: dict[str, str] = {
     "TARGET_UNAVAILABLE": (
-        "target.id 必须逐字取自 keeper_capabilities 的 entities / locations / "
-        "information、keeper_capabilities.world_id、player_view.scene.id，或局内"
-        "角色 player_view.self_actor.id 与 player_view.scene.visible_actors[].id"
-        "（后两者用 kind=actor）；不要自造 id。作用于同伴的行动目标就是那个 actor "
-        "id，不要改用 location 或 world 绕开。确实找不到玩家所指的对象时，才以 "
-        "kind=location + player_view.scene.id 为目标返回 narrative_only。"
+        "按 target.kind 从最新 PlayerView 的可见实体、loose_items、inventory、公开地点或"
+        "角色列表选择与原意匹配的 id；world 仅使用 keeper_capabilities.world_id。"
+        "Keeper 效果词表不等于可作用目标，规则匹配时仅可额外使用候选明确允许的 target_ids。"
+        "没有匹配项时按通用 Runtime 条件判断；不能创建才用当前场景作零写入范围，"
+        "不自造目标或改写原意。"
     ),
     "RULE_OUT_OF_SCOPE": (
-        "所选 rule_decision 的地点、目标类型、目标 ID 或 when 条件不匹配。"
-        "action_families 是开放的语义参考，不要求与 method.family 逐字相等；"
-        "不能仅因动作族词汇不同就去掉一个结构性范围仍然匹配的 rule_decision。"
-        "target_kinds、target_ids 为空即表示该维度不设限，非空才要求本次裁决落在"
-        "其中。确认硬约束不匹配后，才去掉 rule_decision，按普通裁决重新给出这一步。"
+        "检查 rule_decision 的地点、target_kinds、target_ids 与 when；空目标范围表示不设限。"
+        "action_families 是语义参考，不要求与 method.family 逐字相等。"
+        "仅在实际范围不匹配时移除规则，重新裁决当前目标。"
     ),
     "RULE_REQUIRES_CHECK": (
-        "所选 rule_decision 的分支需要掷骰（该候选的 requires_check=true），"
-        "但这一版把 check 写成了 mode=none。保留 summary、method、target 与"
-        " rule_decision 原样不动，只把 check 换成 RequiredAdjudicationCheck，"
-        "技能取该候选的 check_skill_id（没有就选玩家最贴合本次方法的技能）。"
-        "不要为了绕开这个错误去掉 rule_decision——规则此时此地确实适用，去掉它"
-        "会把一个由掷骰决定的模组分支变成自由叙事，这一步会因此停下来问玩家。"
+        "所选分支 requires_check=true，只将 check 修正为 RequiredAdjudicationCheck，"
+        "candidate_id 用 option.id，skill_id 用 option.check_skill_id；未规定时从 self_actor.skills"
+        "选择贴合方法的已有技能，不自造。"
+        "保留 summary、method、target 和 rule_decision，不通过删规则绕开检定。"
     ),
     "RULE_FORBIDS_CHECK": (
-        "所选 rule_decision 的分支不掷骰（该候选的 requires_check=false），"
-        "结果是确定的，但这一版多带了一个 check。保留 summary、method、target 与"
-        " rule_decision 原样不动，只把 check 换成 NoAdjudicationCheck()。"
-        "不要为了凑格式编一个技能出来，也不要去掉 rule_decision。"
+        "所选分支 requires_check=false，只将 check 修正为 NoAdjudicationCheck。"
+        "保留 summary、method、target 和 rule_decision。"
+    ),
+    "RULE_CHECK_SKILL_MISMATCH": (
+        "check.candidates 的技能改为所选 option.check_skill_id，同时修正 method_summary 和"
+        "player_safe_reason 的技能描述；保留 summary、method、target 和 rule_decision。"
     ),
     "INVENTORY_TARGET_NOT_PORTABLE": (
-        "holder_actor_id 只接受 player_view.scene.loose_items、player_view.inventory，"
-        "或同一 effects 序列先用 ensure_runtime_entity(entity_kind=object) 创建的物品。"
-        "若玩家明确指的是当前可见但不可携带的固定实体，改为零写入 narrative_only，"
-        "如实表现拿不走，绝不能创建一个便携替身；若上一版只是把玩家所说的普通软场景"
-        "物品错配到不相干实体，则重新执行通用 Runtime 创建门禁，通过后按"
-        " ensure_runtime_entity、move_entity 的顺序创建并取得。"
+        "holder_actor_id 仅接受 loose_items、inventory 或同次创建的 Runtime object。"
+        "固定实体不能变成便携替身；如果只是错配到无关实体，按原目标重新评估 Runtime 条件，"
+        "通过后先 ensure_runtime_entity 再 move_entity。"
     ),
 }
 
@@ -127,6 +123,8 @@ class ActionPlanOrchestrator:
         on_step_failure: ActionPlanStepFailureObserver | None = None,
         recent_history_source: RecentHistorySource | None = None,
         recent_history_budget: RecentHistoryBudget | None = None,
+        memory_reader: Callable[[PlayerInput, PlayerView], Awaitable[MemoryContext]]
+        | None = None,
     ) -> None:
         if lease_seconds < 1:
             raise ValueError("lease_seconds 必须大于 0")
@@ -138,6 +136,7 @@ class ActionPlanOrchestrator:
         self._lease_seconds = lease_seconds
         self._on_step_failure = on_step_failure
         self._recent_history_source = recent_history_source
+        self._memory_reader = memory_reader
         self._recent_history_budget = recent_history_budget or RecentHistoryBudget()
 
     @property
@@ -946,6 +945,36 @@ class ActionPlanOrchestrator:
             )
             return None
 
+    async def _memory(
+        self, player_input: PlayerInput, view: PlayerView
+    ) -> MemoryContext:
+        empty = MemoryContext(
+            room_id=player_input.room_id,
+            player_id=player_input.player_id,
+            actor_id=player_input.actor_id,
+            as_of_revision=view.revision,
+        )
+        if self._memory_reader is None:
+            return empty
+        try:
+            memory = await self._memory_reader(player_input, view)
+            if any(
+                getattr(memory, key) != getattr(empty, key)
+                for key in ("room_id", "player_id", "actor_id", "as_of_revision")
+            ):
+                raise ValueError("step memory scope mismatch")
+            return memory
+        except Exception as exc:
+            logger.warning(
+                "action_plan_step_memory_degraded",
+                extra={
+                    "room_id": player_input.room_id,
+                    "correlation_id": player_input.client_action_id,
+                    "error_type": type(exc).__name__,
+                },
+            )
+            return empty
+
     async def _freeze_current_adjudication(
         self,
         run: ActionPlanRun,
@@ -962,6 +991,7 @@ class ActionPlanOrchestrator:
             run = await self._replace_steps(run, tuple(steps))
             current = run.steps[index]
         view = await self._player_view_projector.project(player_input)
+        memory = await self._memory(player_input, view)
         context = ActionPlanStepContext(
             player_input=player_input,
             plan_id=run.plan_id,
@@ -972,6 +1002,8 @@ class ActionPlanOrchestrator:
             player_view=view,
             completed_steps=self._completed_summaries(run),
             recent_history=await self._recent_history(player_input, view),
+            memories=memory.entries,
+            conversation_summary=memory.conversation_summary,
             previous_rejection=self._validation_feedback_text(current),
             keeper_capabilities=await self._keeper_capabilities(player_input, view),
         )

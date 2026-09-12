@@ -18,7 +18,23 @@ from collaboration_framework.module import validate_module_v3
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = (
-    ROOT / "docs" / "module-parser" / "examples" / "module-content-validation" / "幸福蛙蛙村"
+    ROOT
+    / "docs"
+    / "module-parser"
+    / "examples"
+    / "module-content-validation"
+    / "幸福蛙蛙村"
+)
+
+GUEST_ROOM_IDS = ("guest_room", *(f"guest_room_{number}" for number in range(2, 9)))
+MAP_LOCATION_IDS = (
+    "resort_reception",
+    "dining_kitchen",
+    "guest_corridor",
+    "staff_area",
+    "storage_room",
+    "messenger_bedroom",
+    *GUEST_ROOM_IDS,
 )
 
 SUCCESS_DEGREES = (
@@ -32,9 +48,7 @@ SUCCESS_DEGREES = (
 def result_routes(difficulty: str) -> dict[str, str]:
     """按 COC7 难度把不足等级的成功路由到失败分支。"""
 
-    required_index = {"critical": 1, "extreme": 2, "hard": 3, "regular": 4}[
-        difficulty
-    ]
+    required_index = {"critical": 1, "extreme": 2, "hard": 3, "regular": 4}[difficulty]
     routes = {
         degree: "success_0" if index < required_index else "failure_0"
         for index, degree in enumerate(SUCCESS_DEGREES)
@@ -117,6 +131,9 @@ def entity(
     visible_when: list[dict[str, Any]] | None = None,
     portable: bool = False,
     visibility: str = "public",
+    voice_type: str | None = None,
+    aliases: list[str] | None = None,
+    initial_custody: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """构造不会在运行时任意生成的 Canon Entity。"""
 
@@ -132,6 +149,10 @@ def entity(
         "plot_relevance": True,
         "lifecycle": "session",
     }
+    if initial_custody is not None:
+        payload["initial_custody"] = initial_custody
+    if aliases:
+        payload["player_visible_aliases"] = aliases
     if visible_when:
         payload["visibility_conditions"] = visible_when
     if portable:
@@ -139,6 +160,16 @@ def entity(
             "portable": True,
             "unique": True,
             "quantity": 1,
+        }
+    # 音色属于模组公开元数据；只把稳定 voice_type 写入 NPC，运行时仍由后端
+    # 按当前豆包资源包和白名单重新校验，失效时安全回退到默认音色。
+    if voice_type is not None:
+        if kind != "npc":
+            raise ValueError("只有 NPC 实体可以配置 voice")
+        payload["voice"] = {
+            "provider": "doubao",
+            "resource_id": "seed-tts-2.0",
+            "voice_type": voice_type,
         }
     return payload
 
@@ -363,6 +394,24 @@ def build_information() -> list[dict[str, Any]]:
             criticality="essential",
         ),
         information(
+            "resort_grounds_seen",
+            "抵达蛙蛙度假村",
+            "调查员抵达后可观察别墅入口、蛙鸣泉与返程小径，尚未得到室内布局。",
+            "林间道路尽头出现田园度假村与两层别墅，入口通向接待处，附近有池塘和返程小径。",
+        ),
+        information(
+            "resort_map_layout",
+            "前台地图上的房间布局",
+            "原图一楼是前台、餐厅后厨、老板与员工宿舍；二楼有八间客房和上锁杂物间。住客秘密不属于公开布局。",
+            "前台地图标明：一楼有接待处、餐厅兼酒吧、后厨、老板宿舍和员工宿舍；楼梯通往二楼走廊、八间编号客房和杂物间。知道房间位置并不代表可以自由进入。",
+        ),
+        information(
+            "storage_key_found",
+            "二楼杂物间钥匙",
+            "在员工区侦查成功后发现杂物间钥匙，队伍取得该房间的通行条件。",
+            "你们在员工工作服和日用品间找到一把标着“二楼杂物间”的钥匙，可以用它打开杂物间。",
+        ),
+        information(
             "flyer_is_hand_drawn",
             "手绘传单",
             "传单看似印刷，实际是逐字手绘，并带有青蛙般的气味。",
@@ -565,6 +614,46 @@ def build_entities() -> list[dict[str, Any]]:
 
     return [
         entity(
+            "richard_lane",
+            "理查德·莱恩",
+            "莱恩先生，詹姆斯的父亲。与妻子在庄园接待调查员，委托他们寻找失踪一周的儿子，并等待调查员回来汇报。",
+            aliases=["莱恩先生", "理查德", "詹姆斯的父亲"],
+            location="lane_manor",
+            kind="npc",
+            voice_type="zh_male_ruyayichen_saturn_bigtts",
+        ),
+        entity(
+            "mrs_lane",
+            "莱恩夫人",
+            "詹姆斯的母亲。与丈夫在庄园等候儿子的消息，向调查员提供寻人委托中公开的情况。",
+            aliases=["莱恩太太", "詹姆斯的母亲"],
+            location="lane_manor",
+            kind="npc",
+            voice_type="zh_female_santongyongns_saturn_bigtts",
+        ),
+        entity(
+            "lane_butler",
+            "莱恩家的管家",
+            "陪同莱恩先生接待调查员，补充詹姆斯最后出现的位置并递交传单。",
+            location="lane_manor",
+            kind="npc",
+            voice_type="zh_male_ruyayichen_saturn_bigtts",
+        ),
+        entity(
+            "james_photo",
+            "詹姆斯的照片",
+            "照片上是一个笑容开朗的二十来岁青年。",
+            location="lane_manor",
+            portable=True,
+        ),
+        entity(
+            "commission_envelope",
+            "预付金信封",
+            "桌上的厚信封，里面装有 100 美金。",
+            location="lane_manor",
+            portable=True,
+        ),
+        entity(
             "lane_commission",
             "莱恩夫妇的委托",
             "寻找詹姆斯的正式委托。",
@@ -576,6 +665,7 @@ def build_entities() -> list[dict[str, Any]]:
             "设计精美、地址模糊的彩色传单。",
             location="lane_manor",
             portable=True,
+            initial_custody={"kind": "starting_actor"},
         ),
         entity(
             "missing_files",
@@ -589,6 +679,7 @@ def build_entities() -> list[dict[str, Any]]:
             "对林地与共同梦境讳莫如深的居民。",
             location="pretrip_investigation",
             kind="npc",
+            voice_type="zh_male_ruyayichen_saturn_bigtts",
         ),
         entity(
             "ezra",
@@ -596,6 +687,7 @@ def build_entities() -> list[dict[str, Any]]:
             "从度假村逃出的推销员，手指间仍有淡绿色蹼膜。",
             location="forest_road",
             kind="npc",
+            voice_type="zh_male_dongfanghaoran_uranus_bigtts",
         ),
         entity(
             "messenger",
@@ -604,6 +696,7 @@ def build_entities() -> list[dict[str, Any]]:
             location="resort_reception",
             kind="npc",
             state={"convinced": False},
+            voice_type="zh_female_vv_uranus_bigtts",
         ),
         entity(
             "emily",
@@ -611,6 +704,7 @@ def build_entities() -> list[dict[str, Any]]:
             "笑容完美无瑕的接待女仆。",
             location="resort_reception",
             kind="npc",
+            voice_type="zh_female_santongyongns_saturn_bigtts",
         ),
         entity(
             "james",
@@ -618,11 +712,14 @@ def build_entities() -> list[dict[str, Any]]:
             "调查员寻找的失踪青年。",
             location="resort_reception",
             kind="npc",
+            voice_type="zh_male_dayi_saturn_bigtts",
             state={
                 "released": False,
                 "under_forced_custody": False,
-                "accompanying_party": False,
-                "alive": True,
+                # 引擎保留键：为 True 时詹姆斯跟着队伍换场景，模组不必在每一条
+                # 移动规则里重复 move_entity（#516）。
+                "accompanying": False,
+                "consciousness": "conscious",
             },
         ),
         entity(
@@ -631,6 +728,51 @@ def build_entities() -> list[dict[str, Any]]:
             "不向游客开放的员工通道。",
             location="resort_reception",
             state={"open": False},
+        ),
+        entity(
+            "resort_map",
+            "前台地图",
+            "挂在接待处墙上的度假村楼层地图。",
+            location="resort_reception",
+            state={"viewed": False},
+            aliases=["度假村地图", "楼层地图", "挂图"],
+        ),
+        entity(
+            "bedroom_door",
+            "老板宿舍入口",
+            "通往老板私人宿舍的门。",
+            location="resort_reception",
+            state={"open": False},
+        ),
+        entity(
+            "storage_door",
+            "杂物间房门",
+            "二楼走廊尽头标着“杂物间”的房门。",
+            location="guest_corridor",
+            state={"open": False, "unlocked": False},
+        ),
+        entity(
+            "guest_room_2_door",
+            "客房2房门",
+            "二楼走廊里标着“2”的客房门。",
+            location="guest_corridor",
+            state={"open": False, "unlocked": False},
+        ),
+        entity(
+            "staff_belongings",
+            "员工工作服与日用品",
+            "员工区堆放的工作服、日用品和未完成传单。",
+            location="staff_area",
+            aliases=["工作服", "日用品"],
+        ),
+        entity(
+            "storage_key",
+            "二楼杂物间钥匙",
+            "一把贴着“二楼杂物间”标签的小钥匙。",
+            location="staff_area",
+            state={"found": False},
+            portable=True,
+            visible_when=[state_is("storage_key", "found", True)],
         ),
         entity(
             "happiness_booklet",
@@ -642,19 +784,20 @@ def build_entities() -> list[dict[str, Any]]:
             "frog_head_guest",
             "宽衣游客",
             "用宽大衣物遮挡身体异样的游客。",
-            location="guest_room",
+            location="guest_room_2",
             kind="npc",
+            voice_type="zh_male_xuanyijieshuo_uranus_bigtts",
         ),
         entity(
             "contaminated_water",
             "汤品与饮料",
-            "由蛙鸣泉池水制作的饮品与汤。",
+            "餐桌上供应的汤品与饮料。",
             location="dining_kitchen",
         ),
         entity(
             "kitchen_barrel",
             "厨房水桶",
-            "装着带微弱磷光池水的大桶。",
+            "盛水的大桶，桶中的液体泛着微光。",
             location="dining_kitchen",
         ),
         entity(
@@ -669,6 +812,7 @@ def build_entities() -> list[dict[str, Any]]:
             "几乎不躲避来人的鲜艳青蛙。",
             location="frog_pond",
             kind="npc",
+            voice_type="zh_female_mizai_saturn_bigtts",
         ),
         entity(
             "night_ritual",
@@ -695,7 +839,7 @@ def build_entities() -> list[dict[str, Any]]:
         entity(
             "messenger_notes",
             "信使的私人笔记",
-            "记录她的来历、目标和转化原因。",
+            "房间里保存的一本私人笔记。",
             location="messenger_bedroom",
         ),
         entity(
@@ -840,7 +984,7 @@ def build_rules() -> list[dict[str, Any]]:
             hints=["扛起詹姆斯", "拖着詹姆斯", "强行携带詹姆斯"],
             effects=[
                 set_state("james", "under_forced_custody", True),
-                set_state("james", "accompanying_party", True),
+                set_state("james", "accompanying", True),
             ],
         ),
         effect_rule(
@@ -851,7 +995,7 @@ def build_rules() -> list[dict[str, Any]]:
             target_id="james",
             option_id="stop-carrying-james",
             hints=["放下詹姆斯", "留下詹姆斯", "放弃携带詹姆斯"],
-            effects=[set_state("james", "accompanying_party", False)],
+            effects=[set_state("james", "accompanying", False)],
         ),
         effect_rule(
             "release_james_from_forced_custody",
@@ -863,7 +1007,7 @@ def build_rules() -> list[dict[str, Any]]:
             hints=["释放詹姆斯", "给詹姆斯松绑", "解除对詹姆斯的物理控制"],
             effects=[
                 set_state("james", "under_forced_custody", False),
-                set_state("james", "accompanying_party", False),
+                set_state("james", "accompanying", False),
             ],
         ),
         effect_rule(
@@ -893,15 +1037,19 @@ def build_rules() -> list[dict[str, Any]]:
             question_kind="intent_relation",
             effects=[
                 set_state("james", "under_forced_custody", True),
-                set_state("james", "accompanying_party", True),
-                {"type": "enter_location", "location_id": "outside"},
+                set_state("james", "accompanying", True),
+                # 先把人拖出去再走场景：这条规则也能从 resort_boundary 触发，那时
+                # 詹姆斯还在接待大厅，不算「与队伍同场景的随行者」，引擎的随行不会
+                # 也不该替这条规则把他从另一个房间捞过来。人已经在门外之后，随后的
+                # enter_location 就不再重复搬他一次（#516）。
                 {
                     "type": "move_entity",
                     "entity_id": "james",
                     "location_id": "outside",
                     "holder_actor_id": None,
                 },
-                set_state("james", "alive", False),
+                {"type": "enter_location", "location_id": "outside"},
+                set_state("james", "consciousness", "dead"),
                 reveal("james_forced_removal_tragedy"),
                 {"type": "mark_core_resolved"},
                 {"type": "set_ending_availability", "available": True},
@@ -920,7 +1068,7 @@ def build_rules() -> list[dict[str, Any]]:
         check_rule(
             "inspect_mutating_guest",
             families=["inspect", "observe"],
-            locations=["guest_room"],
+            locations=["guest_room_2"],
             target_kind="entity",
             target_id="frog_head_guest",
             option_id="spot-hidden",
@@ -974,6 +1122,47 @@ def build_rules() -> list[dict[str, Any]]:
                 {"type": "enter_location", "location_id": "staff_area"},
             ],
             failure_effects=[reveal("staff_are_conditioned")],
+        ),
+        check_rule(
+            "find_storage_key",
+            families=["search", "inspect"],
+            locations=["staff_area"],
+            target_kind="entity",
+            target_id="staff_belongings",
+            option_id="spot-hidden",
+            skill_id="spot-hidden",
+            hints=["搜索员工工作服与日用品", "寻找杂物间钥匙"],
+            success_effects=[
+                set_state("storage_key", "found", True),
+                reveal("storage_key_found"),
+            ],
+            failure_effects=[{"type": "narrative_only"}],
+            when=state_is("storage_key", "found", False),
+        ),
+        check_rule(
+            "infiltrate_messenger_bedroom",
+            families=["sneak", "enter", "distract"],
+            locations=["resort_reception"],
+            target_kind="entity",
+            target_id="bedroom_door",
+            option_id="stealth",
+            skill_id="stealth",
+            hints=["潜入老板宿舍", "避开员工进入老板卧室"],
+            success_effects=[
+                set_state("bedroom_door", "open", True),
+                {"type": "enter_location", "location_id": "messenger_bedroom"},
+            ],
+            failure_effects=[{"type": "narrative_only"}],
+        ),
+        effect_rule(
+            "read_resort_map",
+            families=["read", "inspect", "observe"],
+            locations=["resort_reception"],
+            target_kind="entity",
+            target_id="resort_map",
+            option_id="read-map",
+            hints=["查看前台地图", "了解度假村楼层布局"],
+            effects=[reveal("resort_map_layout")],
         ),
         effect_rule(
             "read_staff_notes",
@@ -1129,7 +1318,7 @@ def build_rules() -> list[dict[str, Any]]:
                 set_state("resort_state", "victims_released", True),
                 set_state("james", "released", True),
                 set_state("james", "under_forced_custody", False),
-                set_state("james", "accompanying_party", False),
+                set_state("james", "accompanying", False),
                 reveal("messenger_convinced"),
                 reveal("victims_released"),
                 reveal("james_returns_home"),
@@ -1152,7 +1341,7 @@ def build_rules() -> list[dict[str, Any]]:
                 set_state("resort_state", "victims_released", True),
                 set_state("james", "released", True),
                 set_state("james", "under_forced_custody", False),
-                set_state("james", "accompanying_party", False),
+                set_state("james", "accompanying", False),
                 reveal("crystal_destroyed"),
                 reveal("victims_released"),
                 reveal("james_returns_home"),
@@ -1249,6 +1438,49 @@ def build_rules() -> list[dict[str, Any]]:
             effects=[set_state("final_debate", "available", True)],
         )
     )
+    rules.extend(
+        [
+            event_rule(
+                "see_resort_grounds",
+                event_type="travel.resolved",
+                conditions=[
+                    party_location_is("frog_resort"),
+                    {"op": "not", "item": info_is("resort_grounds_seen")},
+                ],
+                effects=[reveal("resort_grounds_seen")],
+            ),
+            event_rule(
+                "see_reception_map",
+                event_type="travel.resolved",
+                conditions=[
+                    party_location_is("resort_reception"),
+                    {"op": "not", "item": info_is("resort_map_layout")},
+                ],
+                effects=[reveal("resort_map_layout")],
+            ),
+            event_rule(
+                "learn_locations_from_map",
+                event_type="information.revealed",
+                conditions=[
+                    info_is("resort_map_layout"),
+                    state_is("resort_map", "viewed", False),
+                ],
+                effects=[
+                    set_state("resort_map", "viewed", True),
+                    *[
+                        {
+                            "type": "set_visibility",
+                            "target_kind": "location",
+                            "target_id": location_id,
+                            "visible": True,
+                            "scope": "party",
+                        }
+                        for location_id in MAP_LOCATION_IDS
+                    ],
+                ],
+            ),
+        ]
+    )
     return rules
 
 
@@ -1261,35 +1493,47 @@ def build_module() -> dict[str, Any]:
             "pretrip_investigation",
             "site",
             "老林地周边村镇",
-            "村民、警局档案和地方机构提供互相印证的线索。",
+            "老林地附近的村镇，可在出发前走访。",
         ),
-        ("forest_road", "connector", "老林地碎石路", "通往度假村的潮湿林间道路。"),
+        ("forest_road", "connector", "老林地碎石路", "通往老林地的林间道路。"),
+        ("frog_resort", "site", "蛙蛙度假村", "传单上位于城郊老林地的度假村。"),
+        ("resort_villa", "region", "度假村别墅", "度假村内的两层别墅。"),
+        ("resort_ground_floor", "region", "别墅一层", "别墅入口所在楼层。"),
         (
-            "frog_resort",
-            "site",
-            "蛙蛙度假村",
-            "被雾气与老林环绕的田园度假村。沿碎石路望去，一栋醒目的两层别墅坐落在"
-            "修剪整齐的草坪后方；别墅正门通向一层接待大厅，附近还能看到通往蛙鸣泉"
-            "与度假村边界的小径。",
+            "resort_second_floor",
+            "region",
+            "别墅二层",
+            "地图标注的客房与杂物间所在楼层。",
         ),
-        ("resort_villa", "region", "度假村别墅", "接待、客房和员工区域所在的两层别墅。"),
-        ("resort_ground_floor", "region", "别墅一层", "接待大厅与餐厅厨房所在楼层。"),
-        ("resort_second_floor", "region", "别墅二层", "客房与非公开员工区域所在楼层。"),
-        ("resort_reception", "room", "一层接待大厅", "卡通青蛙木牌后的明亮接待区。"),
-        ("guest_room", "room", "客房", "整洁舒适，却处处重复幸福口号。"),
-        ("dining_kitchen", "room", "用餐区与厨房", "所有汤水都带着蛙鸣泉的微光。"),
+        (
+            "resort_reception",
+            "room",
+            "一层接待大厅",
+            "大门内是前台、沙发与茶几，墙上挂着楼层地图，旁边有通往二楼的楼梯。",
+        ),
+        (
+            "guest_corridor",
+            "connector",
+            "二楼客房走廊",
+            "连接二楼编号客房、楼梯和杂物间的走廊。",
+        ),
+        *[
+            (room_id, "room", f"客房{number}", f"二楼地图上标为{number}号的客房。")
+            for number, room_id in enumerate(GUEST_ROOM_IDS, 1)
+        ],
+        (
+            "dining_kitchen",
+            "room",
+            "餐厅与后厨",
+            "地图标注的一楼餐厅兼酒吧，旁边连接后厨。",
+        ),
         ("frog_pond", "site", "蛙鸣泉", "度假村中心、聚集大量青蛙的池塘。"),
-        (
-            "crystal_shore",
-            "site",
-            "水晶池岸",
-            "调查员将梦境水晶带上岸后，才形成的结局行动位置。",
-        ),
-        ("staff_area", "room", "员工区", "堆放制服、传单和员工纸条的非公开区域。"),
-        ("storage_room", "room", "二楼杂物间", "堆满甜腻营养液桶的房间。"),
-        ("messenger_bedroom", "room", "信使卧室", "保存信使私人笔记的简单卧室。"),
-        ("resort_boundary", "connector", "度假村边界", "雾气包围的返程道路。"),
-        ("outside", "site", "城郊道路", "离开度假村后的现实道路。"),
+        ("crystal_shore", "site", "水晶池岸", "蛙鸣泉边的一段池岸。"),
+        ("staff_area", "room", "员工宿舍", "地图标注的一楼员工区域，不向游客开放。"),
+        ("storage_room", "room", "二楼杂物间", "地图标注的二楼杂物间。"),
+        ("messenger_bedroom", "room", "老板宿舍", "地图标注的一楼老板私人宿舍。"),
+        ("resort_boundary", "connector", "度假村边界", "通向度假村外的返程小径。"),
+        ("outside", "site", "城郊道路", "通往城市的道路。"),
     ]
     parent_by_id = {
         "resort_villa": "frog_resort",
@@ -1297,16 +1541,23 @@ def build_module() -> dict[str, Any]:
         "resort_second_floor": "resort_villa",
         "resort_reception": "resort_ground_floor",
         "dining_kitchen": "resort_ground_floor",
-        "guest_room": "resort_second_floor",
-        "staff_area": "resort_second_floor",
+        "staff_area": "resort_ground_floor",
+        "messenger_bedroom": "resort_ground_floor",
+        "guest_corridor": "resort_second_floor",
+        **{room_id: "resort_second_floor" for room_id in GUEST_ROOM_IDS},
         "storage_room": "resort_second_floor",
-        "messenger_bedroom": "resort_second_floor",
         "frog_pond": "frog_resort",
         "crystal_shore": "frog_resort",
         "resort_boundary": "frog_resort",
     }
     aliases_by_id = {
         "resort_reception": ["度假村别墅", "别墅", "别墅入口"],
+        "guest_corridor": ["二楼", "楼上", "客房走廊"],
+        "guest_room": ["客房", "1号客房", "客房一"],
+        **{f"guest_room_{n}": [f"{n}号客房"] for n in range(2, 9)},
+        "staff_area": ["员工区", "员工区域"],
+        "messenger_bedroom": ["信使卧室", "老板卧室"],
+        "dining_kitchen": ["用餐区", "厨房", "餐厅", "酒吧"],
     }
     location_payloads = [
         {
@@ -1330,16 +1581,19 @@ def build_module() -> dict[str, Any]:
         source: str,
         target: str,
         *,
+        visibility: str = "hidden",
         gated_by: str | None = None,
         conditions: list[dict[str, Any]] | None = None,
     ) -> None:
+        # 未公开的路线由地点揭示或来源条件加入知识图。反向边只表示
+        # 从已经抵达的房间返回来路，不把未发现的房间加入初始公共网络。
         forward: dict[str, Any] = {
             "id": edge_id,
             "from_location_id": source,
             "to_location_id": target,
             "kind": "private" if gated_by else "public_network",
             "traversal": "gated" if gated_by else "automatic",
-            "visibility": "public",
+            "visibility": visibility,
         }
         if gated_by:
             forward["access_point_id"] = gated_by
@@ -1357,46 +1611,99 @@ def build_module() -> dict[str, Any]:
             }
         )
 
-    connect("manor_to_investigation", "lane_manor", "pretrip_investigation")
-    connect("investigation_to_forest", "pretrip_investigation", "forest_road")
-    connect("forest_to_resort", "forest_road", "frog_resort")
-    # `resort_villa` and the two floor nodes are breadcrumb-only containment
-    # ancestors.  Travel edges must land on rooms where play can actually take
-    # place, otherwise entering the villa/upstairs leaves the actor stranded on
-    # an abstract hierarchy node.
-    connect("resort_to_reception", "frog_resort", "resort_reception")
+    connect(
+        "manor_to_investigation",
+        "lane_manor",
+        "pretrip_investigation",
+        visibility="public",
+    )
+    connect(
+        "investigation_to_forest",
+        "pretrip_investigation",
+        "forest_road",
+        visibility="public",
+    )
+    connect(
+        "manor_to_forest",
+        "lane_manor",
+        "forest_road",
+        conditions=[info_is("frog_resort_flyer")],
+    )
+    connect(
+        "forest_to_resort",
+        "forest_road",
+        "frog_resort",
+        conditions=[info_is("frog_resort_flyer")],
+    )
+    for edge_id, target in (
+        ("resort_to_reception", "resort_reception"),
+        ("resort_to_pond", "frog_pond"),
+        ("resort_to_boundary", "resort_boundary"),
+    ):
+        connect(
+            edge_id, "frog_resort", target, conditions=[info_is("resort_grounds_seen")]
+        )
+    # 别墅与楼层只作包含层级；路线落在原图中的房间和走廊。
     connect("reception_to_dining", "resort_reception", "dining_kitchen")
-    connect("reception_stairs_to_guest", "resort_reception", "guest_room")
-    connect("resort_to_pond", "frog_resort", "frog_pond")
+    connect("reception_stairs_to_guest", "resort_reception", "guest_corridor")
+    for room_id in GUEST_ROOM_IDS:
+        connect(
+            f"corridor_to_{room_id}",
+            "guest_corridor",
+            room_id,
+            gated_by="guest_room_2_door" if room_id == "guest_room_2" else None,
+        )
+    connect(
+        "reception_to_staff", "resort_reception", "staff_area", gated_by="staff_door"
+    )
+    connect(
+        "reception_to_bedroom",
+        "resort_reception",
+        "messenger_bedroom",
+        gated_by="bedroom_door",
+    )
+    connect(
+        "corridor_to_storage",
+        "guest_corridor",
+        "storage_room",
+        gated_by="storage_door",
+        conditions=[
+            {
+                "op": "any",
+                "items": [
+                    state_is("storage_key", "found", True),
+                    state_is("storage_door", "unlocked", True),
+                    state_is("storage_door", "open", True),
+                ],
+            }
+        ],
+    )
     connect(
         "pond_to_crystal_shore",
         "frog_pond",
         "crystal_shore",
         conditions=[state_is("dream_crystal", "retrieved", True)],
     )
-    connect("resort_to_boundary", "frog_resort", "resort_boundary")
-    connect(
-        "reception_to_staff",
-        "resort_reception",
-        "staff_area",
-        gated_by="staff_door",
-        conditions=[state_is("staff_door", "open", True)],
-    )
-    connect(
-        "guest_to_staff",
-        "guest_room",
-        "staff_area",
-        gated_by="staff_door",
-        conditions=[state_is("staff_door", "open", True)],
-    )
-    connect("staff_to_storage", "staff_area", "storage_room")
-    connect("staff_to_bedroom", "staff_area", "messenger_bedroom")
-    connect("boundary_to_outside", "resort_boundary", "outside")
+    connect("boundary_to_outside", "resort_boundary", "outside", visibility="public")
 
     return {
         "content_schema_version": 3,
         "module_id": "happy-frog-village",
-        "version": "3.0.8",
+        "version": "3.0.14",
+        "opening_key_facts": [
+            "调查员因寻人委托来到莱恩庄园。",
+            "委托人理查德·莱恩是企业家，也是失踪青年詹姆斯·莱恩的父亲。",
+            "詹姆斯已经失踪一周。",
+            "委托目标是找到詹姆斯并把他安全带回来。",
+            "理查德当场将装有100美金预付金的信封放在桌上。",
+            "安全带回詹姆斯后，每人还能拿到四百金币；保留作者写明的数量、单位和条件。",
+            "提供了詹姆斯的照片，照片上是一个笑容开朗的二十来岁青年。",
+            "警方常规搜寻没有进展。",
+            "詹姆斯最后被看见独自往城郊老林地方向去。",
+            "在詹姆斯房间的垃圾桶中找到了一张彩色传单。",
+            "管家在场接待，补充线索并递交这张传单。"
+        ],
+        "opening_text": "你们接到了一个找人的委托，来到了莱恩庄园，一位衣着华贵但面容憔悴的中年男人在管家的陪同下接待了你们。他是本市有名的企业家，理查德·莱恩先生。没有寒暄，他直接将一个厚厚的信封放在桌上，里面装有100美金。\n\n“我知道你们的本事和……收费。”他声音沙哑，开门见山。“我儿子，詹姆斯·莱恩，已经失踪一周了。这是预付金。找到他，把他安全地带回来，你们每人还能再拿到四百金币。”\n\n他推过来一张照片，上面是一个笑容开朗的二十来岁青年。\n\n“警方的常规搜寻毫无进展。他最后被看见，是独自一人往城郊的‘老林地’方向去了。在他房间的垃圾桶里，我们只找到了这个。”管家补充道，递过来一张被揉皱后又展平的彩色传单。",
         "world_ref": "coc-7e",
         "background": (
             "默认采用现代城郊。莱恩夫妇委托调查员寻找失踪的儿子詹姆斯，线索指向"
@@ -1564,22 +1871,26 @@ def provenance(module: dict[str, Any]) -> dict[str, Any]:
         "forest_road": [99, 100, 104, 105],
         "frog_resort": [131, 132, 133, 138, 195, 196, 239, 424],
         "resort_villa": [138, 140, 146, 195, 196, 206, 301, 305, 308],
-        "resort_ground_floor": [138, 140, 146, 148, 206, 207, 212, 213],
-        "resort_second_floor": [195, 201, 203, 204, 301, 305, 308],
-        "resort_reception": [131, 138, 140, 146, 148],
-        "guest_room": [195, 201, 203, 204],
+        "resort_ground_floor": [196, 199, 206, 301, 308],
+        "resort_second_floor": [196, 199, 201, 203, 204, 305],
+        "resort_reception": [138, 140, 146, 196, 199],
+        "guest_corridor": [196, 199],
+        **{room_id: [199, 201, 203, 204] for room_id in GUEST_ROOM_IDS},
         "dining_kitchen": [206, 212, 213, 215, 235, 236],
         "frog_pond": [239, 244, 246, 248, 251, 312, 313],
         "crystal_shore": [316, 317, 318, 320, 321, 322, 447, 448, 449, 450],
-        "staff_area": [301, 302, 303],
-        "storage_room": [305, 306],
-        "messenger_bedroom": [308, 309, 310],
+        "staff_area": [199, 301, 302, 303],
+        "storage_room": [199, 302, 305, 306],
+        "messenger_bedroom": [199, 308, 309, 310],
         "resort_boundary": [424, 425, 431, 432],
         "outside": [431, 432, 434],
     }
     information_sources = {
         "commission_received": [50, 51, 53, 55, 57],
         "frog_resort_flyer": [33, 34, 35, 36, 37, 38, 39, 57, 69, 70],
+        "resort_grounds_seen": [131, 132, 133, 138, 140, 146, 239],
+        "resort_map_layout": [196, 199],
+        "storage_key_found": [302],
         "flyer_is_hand_drawn": [41],
         "missing_people_pattern": [74, 75, 77, 79, 80, 81, 82],
         "villagers_shared_dreams": [85, 86, 88, 90, 92],
@@ -1729,6 +2040,12 @@ def provenance(module: dict[str, Any]) -> dict[str, Any]:
         "resist_happiness_water": [215, 216, 218, 219, 220, 222, 223, 229, 230],
         "study_dream_frogs": [239, 244, 246, 248, 249],
         "infiltrate_staff_area": [301, 302, 303],
+        "find_storage_key": [302],
+        "infiltrate_messenger_bedroom": [308, 309],
+        "read_resort_map": [196, 199],
+        "see_resort_grounds": [131, 132, 133, 138, 140, 146, 239],
+        "see_reception_map": [196, 199],
+        "learn_locations_from_map": [196, 199],
         "read_staff_notes": [301, 302, 303],
         "read_messenger_notes": [308, 309, 310],
         "follow_messenger_to_pond": [312, 313, 314],
@@ -1747,7 +2064,20 @@ def provenance(module: dict[str, Any]) -> dict[str, Any]:
     return {
         "_comment": "来源段落为 python-docx Document.paragraphs 的 0-based 索引，供人工逐项核验。",
         "source": "模组幸福蛙蛙村.docx",
+        "opening_text": {
+            "paragraph_indices": [51, 53, 55, 57],
+            "index_base": 0,
+            "selection": "默认起始路径的公开原文；保留作者措辞与单位，排除 KP 指导和其它分支。",
+        },
+        "opening_key_facts": {"source_field": "opening_text", "selection": "仅从同路径 opening_text 提取公开任务、线索、数量、时间和条件；运行时作为改写提醒，不替代原文。"},
         "paragraph_numbering": "python-docx Document.paragraphs 0-based index",
+        "source_images": [
+            {
+                "paragraph_index": 199,
+                "docx_part": "word/media/image4.jpeg",
+                "usage": "楼层、八间客房和门锁布局；住客秘密不进入公开地图信息。",
+            }
+        ],
         "module_id": module["module_id"],
         "version": module["version"],
         "locations": location_sources,
@@ -1755,7 +2085,17 @@ def provenance(module: dict[str, Any]) -> dict[str, Any]:
         "rules": rule_sources,
         "knowledge_goals": {
             "understand_resort_truth": [239, 248, 309, 310, 312, 313, 321, 322],
-            "choose_frog_village_outcome": [175, 424, 425, 431, 436, 439, 447, 452, 455],
+            "choose_frog_village_outcome": [
+                175,
+                424,
+                425,
+                431,
+                436,
+                439,
+                447,
+                452,
+                455,
+            ],
         },
         "ending_anchors": {
             "persuade_messenger_and_rescue_james": [
@@ -1802,14 +2142,28 @@ def review_markdown(module: dict[str, Any], source_map: dict[str, Any]) -> str:
 - 关联 Issue：#419
 - 授权：合并前必须由人工 Reviewer 核验结构化改编和公开发布范围。
 
+## 开场关键事实
+
+保留完整作者原文，增加 opening_key_facts 供模型按原意自然重述。事实清单只包含开场公开信息，不提交游戏效果。
+
 ## 来源覆盖
 
 | 对象 | 数量 | 已映射 |
 | --- | ---: | ---: |
 {chr(10).join(rows)}
 
+## 地图与信息修正（3.0.13）
+
+- 开局的传单只开放外围路线；抵达度假村后揭示可见场地，抵达前台看到挂图后揭示房间布局。读地图也使用同一信息节点。
+- 地图信息通过既有 information.revealed 事件和 set_visibility 效果更新队伍地点知识；地点存在、门锁通行与调查线索分别保存。
+- 按 DOCX 段落 199 的内嵌原图校正一楼员工/老板宿舍，恢复二楼走廊、八间客房和独立杂物间；2 号客房上锁，特殊住客只在该房间内出现。
+- 恢复员工区侦查寻找杂物间钥匙；找到钥匙后队伍才取得常规进入条件，也允许通过既有裁决改变门锁状态。
+- 地点和地图的公开描述不携带池水来源、纸条内容、水晶用途或住客秘密；水晶池岸只在水晶取出后加入地图。
+- 现有房间继续绑定原版本；新建房间使用 3.0.13，不将新地点图覆盖到旧存档。
+
 ## 稳定版主线
 
+- 莱恩先生与莱恩夫人是 lane_manor 的公开 NPC，接受询问并在调查员返回时仍在场（#518）。
 - 寻人委托、前期档案/村民调查、埃兹拉警告和度假村多地点调查均有正式目标。
 - 信使笔记与夜间仪式是水晶真相的两条来源；关键失败不会永久关闭主线。
 - 说服、水晶破坏和主动离开分别提交独立 Canon Information，再由 EndingDraft 选择锚点。
@@ -1855,7 +2209,13 @@ def main() -> None:
     if capability_issues:
         raise ValueError(f"运行能力审计失败: {capability_issues!r}")
 
+    # 生成 fixture 时只省略本次新增的空音色字段，保持既有可选字段格式稳定，避免
+    # 仅因契约新增字段就给所有实体制造无关 diff。
     normalized = content.to_json_dict()
+    for entity_payload in normalized.get("entities", []):
+        for optional_key in ("initial_custody", "voice"):
+            if entity_payload.get(optional_key) is None:
+                entity_payload.pop(optional_key, None)
     source_map = provenance(normalized)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     (OUTPUT_DIR / "module-content-v3.json").write_text(

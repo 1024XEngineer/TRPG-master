@@ -1983,35 +1983,6 @@ export default function CharacterPage() {
                 })}
               </div>
 
-              {!isTemplateHost && luckDice && (
-                <DiceModal
-                  open={luckDiceOpen}
-                  onClose={() => {
-                    // 关闭只收起面板，已确认的点数和当前进度保留，之后可继续。
-                    setLuckDiceOpen(false)
-                    setLuckRolling(false)
-                  }}
-                  onResult={() => undefined}
-                  checkRequest={null}
-                  checkDiceState={null}
-                  setCheckDiceState={() => undefined}
-                  sequentialTargets={luckDice}
-                  sequentialStartIndex={luckDiceIndex}
-                  sequentialAccumulated={luckAccumulated}
-                  onSequentialRoll={(value, index) => {
-                    const next = luckAccumulated + value
-                    setLuckAccumulated(next)
-                    setLuckDiceIndex(index + 1)
-                    setAttr(previous => ({ ...previous, LUCK: next * 5 }))
-                    if (index === luckDice.length - 1) {
-                      setLuckRollComplete(true)
-                      setLuckDiceOpen(false)
-                      setLuckRolling(false)
-                    }
-                  }}
-                />
-              )}
-
               {/* Derived Stats */}
               <div className="character-create__derived mt-3">
                 <h4 className="character-create__derived-title font-semibold text-brass-dark tracking-[0.08em] mb-3">衍生属性</h4>
@@ -2312,6 +2283,35 @@ export default function CharacterPage() {
 
           </div>
 
+          {!isTemplateHost && luckDice && (
+            <DiceModal
+              open={luckDiceOpen}
+              onClose={() => {
+                // 关闭只收起面板，已确认的点数和当前进度保留，之后可继续。
+                setLuckDiceOpen(false)
+                setLuckRolling(false)
+              }}
+              onResult={() => undefined}
+              checkRequest={null}
+              checkDiceState={null}
+              setCheckDiceState={() => undefined}
+              sequentialTargets={luckDice}
+              sequentialStartIndex={luckDiceIndex}
+              sequentialAccumulated={luckAccumulated}
+              onSequentialRoll={(value, index) => {
+                const next = luckAccumulated + value
+                setLuckAccumulated(next)
+                setLuckDiceIndex(index + 1)
+                setAttr(previous => ({ ...previous, LUCK: next * 5 }))
+                if (index === luckDice.length - 1) {
+                  setLuckRollComplete(true)
+                  setLuckDiceOpen(false)
+                  setLuckRolling(false)
+                }
+              }}
+            />
+          )}
+
           {/* ═══════════════ Occupation Detail Modal ═══════════════ */}
           {detailOcc && (
             <>
@@ -2505,27 +2505,29 @@ export default function CharacterPage() {
           )}
 
           {/* ═══════════════ Bottom action bar ═══════════════ */}
-          <div className="character-create__actions fixed bottom-0 left-0 right-0 px-5 py-3 max-w-[430px] mx-auto z-20">
-            {(currentNavigationIssues[0] || (step === 3 ? submitError : '')) && (
-              <p className="text-[11px] text-[#c04040] text-center mb-2">
-                {currentNavigationIssues[0] || submitError}
-              </p>
-            )}
-            <div className="flex gap-2.5">
-              <button
-                data-onboarding-page-back
-                onClick={handlePreviousStep}
-                className="character-create__action character-create__action--previous flex-1 flex items-center justify-center text-sm font-semibold transition-all active:scale-[0.97]">
-                上一步
-              </button>
-              <button onClick={handlePrimaryAction}
-                disabled={submitting}
-                data-onboarding-target={step === 3 ? 'character-submit' : undefined}
-                className="character-create__action character-create__action--next flex-1 flex items-center justify-center text-sm font-semibold transition-all active:scale-[0.97] disabled:opacity-60">
-                {submitting ? '提交中…' : step === 3 ? '完成创建' : '下一步'}
-              </button>
+          {!luckDiceOpen && (
+            <div className="character-create__actions fixed bottom-0 left-0 right-0 px-5 py-3 max-w-[430px] mx-auto z-20">
+              {(currentNavigationIssues[0] || (step === 3 ? submitError : '')) && (
+                <p className="text-[11px] text-[#c04040] text-center mb-2">
+                  {currentNavigationIssues[0] || submitError}
+                </p>
+              )}
+              <div className="flex gap-2.5">
+                <button
+                  data-onboarding-page-back
+                  onClick={handlePreviousStep}
+                  className="character-create__action character-create__action--previous flex-1 flex items-center justify-center text-sm font-semibold transition-all active:scale-[0.97]">
+                  上一步
+                </button>
+                <button onClick={handlePrimaryAction}
+                  disabled={submitting}
+                  data-onboarding-target={step === 3 ? 'character-submit' : undefined}
+                  className="character-create__action character-create__action--next flex-1 flex items-center justify-center text-sm font-semibold transition-all active:scale-[0.97] disabled:opacity-60">
+                  {submitting ? '提交中…' : step === 3 ? '完成创建' : '下一步'}
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </>
       )}
     </div>

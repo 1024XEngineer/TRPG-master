@@ -130,6 +130,28 @@
       "title": "Background",
       "type": "string"
     },
+    "opening_text": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Opening Text"
+    },
+    "opening_key_facts": {
+      "default": [],
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Opening Key Facts",
+      "type": "array"
+    },
     "scene": {
       "$ref": "#/$defs/OpeningSceneContext"
     },
@@ -154,6 +176,19 @@
       ],
       "title": "Addressing Mode",
       "type": "string"
+    },
+    "narration_retry_hint": {
+      "anyOf": [
+        {
+          "maxLength": 500,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Narration Retry Hint"
     }
   },
   "required": [

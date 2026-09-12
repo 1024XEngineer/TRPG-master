@@ -1172,6 +1172,9 @@ def build_rules() -> list[dict[str, Any]]:
                     set_state("train_chase", "outcome", "accelerate"),
                     set_state("train_chase", "active", False),
                     set_state("attendant", "present", False),
+                    # 解除随行必须排在这条规则的 enter_location 之前：引擎会把
+                    # 仍标着随行的实体一并带到目的地（#516），先清标记才不会把
+                    # 乘务员一起拖进结局地点。
                     set_state("attendant", "accompanying", False),
                     set_state("clicker_group", "active", False),
                     set_state("rear_maw", "active", False),
@@ -1208,6 +1211,9 @@ def build_rules() -> list[dict[str, Any]]:
                     set_state("train_chase", "outcome", "decelerate"),
                     set_state("train_chase", "active", False),
                     set_state("attendant", "present", False),
+                    # 解除随行必须排在这条规则的 enter_location 之前：引擎会把
+                    # 仍标着随行的实体一并带到目的地（#516），先清标记才不会把
+                    # 乘务员一起拖进结局地点。
                     set_state("attendant", "accompanying", False),
                     set_state("clicker_group", "active", False),
                     set_state("rear_maw", "active", False),
@@ -1225,42 +1231,15 @@ def build_rules() -> list[dict[str, Any]]:
         ]
     )
 
+    # 乘务员的随行由引擎负责：`accompanying` 为真时，`enter_location` 会把他带到
+    # 队伍实际到达的地点（#516）。这里原本有两条 `travel.resolved` 事件规则手工把
+    # 他同步到先头车厢和驾驶室——那是引擎还不认识「随行」时的补丁，只能逐个目的地
+    # 穷举，删掉。
+    #
+    # 钥匙包的两条留着：它是 ItemInstance，权威位置是 ItemCustody 而不是
+    # `location_id`，引擎的随行不搬物品。
     rules.extend(
         [
-            event_rule(
-                "sync_attendant_to_lead_car",
-                event_type="travel.resolved",
-                conditions=[
-                    party_location_is("lead_car"),
-                    state_is("attendant", "accompanying", True),
-                    state_is("attendant", "present", True),
-                ],
-                effects=[
-                    {
-                        "type": "move_entity",
-                        "entity_id": "attendant",
-                        "location_id": "lead_car",
-                    }
-                ],
-                priority=100,
-            ),
-            event_rule(
-                "sync_attendant_to_driver_cab",
-                event_type="travel.resolved",
-                conditions=[
-                    party_location_is("driver_cab"),
-                    state_is("attendant", "accompanying", True),
-                    state_is("attendant", "present", True),
-                ],
-                effects=[
-                    {
-                        "type": "move_entity",
-                        "entity_id": "attendant",
-                        "location_id": "driver_cab",
-                    }
-                ],
-                priority=100,
-            ),
             event_rule(
                 "sync_key_bag_to_lead_car",
                 event_type="travel.resolved",
@@ -1312,6 +1291,9 @@ def build_rules() -> list[dict[str, Any]]:
                     set_state("rear_maw", "active", False),
                     set_state("clicker_group", "active", False),
                     set_state("attendant", "present", False),
+                    # 解除随行必须排在这条规则的 enter_location 之前：引擎会把
+                    # 仍标着随行的实体一并带到目的地（#516），先清标记才不会把
+                    # 乘务员一起拖进结局地点。
                     set_state("attendant", "accompanying", False),
                     reveal("ending_consumed"),
                     {"type": "mark_core_resolved"},
@@ -1569,7 +1551,7 @@ def build_module() -> dict[str, Any]:
     return {
         "content_schema_version": 3,
         "module_id": "constant-darkness-box-zh-coc7",
-        "version": "3.0.0",
+        "version": "3.0.1",
         "world_ref": "coc-7e",
         "background": "2013 年某日深夜，调查员们搭乘前往终点站的末班电车，并在空无一人的 6 号车厢中醒来。列车仍在行驶，窗外没有灯光，手机没有信号；同伴也刚刚从沉睡中醒来，车门上贴着一张尚未阅读的便签。",
         "information": build_information(),
@@ -1791,8 +1773,6 @@ def provenance(module: dict[str, Any]) -> dict[str, Any]:
         "persuade_attendant_to_allow_acceleration": [12],
         "accelerate_train": [12, 13],
         "decelerate_train": [12, 13],
-        "sync_attendant_to_lead_car": [6, 10, 11],
-        "sync_attendant_to_driver_cab": [6, 12],
         "sync_key_bag_to_lead_car": [7, 10, 11],
         "sync_key_bag_to_driver_cab": [7, 12],
         "midnight_maw_consumes_train": [2, 4, 11, 13, 14, 16, 17],
@@ -1871,7 +1851,7 @@ def review_markdown(module: dict[str, Any], source_map: dict[str, Any]) -> str:
 | --- | --- | --- |
 | 顺序车厢、锁门、驾驶室 | native | `Location` + 有向 `location_edges` + gated access point |
 | 便签、报纸、证词、钥匙、操作知识 | native | `Information`、状态条件与 `reveal_information` |
-| 取回黑包、乘务员随行 | native | `move_entity` + 独立 `retrieved/accompanying/present` 状态 |
+| 取回黑包、乘务员随行 | native | 黑包 `move_entity` + 独立 `retrieved/present` 状态；随行由引擎保留键 `accompanying` 驱动 |
 | 2 号车厢潜行 | native | 主动 `coc7.skill` 检定，所有成功等级显式路由 |
 | 制造更大声响引开循声者 | lowerable | 原文规定此法自动成功，压成一次原子规则 |
 | 每车厢 3–4 次行动限制 | lowerable | 无行动计数器；降为 23:00→次日 00:00 的 `time.point_entered` 终点 |
@@ -1885,7 +1865,7 @@ def review_markdown(module: dict[str, Any], source_map: dict[str, Any]) -> str:
 - travel graph：6→5→4→3 是普通前进；6→7、3→2→先头车厢、先头车厢→驾驶室均有真实边界。
 - 2 号车厢不是普通 travel：潜行成功或制造声响规则先提交 `crossing_resolved`，随后同一原子序列 `enter_location(lead_car)`。
 - 黑包是 Canon portable item；取得时真实进入行动者 inventory，不用台词代替持有状态。
-- 乘务员的 `awake`、`accompanying`、`present`、`maw_believed`、`allows_acceleration` 分开保存；随行后由 `travel.resolved` 事件真实移动到先头车厢和驾驶室。
+- 乘务员的 `awake`、`accompanying`、`present`、`maw_believed`、`allows_acceleration` 分开保存；`accompanying` 是引擎保留键，为真时由 `enter_location` 把他带到队伍实际到达的地点，模组不再逐个目的地手工同步。
 - A/B/C 各提交唯一 `train_chase.outcome`、结果 Information、`mark_core_resolved`、`set_ending_availability` 和结局场景迁移。所有分支以 `outcome=none && core_resolved=false` 互斥。
 - 午夜 C 由世界时间进入 D1 00:00 自动触发，并以 `deadline_reached` 和 `outcome` 保证重放幂等。
 

@@ -115,6 +115,53 @@ class ConditionIssuesTests(unittest.TestCase):
         )
 
 
+class AccompanyingKeyValidationTests(unittest.TestCase):
+    """`accompanying` 是引擎保留键，发布期就要求它是布尔值（#516）。
+
+    引擎把「跟着队伍换场景」这条语义挂在了这个键上，判定是 `is True`。写成真值字符串
+    在结构上完全合法，运行时却永远不成立——随行静默失效，和这个键不存在时一模一样。
+    这类「引擎认识这个名字但内容写错了」的问题按 #347 的分工归发布期。
+    """
+
+    def _module(self) -> dict:
+        path = FIXTURES / "幸福蛙蛙村" / "module-content-v3.json"
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def _errors(self, data: dict) -> list:
+        return [
+            item
+            for item in validate_module_v3(ModuleContentV3.model_validate(data)).errors
+            if item.code == "MODULE_V3_ACCOMPANYING_NOT_BOOLEAN"
+        ]
+
+    def test_the_published_module_uses_the_reserved_key_correctly(self) -> None:
+        self.assertEqual(self._errors(self._module()), [])
+
+    def test_a_non_boolean_initial_value_is_rejected(self) -> None:
+        data = self._module()
+        index, entity = next(
+            (index, item)
+            for index, item in enumerate(data["entities"])
+            if "accompanying" in item.get("state", {})
+        )
+        entity["state"]["accompanying"] = "yes"
+
+        (issue,) = self._errors(data)
+        self.assertEqual(issue.path, f"entities.{index}.state.accompanying")
+
+    def test_a_non_boolean_effect_value_is_rejected(self) -> None:
+        data = self._module()
+        for rule in data["rules"]:
+            for step in rule["execution"]["steps"]:
+                effect = step.get("effect") or {}
+                if effect.get("key") == "accompanying":
+                    effect["value"] = "yes"
+
+        issues = self._errors(data)
+        self.assertTrue(issues)
+        self.assertTrue(all(item.path.endswith(".value") for item in issues))
+
+
 class ActorBindingValidationTests(unittest.TestCase):
     """`actor_binding` is checked against the registered value space (#347 §4.8)."""
 

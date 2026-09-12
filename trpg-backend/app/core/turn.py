@@ -36,6 +36,7 @@ from collaboration_framework.host.ports import (
 from collaboration_framework.host.prompts.action_plan import PROMPT_VERSION
 from collaboration_framework.host.schemas import (
     NarrationOutput,
+    OpeningNarrationContext,
     RecentHistoryBudget,
     RecentTurnContext,
 )
@@ -155,22 +156,59 @@ class SessionViewApplication:
         )
         return await PlayerViewProjector(self.engine).project_scope(scope)
 
+    async def _narrate_opening_with_retry(
+        self,
+        context: OpeningNarrationContext,
+    ) -> NarrationOutput:
+        """安全校验拒绝时带提示重试一次，再不过才让调用方降级（issue #505）。
+
+        原来这里是「一次不过立刻降级」。实测最常撞上的不是超时，而是
+        `participant_coverage`——校验要求正文逐字包含每位玩家的角色名，而玩家
+        起的名字可能是任意短语（实测「回家了」），模型写出的自然叙事很容易没有
+        原样嵌进那几个字，于是整段作废。这类失败模型自己是能改对的，缺的只是
+        「你哪里没做到」这一句话，和回合叙事那条链的处理方式一致。
+
+        重试只做一轮：再多就是在用玩家的等待时间赌模型，而降级模板本身已经点名
+        了全部参与者，安全性不依赖这次重试。
+        """
+
+        narrator = OpeningNarrator(self.opening_narration_model)
+        try:
+            return await narrator.narrate(context)
+        except OpeningNarrationValidationError as exc:
+            logger.warning(
+                "opening_narration_rejected",
+                message_id="game-opening",
+                attempt=1,
+                reason=exc.reason,
+            )
+            hint = _opening_retry_hint(exc.reason, context)
+            if hint is None:
+                raise
+            return await narrator.narrate(context.model_copy(update={"narration_retry_hint": hint}))
+
     async def generate_opening(
         self,
         player_view: PlayerView,
     ) -> OpeningGenerationResult:
         """Generate a validated opening, with a deterministic public fallback."""
 
-        context = ContextAssembler().for_opening(player_view)
+        opening_text = None
+        opening_key_facts: tuple[str, ...] = ()
         addressing_mode = "second_person"
         try:
             async with self.store.transaction(player_view.room_id) as transaction:
                 runtime = await transaction.load_runtime()
+            opening_text = runtime.module_content.opening_text
+            opening_key_facts = runtime.module_content.opening_key_facts
             bound = [actor for actor in runtime.game_state.actors.values() if actor.player_id]
             if len(bound) >= 2:
                 addressing_mode = "named_actor"
         except Exception:  # noqa: BLE001 - 开场人数读失败时保持单人第二人称
             addressing_mode = "second_person"
+        context = ContextAssembler().for_opening(
+            player_view, opening_text=opening_text, opening_key_facts=opening_key_facts
+        )
         if addressing_mode != context.addressing_mode:
             context = context.model_copy(update={"addressing_mode": addressing_mode})
         started_at = time.perf_counter()
@@ -181,8 +219,10 @@ class SessionViewApplication:
             result = "template"
         else:
             try:
+                # 整个重试序列共用一份超时预算：重试是为了救回被安全校验拒绝的
+                # 那一版，不是把玩家的等待时间翻倍。
                 with anyio.fail_after(self.opening_narration_timeout_seconds):
-                    narration = await OpeningNarrator(self.opening_narration_model).narrate(context)
+                    narration = await self._narrate_opening_with_retry(context)
                 result = "model"
             except Exception as exc:  # the opening must never prevent entering InGame
                 failure_category = _opening_failure_category(exc)
@@ -191,7 +231,7 @@ class SessionViewApplication:
 
         elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
         input_chars = len(
-            json.dumps(context.to_json_dict(), ensure_ascii=False, separators=(",", ":"))
+            json.dumps(context.to_prompt_dict(), ensure_ascii=False, separators=(",", ":"))
         )
         logger.info(
             "opening_narration_completed",
@@ -203,6 +243,7 @@ class SessionViewApplication:
             elapsed_ms=elapsed_ms,
             result=result,
             failure_category=failure_category,
+            opening_source="module" if opening_text else "legacy_missing_opening",
             input_chars=input_chars,
             output_chars=len(narration.text),
         )
@@ -211,6 +252,33 @@ class SessionViewApplication:
             result=result,
             failure_category=failure_category,
         )
+
+
+def _opening_retry_hint(
+    reason: str,
+    context: OpeningNarrationContext,
+) -> str | None:
+    """把拒绝类别翻译成模型能照着改的一句话；不可自愈的类别返回 None。"""
+
+    if reason == "participant_coverage":
+        names = "、".join(participant.name for participant in context.participants)
+        return (
+            "上一版开场没有逐字写出全部玩家角色的姓名。必须在正文中原样出现："
+            f"{names}。不得改写、简称、翻译或用称谓替代。"
+        )
+    if reason == "subject_ownership":
+        return (
+            "上一版开场用错了叙述人称。addressing_mode=named_actor 时，引号外不得用"
+            "“你”或“您”称呼玩家角色，必须使用 participants 中的姓名。"
+        )
+    if reason in {"protocol_tail", "schema_fragment", "opening_contract"}:
+        return (
+            "上一版开场把协议内容写进了正文。text 只能是自然的角色内叙事，"
+            "不得包含 JSON、字段名、schema 片段或自检说明；"
+            "claimed_fact_ids 与 suggested_actions 必须是空数组。"
+        )
+    # outer_schema 是整份输出结构就不对，给提示也谈不上"改正哪里"，直接降级。
+    return None
 
 
 def _opening_failure_category(exc: Exception) -> str:
@@ -243,19 +311,22 @@ def _configured_opening_models(
             FakeOpeningNarrationModel(),
             HostModelMetadata(provider="fake", model="deterministic"),
         )
-    # 开场叙事显式不重试，与回合链的策略不同。
+    # 开场叙事按传输层错误重试一次。
     #
-    # 开场整段被 `anyio.fail_after(opening_narration_timeout_seconds)` 包住，那是
-    # 一个**总**预算（超时即退回确定性模板），而单次请求预算是
-    # `<provider>_timeout_seconds`。两者默认都是 30 秒，于是第一次请求耗尽预算的
-    # 同时外层 deadline 到期，退避与第二次尝试直接被取消——重试在这条路径上
-    # 从来不会发生，配了也是假的。
+    # 这里原来是 `max_attempts=1`，理由是"外层总预算与单次请求预算都是 30 秒，第一次
+    # 请求耗尽预算的同时外层 deadline 到期，第二次尝试必然被取消，配了也是假的"。
+    # 那个前提已经不成立，两处都变了：
     #
-    # 让总预算容纳两次尝试需要放宽到 60 秒以上（config 的上限也只有 60），玩家
-    # 开局要多等一分钟；压缩单次预算又会让每一次生成都更容易超时（#267 才因为
-    # 10 秒太紧把它提到 30 秒）。开场本来就有确定性模板兜底，失败代价远低于让
-    # 玩家干等，所以这里选择如实地不重试，而不是配一个永远不生效的策略。
-    retry_policy = ModelClientRetryPolicy(max_attempts=1)
+    # - 外层 `opening_narration_timeout_seconds` 现在是 45 秒（#505）。
+    # - 更关键的是失败根本不是"生成太慢"。预览环境实测到的是
+    #   error_type=ConnectTimeout、duration_ms=30215、transport_attempts=1——TCP/TLS
+    #   握手就没成功，请求没发出去，整份预算全烧在建连上。原因是 httpx 的
+    #   `timeout=<float>` 会把同一个标量套到 connect 上，于是建连也被允许等 30 秒。
+    #
+    # `model_http_timeout()` 把建连收紧到 5 秒之后，一次连不上的尝试只花 5 秒，
+    # 45 秒的总预算装得下"快速失败 + 退避 + 一次完整生成"。上游是间歇性连不上
+    # （同一 provider 同期有 3.8–5.2 秒成功的调用），这正是重试能救回来的形态。
+    retry_policy = ModelClientRetryPolicy(max_attempts=2, backoff_seconds=0.5)
     if settings.host_model_provider == "deepseek":
         if settings.deepseek_api_key is None:
             raise ValueError("DeepSeek Host 模型缺少 API key")

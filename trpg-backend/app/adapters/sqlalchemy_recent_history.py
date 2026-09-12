@@ -17,11 +17,13 @@ from collaboration_framework.host.schemas import (
     RecentTurnContext,
     VisibleHistoryText,
 )
-from sqlalchemy import and_, or_, select
+from collaboration_framework.host.schemas.history import RecentNpcReply
+from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.core.event_text import payload_ids
 from app.models.engine import ActionExecution
-from app.models.event import Event
+from app.models.event import Event, EventAudience
 
 _CANDIDATE_LIMIT = 24
 _UTTERANCE_LIMIT = 800
@@ -46,6 +48,7 @@ def _turn_chars(turn: RecentTurn) -> int:
             turn.player_utterance.text,
             turn.accepted_intent_summary or "",
             turn.published_narration.text if turn.published_narration else "",
+            *(reply.text.text for reply in turn.npc_replies),
             *(
                 fact.text
                 for fact in (
@@ -131,6 +134,23 @@ def _select_turns(
             )
             selected[0] = adjacent
         total = sum(_turn_chars(turn) for turn in selected)
+        if total > budget.max_chars and adjacent.npc_replies:
+            replies = list(adjacent.npc_replies)
+            while len(replies) > 1 and total > budget.max_chars:
+                total -= len(replies.pop().text.text)
+            if total > budget.max_chars:
+                reply = replies[0]
+                length = max(1, len(reply.text.text) - (total - budget.max_chars))
+                replies[0] = reply.model_copy(
+                    update={
+                        "text": reply.text.model_copy(
+                            update={"text": _truncate(reply.text.text, length)}
+                        )
+                    }
+                )
+            adjacent = adjacent.model_copy(update={"npc_replies": tuple(replies)})
+            selected[0] = adjacent
+            total = sum(_turn_chars(turn) for turn in selected)
         if total > budget.max_chars and len(adjacent.player_utterance.text) > 1:
             new_length = max(
                 1,
@@ -150,7 +170,43 @@ def _select_turns(
             )
             selected[0] = adjacent
 
+    if sum(_turn_chars(turn) for turn in selected) > budget.max_chars:
+        selected[0] = selected[0].model_copy(update={"published_narration": None})
     return tuple(reversed(selected))
+
+
+def _viewer_condition(player_id: str):
+    return or_(
+        Event.visibility == "public",
+        and_(Event.visibility == "player_scoped", Event.player_id == player_id),
+        and_(
+            Event.visibility == "scene_scoped",
+            exists(
+                select(EventAudience.event_id).where(
+                    EventAudience.event_id == Event.id, EventAudience.player_id == player_id
+                )
+            ),
+        ),
+    )
+
+
+def _action_correlation(event: Event) -> str | None:
+    if event.event_type == "dialogue.player":
+        explicit = event.payload.get("clientActionId") or event.payload.get("client_action_id")
+        if isinstance(explicit, str) and explicit:
+            return explicit
+        return event.correlation_id.removesuffix(":player") if event.correlation_id else None
+    return event.correlation_id
+
+
+def _reply_correlation(event: Event) -> str | None:
+    explicit = event.payload.get("sourceActionId") or event.payload.get("source_action_id")
+    if isinstance(explicit, str) and explicit:
+        return explicit
+    for separator in (":followup-npc:", ":npc:"):
+        if event.correlation_id and separator in event.correlation_id:
+            return event.correlation_id.rsplit(separator, 1)[0]
+    return None
 
 
 class SqlAlchemyRecentHistorySource:
@@ -207,21 +263,19 @@ class SqlAlchemyRecentHistorySource:
             cutoff = await session.scalar(
                 select(Event).where(
                     Event.room_id == player_input.room_id,
-                    Event.event_type == "action.broadcast",
-                    Event.correlation_id == exclude_correlation_id,
+                    Event.event_type.in_(("action.broadcast", "dialogue.player")),
+                    Event.correlation_id.in_(
+                        (exclude_correlation_id, f"{exclude_correlation_id}:player")
+                    ),
                 )
             )
             conditions = [
                 Event.room_id == player_input.room_id,
-                Event.event_type == "action.broadcast",
-                Event.correlation_id != exclude_correlation_id,
-                or_(
-                    Event.visibility == "public",
-                    and_(
-                        Event.visibility == "player_scoped",
-                        Event.player_id == player_input.player_id,
-                    ),
+                Event.event_type.in_(("action.broadcast", "dialogue.player")),
+                Event.correlation_id.not_in(
+                    (exclude_correlation_id, f"{exclude_correlation_id}:player")
                 ),
+                _viewer_condition(player_input.player_id),
             ]
             if cutoff is not None:
                 conditions.append(
@@ -244,19 +298,25 @@ class SqlAlchemyRecentHistorySource:
                 ).all()
             )
             correlations = [
-                event.correlation_id for event in action_events if event.correlation_id is not None
+                correlation
+                for event in action_events
+                if (correlation := _action_correlation(event)) is not None
             ]
             related_conditions = [
                 Event.room_id == player_input.room_id,
-                Event.correlation_id.in_(correlations),
-                Event.event_type.in_(["narration.push", "check.result"]),
-                or_(
-                    Event.visibility == "public",
-                    and_(
-                        Event.visibility == "player_scoped",
-                        Event.player_id == player_input.player_id,
-                    ),
+                Event.correlation_id.in_(
+                    (
+                        *correlations,
+                        *(
+                            f"{correlation}:{suffix}:{index}"
+                            for correlation in correlations
+                            for suffix in ("npc", "followup-npc")
+                            for index in range(3)
+                        ),
+                    )
                 ),
+                Event.event_type.in_(["narration.push", "check.result", "dialogue.npc"]),
+                _viewer_condition(player_input.player_id),
             ]
             execution_conditions = [
                 ActionExecution.room_id == player_input.room_id,
@@ -274,7 +334,15 @@ class SqlAlchemyRecentHistorySource:
                 )
                 execution_conditions.append(ActionExecution.created_at < cutoff.created_at)
             related_events = (
-                list((await session.scalars(select(Event).where(*related_conditions))).all())
+                list(
+                    (
+                        await session.scalars(
+                            select(Event)
+                            .where(*related_conditions)
+                            .order_by(Event.created_at, Event.id)
+                        )
+                    ).all()
+                )
                 if correlations
                 else []
             )
@@ -298,7 +366,7 @@ class SqlAlchemyRecentHistorySource:
         projected: list[RecentTurn] = []
         truncated_field_count = 0
         for action_event in action_events:
-            correlation_id = action_event.correlation_id
+            correlation_id = _action_correlation(action_event)
             if correlation_id is None or action_event.player_id is None:
                 continue
             own_turn = action_event.player_id == player_input.player_id
@@ -347,6 +415,28 @@ class SqlAlchemyRecentHistorySource:
                         visibility=narration_event.visibility,
                     )
 
+            reply_events = [
+                event
+                for event in related_events
+                if event.event_type == "dialogue.npc"
+                and _reply_correlation(event) == correlation_id
+                and event.actor_id
+                and isinstance(event.payload.get("text"), str)
+                and event.payload["text"].strip()
+            ]
+            replies = tuple(
+                RecentNpcReply(
+                    speaker_id=cast(str, event.actor_id),
+                    speaker_name=event.payload.get("speakerName")
+                    or event.payload.get("speaker_name"),
+                    text=VisibleHistoryText(
+                        text=_truncate(event.payload["text"].strip(), _NARRATION_LIMIT),
+                        visibility=cast(HistoryVisibility, event.visibility),
+                    ),
+                    listener_ids=payload_ids(event.payload, "listener_ids", "listenerIds"),
+                )
+                for event in reply_events
+            )
             accepted_summary = None
             safe_result = None
             participants: list[str] = []
@@ -367,7 +457,15 @@ class SqlAlchemyRecentHistorySource:
                 if target_id in safe_participant_ids and target_id not in participants:
                     participants.append(target_id)
 
-            evidence = [f"transport_event:{action_event.id}"]
+            participants.extend(
+                item
+                for item in payload_ids(action_event.payload, "participant_ids", "participantIds")
+                if item not in participants
+            )
+            evidence = [
+                f"transport_event:{action_event.id}",
+                *(f"transport_event:{event.id}" for event in reply_events),
+            ]
             if execution is not None and own_turn:
                 evidence.append(f"action_execution:{correlation_id}")
             if narration_event is not None and narration is not None:
@@ -407,6 +505,7 @@ class SqlAlchemyRecentHistorySource:
                     accepted_intent_summary=accepted_summary,
                     player_safe_result=safe_result,
                     published_narration=narration,
+                    npc_replies=replies,
                     evidence_refs=tuple(evidence),
                 )
             )

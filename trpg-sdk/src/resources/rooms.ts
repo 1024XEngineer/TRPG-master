@@ -222,4 +222,33 @@ export class RoomsResource {
       { ...this.hostSpeechAuth(token, reconnectToken, signal), method: 'GET' }
     );
   }
+
+  /** 读取当前玩家有权看到的 NPC 对话语音分句清单。 */
+  getNpcSpeechManifest(
+    roomId: string,
+    messageId: string,
+    token: string,
+    reconnectToken: string,
+    signal?: AbortSignal
+  ): Promise<HostSpeechManifest> {
+    return this.client.get<HostSpeechManifest>(
+      `/rooms/${encodeURIComponent(roomId)}/dialogues/${encodeURIComponent(messageId)}/speech`,
+      this.hostSpeechAuth(token, reconnectToken, signal)
+    );
+  }
+
+  /** 下载 NPC 对话的一条音频分句；音色由服务端根据 speaker_id 解析。 */
+  getNpcSpeechSentence(
+    roomId: string,
+    messageId: string,
+    sentenceIndex: number,
+    token: string,
+    reconnectToken: string,
+    signal?: AbortSignal
+  ): Promise<Blob> {
+    return this.client.requestBlob(
+      `/rooms/${encodeURIComponent(roomId)}/dialogues/${encodeURIComponent(messageId)}/speech/sentences/${sentenceIndex}`,
+      { ...this.hostSpeechAuth(token, reconnectToken, signal), method: 'GET' }
+    );
+  }
 }

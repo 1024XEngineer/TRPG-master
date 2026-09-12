@@ -211,6 +211,14 @@ class InitialCustodySpec(ContractModel):
     kind: Literal["location", "starting_actor"]
 
 
+class EntityVoiceProfile(ContractModel):
+    """NPC 的模组级语音配置；只保存可发布的稳定音色标识。"""
+
+    provider: Literal["doubao"]
+    resource_id: str = Field(min_length=1, max_length=200)
+    voice_type: str = Field(min_length=1, max_length=200)
+
+
 class EntitySpecV3(ContractModel):
     """一个 Canon 人物或物体。
 
@@ -231,12 +239,22 @@ class EntitySpecV3(ContractModel):
     initial_custody: InitialCustodySpec | None = None
     state: dict[str, JsonValue] = Field(default_factory=dict)
     item_component: ItemComponent | None = None
+    # 音色是模组公开展示元数据，只允许 NPC 配置，运行时仍由服务端校验资源和白名单。
+    voice: EntityVoiceProfile | None = None
     visibility: Literal["public", "party", "actor", "keeper"] = "public"
     # 受众与发现是两个独立概念。即使实体是 public，在已注册的确定性谓词确认其
     # 被发现之前，也可以不出现在任何玩家投影中。
     visibility_conditions: tuple[ConditionExpr, ...] = ()
     plot_relevance: bool = True
     lifecycle: Literal["campaign", "session"] = "campaign"
+
+    @model_validator(mode="after")
+    def validate_voice_kind(self) -> "EntitySpecV3":
+        """阻止物品等非 NPC 实体携带 NPC 专属音色。"""
+
+        if self.voice is not None and self.kind != "npc":
+            raise ValueError("只有 NPC 实体可以配置 voice")
+        return self
 
 
 # --------------------------------------------------------------------------- #
@@ -969,6 +987,18 @@ class ModuleContentV3(ContractModel):
     version: str = Field(min_length=1, max_length=50)
     world_ref: str = Field(min_length=1, max_length=100)
     background: str = Field(min_length=1)
+    opening_text: str | None = Field(
+        default=None,
+        min_length=1,
+        exclude_if=lambda value: value is None,
+        description="当前默认起点可向全体玩家朗读的完整开场原文；缺省兼容旧版本。",
+    )
+
+    opening_key_facts: tuple[Annotated[str, Field(min_length=1)], ...] = Field(
+        default=(),
+        exclude_if=lambda value: not value,
+        description="从开场原文提取的公开关键事实提醒，保留任务、线索、数量和条件；不替代原文。",
+    )
 
     information: tuple[InformationSpecV3, ...] = ()
     knowledge_goals: tuple[KnowledgeGoalSpec, ...] = ()
@@ -985,6 +1015,14 @@ class ModuleContentV3(ContractModel):
     initial_state: InitialStateSpec
     world_profile: WorldProfileSpec = Field(default_factory=WorldProfileSpec)
     time_policy: ModuleTimePolicySpec = Field(default_factory=ModuleTimePolicySpec)
+
+    @model_validator(mode="after")
+    def validate_opening_key_facts(self) -> ModuleContentV3:
+        if self.opening_key_facts and not (self.opening_text or "").strip():
+            raise ValueError("opening_key_facts 必须有 opening_text 作为来源")
+        if any(not fact.strip() for fact in self.opening_key_facts):
+            raise ValueError("opening_key_facts 不得包含空白事实")
+        return self
 
     @model_validator(mode="after")
     def validate_unique_ids(self) -> ModuleContentV3:
@@ -1057,6 +1095,7 @@ __all__ = [
     "EndingPolicySpec",
     "EntityRelationKind",
     "EntityRelationSpec",
+    "EntityVoiceProfile",
     "EntitySpecV3",
     "EventTriggerSpec",
     "ExecutionBranchSpec",

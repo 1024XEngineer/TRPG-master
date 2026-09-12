@@ -48,7 +48,7 @@ from collaboration_framework.engine import (
 )
 from collaboration_framework.engine.initialization import create_initial_game_state
 from collaboration_framework.engine.models import ActorState
-from collaboration_framework.engine.projection_v3 import _rule_check_skill_id
+from collaboration_framework.engine.projection_v3 import rule_check_skill_id
 from collaboration_framework.host.application import PlayerViewProjector, TurnExecutionError
 from collaboration_framework.host.prompts.action_plan import (
     current_step_adjudication_instructions,
@@ -61,7 +61,12 @@ from collaboration_framework.host.schemas import (
     RecentTurnContext,
 )
 
-from app.adapters.openai_models import _SAFE_ADJUDICATION_INSTRUCTIONS, PromptTurnPlanner
+from app.adapters.openai_models import (
+    _SAFE_ADJUDICATION_INSTRUCTIONS,
+    PromptActionPlanStepAdjudicator,
+    PromptHostTurnDecisionModel,
+    PromptTurnPlanner,
+)
 from app.core.action_plan_turn import (
     DeterministicHostTurnDecisionModel,
     PlanPrerequisiteResolver,
@@ -69,9 +74,9 @@ from app.core.action_plan_turn import (
     _deterministic_step_adjudication,
     _DeterministicStepAdjudicator,
     _match_travel_target,
+    _ModelStepAdjudicator,
     _normalize_single_travel_decision,
     _project_plan_prerequisite_facts,
-    _RuleFirstStepAdjudicator,
     build_action_plan_turn_application,
     build_rule_once_adjudication,
 )
@@ -237,7 +242,7 @@ def test_rule_check_skill_id_reads_coc7_skill_profile_parameter() -> None:
             "fumble": "done",
         },
     )
-    assert _rule_check_skill_id(step) == "credit-rating"
+    assert rule_check_skill_id(step) == "credit-rating"
 
 
 async def test_rule_once_builder_rejects_unmapped_rule_check_branch() -> None:
@@ -374,15 +379,10 @@ async def test_fake_single_action_uses_the_same_rule_match_view() -> None:
     assert isinstance(decision.adjudication.check, RequiredAdjudicationCheck)
 
 
-async def test_rule_first_adjudicator_does_not_call_model_for_unique_match() -> None:
-    """线上裁决对唯一 Match View 候选也走确定性路径。"""
+async def test_fake_adjudicator_resolves_unique_match() -> None:
+    """Fake 对唯一 Match View 候选使用离线规则匹配。"""
 
-    class FailingFallback:
-        async def adjudicate(self, context):
-            del context
-            raise AssertionError("唯一规则候选不应调用模型")
-
-    adjudication = await _RuleFirstStepAdjudicator(FailingFallback()).adjudicate(
+    adjudication = await _DeterministicStepAdjudicator().adjudicate(
         await _cemetery_context("仔细观察守墓人")
     )
 
@@ -390,15 +390,10 @@ async def test_rule_first_adjudicator_does_not_call_model_for_unique_match() -> 
     assert adjudication.rule_decision.rule_id == "observe_caretaker"
 
 
-async def test_visible_dialogue_does_not_call_model_or_reveal_information() -> None:
+async def test_fake_visible_dialogue_does_not_reveal_information() -> None:
     """普通对话不应因二次模型调用失败，也不能绕过规则凭空揭示线索。"""
 
-    class FailingFallback:
-        async def adjudicate(self, context):
-            del context
-            raise AssertionError("可见人物的普通对话不应调用模型")
-
-    adjudication = await _RuleFirstStepAdjudicator(FailingFallback()).adjudicate(
+    adjudication = await _DeterministicStepAdjudicator().adjudicate(
         await _cemetery_context(
             "前往公墓，询问守墓人是否见过有人常来墓地",
             step_kind="dialogue",
@@ -415,7 +410,7 @@ async def test_visible_dialogue_does_not_call_model_or_reveal_information() -> N
     assert isinstance(adjudication.success_effects[0], NarrativeOnlyEffect)
 
 
-async def test_unknown_ordinary_travel_is_resolved_without_a_model_round_trip() -> None:
+async def test_fake_unknown_ordinary_travel_creates_runtime_location() -> None:
     """#212 普通动态地点要真的建出来。
 
     只靠提示词不管用：模型反复回答「阿诺兹堡没有挂牌的旅店」，玩家因此永远
@@ -423,17 +418,12 @@ async def test_unknown_ordinary_travel_is_resolved_without_a_model_round_trip() 
     地登记并进入，不再看模型脸色。
     """
 
-    class FailingFallback:
-        async def adjudicate(self, context):
-            del context
-            raise AssertionError("普通去处不应该还要问模型")
-
     context = await _cemetery_context(
         "我想去小镇上的旅馆休息到晚上",
         step_kind="travel",
         semantic_goal="前往小镇上的旅馆",
     )
-    adjudication = await _RuleFirstStepAdjudicator(FailingFallback()).adjudicate(context)
+    adjudication = await _DeterministicStepAdjudicator().adjudicate(context)
 
     assert [effect.type for effect in adjudication.success_effects] == [
         "ensure_runtime_location",
@@ -721,7 +711,7 @@ async def test_planner_cannot_invent_ambient_venue_for_npc_search() -> None:
             )
 
     fallback = RecordingFallback()
-    adjudication = await _RuleFirstStepAdjudicator(fallback).adjudicate(
+    adjudication = await _ModelStepAdjudicator(fallback).adjudicate(
         await _cemetery_context(
             "去找守墓人",
             step_kind="travel",
@@ -857,7 +847,7 @@ async def test_step_travel_rejects_known_location_substitution_for_unknown_desti
             )
 
     with pytest.raises(TurnExecutionError) as captured:
-        await _RuleFirstStepAdjudicator(WrongLocationFallback()).adjudicate(
+        await _ModelStepAdjudicator(WrongLocationFallback()).adjudicate(
             await _cemetery_context(
                 "去教堂看看",
                 step_kind="travel",
@@ -1132,15 +1122,32 @@ async def test_semantic_malformed_plan_returns_clarification_without_run() -> No
     assert await application.get_plan("semantic-room", "semantic-invalid") is None
 
 
-async def test_clear_single_step_uses_legacy_fast_producer_when_semantic_is_enabled() -> None:
+async def test_clear_single_step_uses_safe_semantic_planner_when_available() -> None:
     application = await _semantic_application()
 
-    class InvalidSemanticClient:
-        async def generate(self, **kwargs):
-            del kwargs
-            raise AssertionError("clear single-step input must not enter semantic Planner")
+    class RecordingSemanticPlanner:
+        calls = 0
 
-    application._semantic_planner = PromptTurnPlanner(InvalidSemanticClient())
+        async def generate(self, context):
+            self.calls += 1
+            return ActionPlan(
+                goal=context.player_input.utterance,
+                steps=(
+                    ActionPlanStep(
+                        kind="action",
+                        semantic_goal=context.player_input.utterance,
+                    ),
+                ),
+            )
+
+    class ForbiddenLegacyPlanner:
+        async def generate(self, context):
+            del context
+            raise AssertionError("生产单步输入不得回退到融合 Planner")
+
+    semantic_planner = RecordingSemanticPlanner()
+    application._semantic_planner = semantic_planner
+    application._planner = ForbiddenLegacyPlanner()
 
     result = await application.start(
         room_id="semantic-room",
@@ -1153,11 +1160,100 @@ async def test_clear_single_step_uses_legacy_fast_producer_when_semantic_is_enab
     run = await application.get_plan("semantic-room", "semantic-fast-path")
     assert run is not None
     assert len(run.steps) == 1
+    assert semantic_planner.calls == 1
+
+
+async def test_npc_single_intent_reaches_rule_match_after_safe_planning() -> None:
+    """#507：NPC 单意图也必须在当前步拿到规则候选，且 Planner 不见 Keeper 数据。"""
+
+    content = _content()
+    state = create_initial_game_state(
+        content,
+        room_id="issue-507-room",
+        actors={
+            "issue-507-actor": ActorState(
+                player_id="issue-507-player",
+                name="调查员",
+                source_character_id="issue-507-character",
+                source_character_version=1,
+                state={"skills": {"intimidate": 60}},
+            )
+        },
+    ).model_copy(update={"scene_id": "cemetery"}, deep=True)
+    store = InMemoryEngineStore()
+    store.register_room(module_content=content, initial_state=state)
+
+    class RecordingClient:
+        def __init__(self) -> None:
+            self.schemas: list[str] = []
+
+        async def generate(self, *, schema_name, schema, instructions, input_payload):
+            del schema, instructions
+            self.schemas.append(schema_name)
+            if schema_name == "trpg_turn_plan":
+                assert input_payload["player_input"]["interlocutor_id"] == "melodias"
+                assert "keeper_capabilities" not in input_payload
+                assert "melodias_night_sighting" not in str(input_payload)
+                return {
+                    "kind": "action_plan",
+                    "goal": "威胁守墓人交代道格拉斯的去向",
+                    "steps": [
+                        {
+                            "kind": "dialogue",
+                            "semantic_goal": "威胁守墓人交代道格拉斯的去向",
+                        }
+                    ],
+                }
+            if schema_name == "trpg_action_plan_step_adjudication":
+                context = ActionPlanStepContext.model_validate(input_payload)
+                assert context.keeper_capabilities is not None
+                candidate = next(
+                    rule
+                    for rule in context.keeper_capabilities.rule_candidates
+                    if rule.rule_id == "intimidate_caretaker"
+                )
+                return build_rule_once_adjudication(
+                    player_input=context.player_input,
+                    player_view=context.player_view,
+                    capabilities=context.keeper_capabilities,
+                    rule_id=candidate.rule_id,
+                    option_id=candidate.options[0].id,
+                ).to_json_dict()
+            raise AssertionError(f"单意图不应调用 {schema_name}")
+
+    client = RecordingClient()
+    application = build_action_plan_turn_application(
+        store=store,
+        engine=RuleEngineService(store),
+        adjudication_engine=AdjudicationEngineService(store),
+        settings=Settings(host_model_provider="deepseek", deepseek_api_key="test-key"),
+        client=client,
+        planner_client=client,
+        memory_source=_EmptyMemorySource(),
+    )
+
+    result = await application.start(
+        room_id="issue-507-room",
+        player_id="issue-507-player",
+        client_action_id="issue-507-single-threat",
+        utterance="告诉我道格拉斯藏在哪里，否则我就告发你",
+        interlocutor_id="melodias",
+        interlocutor_name="梅洛迪亚斯·杰弗逊",
+    )
+
+    assert result.status == "waiting_for_player"
+    assert client.schemas == ["trpg_turn_plan", "trpg_action_plan_step_adjudication"]
+    run = await application.get_plan("issue-507-room", "issue-507-single-threat")
+    assert run is not None
+    adjudication = run.steps[0].adjudication
+    assert adjudication is not None
+    assert adjudication.rule_decision is not None
+    assert adjudication.rule_decision.rule_id == "intimidate_caretaker"
 
 
 @pytest.mark.asyncio
-async def test_single_travel_moves_named_companion_present_with_player() -> None:
-    """“带他”由裁决摘要消解后，身边 NPC 必须获得权威移动效果。"""
+async def test_single_travel_does_not_synthesize_companion_moves() -> None:
+    """旅行归一化不能根据玩家或模型文字自动搬运 NPC。"""
 
     context = await _cemetery_context(
         "带他去找守墓人",
@@ -1191,7 +1287,7 @@ async def test_single_travel_moves_named_companion_present_with_player() -> None
         for effect in normalized.adjudication.success_effects
         if isinstance(effect, MoveEntityEffect)
     )
-    assert moved == (MoveEntityEffect(entity_id="thomas", location_id="cemetery"),)
+    assert moved == ()
 
 
 async def test_ambient_venue_never_shadows_an_authored_location() -> None:
@@ -1219,7 +1315,7 @@ async def test_ambient_venue_never_shadows_an_authored_location() -> None:
 
     fallback = RecordingFallback()
     with pytest.raises(TurnExecutionError) as captured:
-        await _RuleFirstStepAdjudicator(fallback).adjudicate(
+        await _ModelStepAdjudicator(fallback).adjudicate(
             await _cemetery_context(
                 "我想去地下酒吧",
                 step_kind="travel",
@@ -1231,81 +1327,57 @@ async def test_ambient_venue_never_shadows_an_authored_location() -> None:
     assert captured.value.code == "TRAVEL_DESTINATION_NOT_FOUND"
 
 
-def test_prompt_allows_ordinary_runtime_location_without_false_clarification() -> None:
-    assert "不应追问" in _SAFE_ADJUDICATION_INSTRUCTIONS
-    assert "具体实例" in _SAFE_ADJUDICATION_INSTRUCTIONS
-    assert "ensure_runtime_location、enter_location" in _SAFE_ADJUDICATION_INSTRUCTIONS
-    assert "地点的功能类别、规模或专业性本身也不构成拒绝理由" in (_SAFE_ADJUDICATION_INSTRUCTIONS)
-    assert "不要仅因玩家没有指定普通内容的具体名称或实例而要求澄清" in (
-        current_step_adjudication_instructions()
-    )
-    assert "不得把人物和可携带物件的" in current_step_adjudication_instructions()
-    assert "地点的功能类别、规模或专业性本身也不构成拒绝理由" in (
-        current_step_adjudication_instructions()
-    )
+@pytest.mark.parametrize("entry", ["step", "host"])
+async def test_model_receives_shared_adjudication_contract_once(entry: str) -> None:
+    """Check the actual request boundary; wording examples are not a behavioral contract."""
+    step = await _cemetery_context("用侦查观察梅洛迪亚斯·杰弗逊")
+    adjudication = await _DeterministicStepAdjudicator().adjudicate(step)
+    raw = adjudication.to_json_dict()
+    captured = {}
 
+    class CaptureClient:
+        async def generate(self, **kwargs):
+            captured.update(kwargs)
+            return raw if entry == "step" else {"kind": "single_action", "adjudication": raw}
 
-def test_prompt_preserves_terminal_actions_and_distinguishes_service_verbs() -> None:
-    planning = host_turn_decision_instructions(ActionPlanPolicy())
+    if entry == "step":
+        result = await PromptActionPlanStepAdjudicator(CaptureClient()).adjudicate(step)
+        prefix = current_step_adjudication_instructions()
+        expected_schema = "trpg_action_plan_step_adjudication"
+    else:
+        context = HostAgentContext(
+            player_input=step.player_input,
+            player_view=step.player_view,
+            recent_history=RecentTurnContext.empty(
+                player_input=step.player_input, player_view=step.player_view
+            ),
+            keeper_capabilities=step.keeper_capabilities,
+        )
+        decision = await PromptHostTurnDecisionModel(CaptureClient()).generate(context)
+        assert isinstance(decision, SingleActionDecision)
+        result = decision.adjudication
+        prefix = host_turn_decision_instructions(ActionPlanPolicy())
+        expected_schema = "trpg_host_turn_decision"
 
-    assert "句末动词" in planning
-    assert "相邻书写、省略连词" in planning
-    assert "前置交互 + 等待/休息/使用/继续操作" in planning
-    assert "服务请求、惯用语或抽象含义" in _SAFE_ADJUDICATION_INSTRUCTIONS
-    assert "不得映射成\n物体 open" in _SAFE_ADJUDICATION_INSTRUCTIONS
-
-
-def test_prompt_forbids_semantically_unrelated_target_substitution() -> None:
-    assert "只证明一个 id 在协议上可以引用，不证明它与玩家原话语义匹配" in (
-        _SAFE_ADJUDICATION_INSTRUCTIONS
-    )
-    assert "绝不能为了得到一个合法\nid，就把当前 scene 或其他已知地点当作替代目标" in (
-        _SAFE_ADJUDICATION_INSTRUCTIONS
-    )
-    assert "过去可能错误的映射延续到本回合" in _SAFE_ADJUDICATION_INSTRUCTIONS
-
-    step_instructions = current_step_adjudication_instructions()
-    assert "不能覆盖玩家本回合明确指定的对象、地点" in step_instructions
-    assert "不得进入替代地点、推进时间" in step_instructions
-
-
-def test_prompt_defines_runtime_item_custody_and_consumption() -> None:
-    assert "player_view.scene.loose_items[].id" in _SAFE_ADJUDICATION_INSTRUCTIONS
-    assert "player_view.inventory[].id" in _SAFE_ADJUDICATION_INSTRUCTIONS
-    assert "这样物品才会进入背包" in _SAFE_ADJUDICATION_INSTRUCTIONS
-    assert "move_entity(location_id=当前 scene.id)" in _SAFE_ADJUDICATION_INSTRUCTIONS
-    assert "consume_entity" in _SAFE_ADJUDICATION_INSTRUCTIONS
-    step_instructions = current_step_adjudication_instructions()
-    assert "世界一致性" in step_instructions
-    assert "场景依据" in step_instructions
-    assert "普通性" in step_instructions
-    assert "零剧情权限" in step_instructions
-    assert "Canon 不替代" in step_instructions
-    assert "拾取要在同一 effects 序列继续 move_entity" in step_instructions
-    assert "新建物品尚不是合法 target" in step_instructions
-    assert "keeper_capabilities.world_profile" in step_instructions
-    assert "明确取得物品决策表" in step_instructions
-    assert "没有具体实体所以只能留在原处" in step_instructions
-    assert "published_narration 只是普通内容的软场景依据" in step_instructions
-    assert "固定实体\n不能因此进入背包" in step_instructions
-
-
-def test_prompt_requires_exact_existing_entity_match_before_runtime_creation() -> None:
-    assert "scene.visible_entities、scene.loose_items 与" in _SAFE_ADJUDICATION_INSTRUCTIONS
-    assert "target 必须保持为当前 player_view.scene.id" in _SAFE_ADJUDICATION_INSTRUCTIONS
+    instructions = captured["instructions"]
+    assert instructions.count(_SAFE_ADJUDICATION_INSTRUCTIONS) == 1
+    assert instructions.startswith(prefix)
+    # Entry-specific scope must not carry a second set of effect / Runtime rules.
+    for effect in (
+        "ensure_runtime_location",
+        "ensure_runtime_entity",
+        "move_entity",
+        "enter_location",
+    ):
+        assert effect not in prefix
+    assert captured["schema_name"] == expected_schema
+    assert step.keeper_capabilities is not None
     assert (
-        "不能\n  仅因某物出现在 scene.visible_entities 或 "
-        "keeper_capabilities.entities 就把它移入背包" in _SAFE_ADJUDICATION_INSTRUCTIONS
+        captured["input_payload"]["keeper_capabilities"] == step.keeper_capabilities.to_json_dict()
     )
-    assert "published_narration 只是普通内容的软场景依据" in (_SAFE_ADJUDICATION_INSTRUCTIONS)
-    assert "明确取得物品决策表" in _SAFE_ADJUDICATION_INSTRUCTIONS
-    assert "不得创建便携\n  替身" in _SAFE_ADJUDICATION_INSTRUCTIONS
-    step_instructions = current_step_adjudication_instructions()
-    assert "keeper_capabilities 里的实体不代表玩家此刻看得见" in step_instructions
-    assert "是效果能力词表，不自动成为可直接作用的 target" in step_instructions
-    assert "类别、数量、所有者、唯一性、状态" in step_instructions
-    assert "五本失窃藏书" not in step_instructions
-    assert "五本失窃藏书" not in _SAFE_ADJUDICATION_INSTRUCTIONS
+    assert result.rule_decision == adjudication.rule_decision
+    assert result.check == adjudication.check
+    assert not result.success_effects and not result.failure_effects
 
 
 @pytest.mark.parametrize(

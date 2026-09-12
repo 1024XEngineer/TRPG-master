@@ -17,7 +17,7 @@ from collaboration_framework.contracts import (
 )
 
 
-HistoryVisibility = Literal["public", "player_scoped"]
+HistoryVisibility = Literal["public", "player_scoped", "scene_scoped"]
 
 
 class RecentHistoryBudget(ContractModel):
@@ -43,6 +43,15 @@ class RecentSafeResult(ContractModel):
     visible_facts: tuple[VisibleFact, ...] = ()
 
 
+class RecentNpcReply(ContractModel):
+    """A prior NPC utterance with its actual speaker and viewer visibility."""
+
+    speaker_id: str = Field(min_length=1)
+    speaker_name: str | None = None
+    text: VisibleHistoryText
+    listener_ids: tuple[str, ...] = ()
+
+
 class RecentTurn(ContractModel):
     """One prior action and only the evidence safe for the current viewer."""
 
@@ -57,6 +66,7 @@ class RecentTurn(ContractModel):
     accepted_intent_summary: str | None = Field(default=None, min_length=1)
     player_safe_result: RecentSafeResult | None = None
     published_narration: VisibleHistoryText | None = None
+    npc_replies: tuple[RecentNpcReply, ...] = ()
     evidence_refs: tuple[str, ...] = ()
 
 
@@ -103,7 +113,11 @@ class RecentTurnContext(ContractModel):
     def validate_visibility(self) -> RecentTurnContext:
         for turn in self.turns:
             own_turn = turn.source_player_id == self.viewer_player_id
-            visible_texts = (turn.player_utterance, turn.published_narration)
+            visible_texts = (
+                turn.player_utterance,
+                turn.published_narration,
+                *(reply.text for reply in turn.npc_replies),
+            )
             if (
                 any(
                     text is not None and text.visibility == "player_scoped"

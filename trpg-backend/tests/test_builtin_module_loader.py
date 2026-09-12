@@ -57,6 +57,54 @@ async def test_all_builtin_modules_load_idempotently(db_session: AsyncSession) -
     assert version.content_schema_version == 3
 
 
+async def test_happy_frog_parent_publication_preserves_old_version(
+    db_session: AsyncSession,
+) -> None:
+    """#518: an existing 3.0.9 database can publish the parents without overwriting old rooms."""
+
+    current = await db_session.get(
+        ModuleVersion,
+        (HAPPY_FROG_VILLAGE_MODULE_ID, HAPPY_FROG_VILLAGE_SPEC.version),
+    )
+    assert current is not None
+    old_content = deepcopy(current.content_json)
+    old_content["version"] = "3.0.9"
+    old_content["entities"] = [
+        entity
+        for entity in old_content["entities"]
+        if entity["id"] not in {"richard_lane", "mrs_lane"}
+    ]
+    await db_session.delete(current)
+    db_session.add(
+        ModuleVersion(
+            module_id=HAPPY_FROG_VILLAGE_MODULE_ID,
+            version="3.0.9",
+            world_ref=old_content["world_ref"],
+            content_schema_version=3,
+            content_json=old_content,
+        )
+    )
+    await db_session.commit()
+
+    await load_builtin_module(db_session, HAPPY_FROG_VILLAGE_SPEC)
+    await load_builtin_module(db_session, HAPPY_FROG_VILLAGE_SPEC)
+    db_session.expire_all()
+    old = await db_session.get(ModuleVersion, (HAPPY_FROG_VILLAGE_MODULE_ID, "3.0.9"))
+    new = await db_session.get(
+        ModuleVersion,
+        (HAPPY_FROG_VILLAGE_MODULE_ID, HAPPY_FROG_VILLAGE_SPEC.version),
+    )
+    assert old is not None and old.content_json == old_content
+    assert new is not None and new.version == HAPPY_FROG_VILLAGE_SPEC.version
+    parents = {
+        entity["id"]: entity
+        for entity in new.content_json["entities"]
+        if entity["id"] in {"richard_lane", "mrs_lane"}
+    }
+    assert len(parents) == 2
+    assert all(entity["located_in"] == "lane_manor" for entity in parents.values())
+
+
 async def test_paper_chase_npc_portraits_are_seeded_idempotently(
     db_session: AsyncSession,
 ) -> None:

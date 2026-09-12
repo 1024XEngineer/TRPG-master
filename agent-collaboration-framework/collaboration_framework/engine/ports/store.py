@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from contextlib import AbstractAsyncContextManager
 from datetime import datetime
+from collections.abc import Callable
+from pydantic import JsonValue
 from typing import Protocol
 
 from collaboration_framework.contracts import ContractError
@@ -97,6 +99,16 @@ class EngineTransaction(Protocol):
 
 class EngineStore(Protocol):
     """Open a transaction over one room's authoritative runtime."""
+
+    async def prepare_randomness(
+        self,
+        *,
+        room_id: str,
+        operation_key: str,
+        create: Callable[[], dict[str, JsonValue]],
+    ) -> tuple[dict[str, JsonValue], bool]:
+        """Get-or-create private entropy in a separate durable preparation."""
+        ...
 
     def transaction(
         self,

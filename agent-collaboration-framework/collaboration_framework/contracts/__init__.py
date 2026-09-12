@@ -48,6 +48,7 @@ from .adjudication import (
     AdjudicationExecution,
     CancelCheckChoice,
     ChangeEntityStateEffect,
+    ChangeActorResourceEffect,
     CheckDecisionRequest,
     CheckDegree,
     CheckDifficulty,

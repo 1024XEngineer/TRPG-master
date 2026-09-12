@@ -784,3 +784,16 @@ class EndingCommandExecution(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
+
+
+class EngineRandomness(Base):
+    """Private preparation only; never exposed in events or PlayerView."""
+
+    __tablename__ = "engine_randomness"
+    room_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("game_sessions.room_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    operation_key: Mapped[str] = mapped_column(String(300), primary_key=True)
+    snapshot_json: Mapped[dict] = mapped_column(JSON, nullable=False)

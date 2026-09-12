@@ -2,6 +2,46 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "recent-turn-context.schema.json",
   "$defs": {
+    "RecentNpcReply": {
+      "additionalProperties": false,
+      "description": "A prior NPC utterance with its actual speaker and viewer visibility.",
+      "properties": {
+        "speaker_id": {
+          "minLength": 1,
+          "title": "Speaker Id",
+          "type": "string"
+        },
+        "speaker_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Speaker Name"
+        },
+        "text": {
+          "$ref": "#/$defs/VisibleHistoryText"
+        },
+        "listener_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Listener Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "speaker_id",
+        "text"
+      ],
+      "title": "RecentNpcReply",
+      "type": "object"
+    },
     "RecentSafeResult": {
       "additionalProperties": false,
       "description": "The deliberately small, player-safe projection of an ActionResult.",
@@ -156,6 +196,14 @@
           ],
           "default": null
         },
+        "npc_replies": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RecentNpcReply"
+          },
+          "title": "Npc Replies",
+          "type": "array"
+        },
         "evidence_refs": {
           "default": [],
           "items": {
@@ -277,7 +325,8 @@
         "visibility": {
           "enum": [
             "public",
-            "player_scoped"
+            "player_scoped",
+            "scene_scoped"
           ],
           "title": "Visibility",
           "type": "string"

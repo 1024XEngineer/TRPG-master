@@ -5,22 +5,13 @@ from collaboration_framework.engine import (
     DiceRoller,
     RuleEngineService,
 )
+from collaboration_framework.engine.dice import FixedDiceSource as _FixedDiceSource
+from collaboration_framework.engine.dice import SidesSequenceDiceSource
 
 from app.adapters import SqlAlchemyActionPlanRunStore, SqlAlchemyEngineStore
 from app.core.config import get_settings
 from app.core.db import async_session_factory
 from app.core.legacy_turn_run import LegacySingleActionRecoveryAdapter
-
-
-class _FixedDiceSource:
-    def __init__(self, value: int) -> None:
-        self._value = value
-
-    def randint(self, minimum: int, maximum: int) -> int:
-        if not minimum <= self._value <= maximum:
-            raise AssertionError(f"Fixed test roll {self._value} is outside [{minimum}, {maximum}]")
-        return self._value
-
 
 engine_store = SqlAlchemyEngineStore(async_session_factory)
 action_plan_store = SqlAlchemyActionPlanRunStore(async_session_factory)
@@ -30,6 +21,8 @@ _dice = (
     if _settings.app_env == "test" and _settings.test_fixed_dice_roll is not None
     else None
 )
+if _settings.app_env == "test" and _settings.test_dice_by_sides is not None:
+    _dice = DiceRoller(SidesSequenceDiceSource(_settings.test_dice_by_sides))
 adjudication_engine_service = AdjudicationEngineService(engine_store, dice=_dice)
 rule_engine_service = RuleEngineService(engine_store)
 legacy_single_action_recovery = LegacySingleActionRecoveryAdapter(

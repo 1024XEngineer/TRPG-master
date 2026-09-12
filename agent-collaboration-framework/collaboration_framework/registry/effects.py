@@ -87,6 +87,7 @@ from collaboration_framework.contracts.validation import (
     ValidationResult,
 )
 from collaboration_framework.registry import predicates as predicate_registry
+from .resources import apply_resource, validate_resource
 
 if TYPE_CHECKING:  # annotations only — this package must not import engine.
     from collaboration_framework.engine.models import (
@@ -169,6 +170,7 @@ class EffectServices:
     settle_due_tasks: Callable[..., object]
     time_advance_block_reason: Callable[..., TimeAdvanceBlockReason | None]
     is_public_standard_state: Callable[..., bool]
+    roll_quantity: Callable[..., tuple[int, tuple[int, ...]]] | None = None
     new_event_id: Callable[[], str] = lambda: f"evt_{uuid4().hex}"
 
 
@@ -271,6 +273,8 @@ class ApplyContext:
     request_id: str
     actor_id: str
     offset: int
+    simulation: bool = False
+    action_request_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -323,12 +327,15 @@ class EffectRegistration:
     writes: tuple[FieldRef, ...] = ()
     must_not_exist: tuple[FieldRef, ...] = ()
     emits_event: bool = True
+    writes_current_actor_resource: bool = False
 
 
 # --------------------------------------------------------------------------- #
 # narrative_only
 # --------------------------------------------------------------------------- #
-def _apply_narrative_only(effect: NarrativeOnlyEffect, ctx: ApplyContext) -> ApplyResult:
+def _apply_narrative_only(
+    effect: NarrativeOnlyEffect, ctx: ApplyContext
+) -> ApplyResult:
     return ApplyResult(state=ctx.state)
 
 
@@ -428,7 +435,9 @@ def _visibility_knowledge(
     )
 
 
-def _apply_set_visibility(effect: SetVisibilityEffect, ctx: ApplyContext) -> ApplyResult:
+def _apply_set_visibility(
+    effect: SetVisibilityEffect, ctx: ApplyContext
+) -> ApplyResult:
     state = ctx.state
     overrides = dict(state.visibility_overrides)
     # Party scope must not be keyed by the acting actor, or no other
@@ -501,7 +510,9 @@ def _validate_enter_location(
         )
 
 
-def _apply_enter_location(effect: EnterLocationEffect, ctx: ApplyContext) -> ApplyResult:
+def _apply_enter_location(
+    effect: EnterLocationEffect, ctx: ApplyContext
+) -> ApplyResult:
     state = ctx.state
     # 队伍出发前站在哪，决定了谁算「同场景的随行者」（#516）。必须在写 scene_id
     # 之前取，之后这个事实就没有第二个地方还留着了。
@@ -682,7 +693,10 @@ def _validate_ensure_runtime_entity(
     runtime: EngineRuntimeSnapshot,
     services: EffectServices,
 ) -> None:
-    if effect.entity_id in vocab.entity_ids or effect.location_id not in vocab.location_ids:
+    if (
+        effect.entity_id in vocab.entity_ids
+        or effect.location_id not in vocab.location_ids
+    ):
         _reject_canon_shadow()
     if effect.entity_kind == "object" and (
         len(effect.entity_id) > 100 or len(effect.name) > 200
@@ -778,7 +792,11 @@ def resolve_entity_storage(
     `decide`/`decide_post_roll`.
     """
 
-    return "item_instance" if state.item_instances.get(entity_id) is not None else "generic_entity"
+    return (
+        "item_instance"
+        if state.item_instances.get(entity_id) is not None
+        else "generic_entity"
+    )
 
 
 def _mutate_generic_entity(
@@ -935,9 +953,15 @@ def _validate_move_entity(
         _reject_target_not_found()
     if effect.location_id is not None and effect.location_id not in vocab.location_ids:
         _reject_target_not_found()
-    if effect.holder_actor_id is not None and effect.holder_actor_id not in vocab.actor_ids:
+    if (
+        effect.holder_actor_id is not None
+        and effect.holder_actor_id not in vocab.actor_ids
+    ):
         _reject_target_not_found()
-    if effect.holder_actor_id is not None and effect.entity_id not in vocab.portable_item_ids:
+    if (
+        effect.holder_actor_id is not None
+        and effect.entity_id not in vocab.portable_item_ids
+    ):
         _reject_not_portable()
 
 
@@ -1080,7 +1104,9 @@ def _apply_change_entity_state(
 # --------------------------------------------------------------------------- #
 # consume_entity
 # --------------------------------------------------------------------------- #
-def _apply_consume_entity(effect: ConsumeEntityEffect, ctx: ApplyContext) -> ApplyResult:
+def _apply_consume_entity(
+    effect: ConsumeEntityEffect, ctx: ApplyContext
+) -> ApplyResult:
     state = ctx.state
     event_id: str | None = None
     if resolve_entity_storage(state, effect.entity_id) == "item_instance":
@@ -1123,7 +1149,11 @@ def _validate_advance_world_time(
     runtime: EngineRuntimeSnapshot,
     services: EffectServices,
 ) -> None:
-    world_time = vocab.world_time if vocab.world_time is not None else runtime.game_state.world_time
+    world_time = (
+        vocab.world_time
+        if vocab.world_time is not None
+        else runtime.game_state.world_time
+    )
     blocked = services.time_advance_block_reason(
         tuple(vocab.actor_ids),
         module_content=runtime.module_content,
@@ -1226,7 +1256,9 @@ def _apply_set_ending_availability(
     effect: SetEndingAvailabilityEffect,
     ctx: ApplyContext,
 ) -> ApplyResult:
-    state = ctx.state.model_copy(update={"ending_available": effect.available}, deep=True)
+    state = ctx.state.model_copy(
+        update={"ending_available": effect.available}, deep=True
+    )
     return ApplyResult(
         state=state,
         event_type="ending.availability_changed",
@@ -1267,6 +1299,13 @@ def _apply_commit_terminal_ending(
 # the table
 # --------------------------------------------------------------------------- #
 EFFECTS: dict[str, EffectRegistration] = {
+    "change_actor_resource": EffectRegistration(
+        authority=lambda effect, ctx: "L4",
+        apply=apply_resource,
+        validate=validate_resource,
+        target_ref=lambda effect: effect.resource_id,
+        writes_current_actor_resource=True,
+    ),
     "narrative_only": EffectRegistration(
         authority=lambda effect, ctx: "L0",
         apply=_apply_narrative_only,

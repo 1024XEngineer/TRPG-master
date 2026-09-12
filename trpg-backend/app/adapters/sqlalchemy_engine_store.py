@@ -30,6 +30,7 @@ from collaboration_framework.engine.rules_v3 import (
     agenda_claim_key,
     agenda_is_claimable,
 )
+from pydantic import JsonValue
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -41,6 +42,7 @@ from app.models.engine import (
     ActionExecution,
     AdjudicationCommandExecution,
     CheckRunRecord,
+    EngineRandomness,
     GameEvent,
     GameSession,
     ModuleVersion,
@@ -84,6 +86,34 @@ class SqlAlchemyEngineStore(EngineStore):
         """Application-only access for isolated legacy recovery reads."""
 
         return self._session_factory
+
+    async def prepare_randomness(
+        self,
+        *,
+        room_id: str,
+        operation_key: str,
+        create: Callable[[], dict[str, JsonValue]],
+    ) -> tuple[dict[str, JsonValue], bool]:
+        key = (room_id, operation_key)
+        async with self._session_factory() as session:
+            existing = await session.get(EngineRandomness, key)
+            if existing is not None:
+                return deepcopy(existing.snapshot_json), False
+            snapshot = create()
+            session.add(
+                EngineRandomness(
+                    room_id=room_id, operation_key=operation_key, snapshot_json=snapshot
+                )
+            )
+            try:
+                await session.commit()
+                return snapshot, True
+            except IntegrityError:
+                await session.rollback()
+                existing = await session.get(EngineRandomness, key)
+                if existing is None:
+                    raise
+                return deepcopy(existing.snapshot_json), False
 
     @asynccontextmanager
     async def transaction(self, room_id: str) -> AsyncIterator[EngineTransaction]:

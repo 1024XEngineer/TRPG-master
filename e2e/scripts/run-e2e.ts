@@ -68,6 +68,7 @@ const backendEnv = {
   ].filter(Boolean).join(delimiter),
   APP_ENV: 'test',
   TEST_FIXED_DICE_ROLL: '1',
+  ...(process.env.E2E_DICE_BY_SIDES ? { TEST_DICE_BY_SIDES: process.env.E2E_DICE_BY_SIDES } : {}),
   // 真实模型下不注入这两个变量，让后端按 .env 解析 provider 与 key：环境变量
   // 优先级高于 .env，注入空 Key 会直接卡在 Settings 校验。
   ...(USE_REAL_MODEL ? {} : fakeModelEnv),

@@ -8,7 +8,7 @@ commits them without interpreting player language.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal, NoReturn
 from uuid import uuid4
 
@@ -20,6 +20,7 @@ from collaboration_framework.contracts import (
     ActionEffect,
     ActionTarget,
     AdjudicationExecution,
+    AdjudicatedCheckStep,
     AdjudicationRecovery,
     AdjudicationStatusView,
     AdvanceWorldTimeEffect,
@@ -51,9 +52,11 @@ from collaboration_framework.contracts.validation import (
 )
 from collaboration_framework.registry import effects as effect_registry
 from collaboration_framework.registry import rulesets as ruleset_registry
+from collaboration_framework.registry.check_outcomes import CheckOutcomeContext
 
 from .agenda_execution import RuleSettlement, SettlementResult
 from .dice import DiceRoller, coc7_success_level, passes_difficulty
+from .command_randomness import ACTIVE_ACTION_ID, ACTIVE_DICE, recoverable_dice
 from .models import (
     AgendaParentContinuation,
     AgendaSource,
@@ -663,6 +666,7 @@ class AdjudicationEngineService:
             scene_consent_player_ids=tuple(sorted(consent_player_ids)),
         )
 
+    @recoverable_dice
     async def _submit(
         self,
         request: SubmitAdjudicationRequest,
@@ -867,6 +871,7 @@ class AdjudicationEngineService:
             )
             return execution
 
+    @recoverable_dice
     async def decide(self, request: CheckDecisionRequest) -> AdjudicationExecution:
         async with self._store.transaction(request.room_id) as transaction:
             runtime = await transaction.load_runtime()
@@ -1113,6 +1118,7 @@ class AdjudicationEngineService:
             )
             return execution
 
+    @recoverable_dice
     async def decide_post_roll(
         self,
         request: PostRollDecisionRequest,
@@ -1837,8 +1843,8 @@ class AdjudicationEngineService:
             # skills/attributes 中的一项。作者态主动规则仍用统一的
             # SkillCheckCandidate 形状表达它；只在解析目标值时接回资源，避免
             # 《追书人》的幸运检定被误判成角色没有这个“技能”。
-            if value is None and candidate.skill_id == "luck":
-                value = actor.resources.luck
+            if value is None and candidate.skill_id in {"luck", "san"}:
+                value = getattr(actor.resources, candidate.skill_id)
             if (
                 not isinstance(value, int)
                 or isinstance(value, bool)
@@ -1895,7 +1901,7 @@ class AdjudicationEngineService:
         effect_registry.validate(effect, vocabulary, runtime, _EFFECT_SERVICES)
 
     def _roll(self, target_value: int, difficulty: str) -> CheckRoll:
-        value = self._dice.percentile()
+        value = (ACTIVE_DICE.get() or self._dice).percentile()
         level = coc7_success_level(target_value, value)
         passed = passes_difficulty(level, difficulty)
         degree: CheckDegree = {
@@ -2193,6 +2199,13 @@ class AdjudicationEngineService:
         同一件事。
         """
 
+        runtime, prefix_events = self._apply_check_outcome(
+            runtime,
+            request_id=request_id,
+            decision=decision,
+            check_run=check_run,
+            prefix_events=prefix_events,
+        )
         origin = decision.rule_origin
         if origin is not None and origin.resumes_agenda:
             return self._resume_rule_check(
@@ -2211,6 +2224,94 @@ class AdjudicationEngineService:
             player_id=decision.player_id,
             prefix_events=prefix_events,
             check_run=check_run,
+        )
+
+    def _apply_check_outcome(
+        self,
+        runtime: EngineRuntimeSnapshot,
+        *,
+        request_id: str,
+        decision: PendingCheckDecision,
+        check_run: CheckRun,
+        prefix_events: tuple[DomainEvent, ...],
+    ) -> tuple[EngineRuntimeSnapshot, tuple[DomainEvent, ...]]:
+        origin = decision.rule_origin
+        if origin is None:
+            return runtime, prefix_events
+        if (
+            origin.module_version is not None
+            and origin.module_version != runtime.module_version
+        ):
+            raise ContractError("RULE_CHECK_VERSION_MISMATCH")
+        spec = self._rule_check_spec(runtime, origin)
+        if spec is None:
+            rule = next(
+                (
+                    item
+                    for item in runtime.module_content.rules
+                    if item.id == origin.rule_id
+                ),
+                None,
+            )
+            step = (
+                next(
+                    (
+                        item
+                        for item in rule.execution.steps
+                        if item.id == origin.step_id
+                    ),
+                    None,
+                )
+                if rule
+                else None
+            )
+            if isinstance(step, AdjudicatedCheckStep):
+                return runtime, prefix_events
+            raise ContractError("RULE_CHECK_SOURCE_MISSING")
+        handler = ruleset_registry.check_outcome_handler_for(
+            runtime.module_content.world_ref,
+            spec.profile_id,
+        )
+        if handler is None:
+            return runtime, prefix_events
+        outcome = handler(
+            CheckOutcomeContext(
+                check=spec, result=check_run.final_result or check_run.roll
+            )
+        )
+        state, resource_events = self._apply_effect(
+            runtime,
+            runtime.game_state,
+            outcome.effect,
+            room_id=runtime.game_state.room_id,
+            request_id=request_id,
+            actor_id=decision.actor_id,
+            offset=len(prefix_events) + 1,
+        )
+        resource_event = resource_events[0]
+        fact = self._event_from_state(
+            state,
+            room_id=state.room_id,
+            request_id=request_id,
+            actor_id=decision.actor_id,
+            offset=len(prefix_events) + len(resource_events) + 1,
+            event_type=outcome.event_type,
+            visibility="hidden",
+            payload={
+                **resource_event.payload,
+                "outcome_id": check_run.check_id,
+                "resource_event_id": resource_event.event_id,
+                "check_id": check_run.check_id,
+                "rule_origin": origin.to_json_dict(),
+                "module_id": runtime.module_id,
+                "module_version": runtime.module_version,
+                "degree": (check_run.final_result or check_run.roll).degree,
+            },
+        )
+        return runtime.model_copy(update={"game_state": state}), (
+            *prefix_events,
+            *resource_events,
+            fact,
         )
 
     def _resume_rule_check(
@@ -2721,6 +2822,7 @@ class AdjudicationEngineService:
                         services=_EFFECT_SERVICES,
                         room_id=simulated_state.room_id,
                         request_id="validation",
+                        simulation=True,
                         actor_id=actor_id,
                         offset=1,
                     ),
@@ -2929,16 +3031,24 @@ class AdjudicationEngineService:
                 actor_id=actor_id,
                 offset=offset,
             )
+        if effect_registry.registration_for(effect).writes_current_actor_resource:
+            actor = state.actors.get(actor_id)
+            if actor is None or getattr(actor.resources, effect.resource_id) is None:
+                raise ContractError("ACTOR_RESOURCE_UNAVAILABLE")
         result = effect_registry.apply(
             effect,
             effect_registry.ApplyContext(
                 runtime=runtime,
                 state=state,
-                services=_EFFECT_SERVICES,
+                services=replace(
+                    _EFFECT_SERVICES,
+                    roll_quantity=(ACTIVE_DICE.get() or self._dice).quantity,
+                ),
                 room_id=room_id,
                 request_id=request_id,
                 actor_id=actor_id,
                 offset=offset,
+                action_request_id=ACTIVE_ACTION_ID.get(),
             ),
         )
         if result.event_type is None:

@@ -2128,7 +2128,7 @@ class RuleOwnedCheckTests(unittest.IsolatedAsyncioTestCase):
         for roll, expected_outcome in ((5, "success"), (81, "failure")):
             store, engine, rules, published, execution = await shout(
                 request_id=f"call-figure-{roll}",
-                rolls=[roll],
+                rolls=[roll, 4],
             )
             self.assertIn("call_to_figure", published)
             self.assertNotIn("talk_to_figure", published)

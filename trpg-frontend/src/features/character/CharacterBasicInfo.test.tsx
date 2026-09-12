@@ -51,6 +51,16 @@ describe('CharacterBasicInfo', () => {
     )
   })
 
+  it('updates SAN after settlement and preserves zero across rerenders', () => {
+    const view = (san: number) => <CharacterBasicInfo character={character()} attributes={ATTRIBUTES} liveResources={{ san }} />
+    const { rerender } = render(view(60))
+    expect(screen.getByTestId('derived-stat-san')).toHaveTextContent('60')
+    rerender(view(56))
+    expect(screen.getByTestId('derived-stat-san')).toHaveTextContent('56')
+    rerender(view(0))
+    expect(screen.getByTestId('derived-stat-san')).toHaveTextContent(/^0$/)
+  })
+
   // 建卡完成页在开局前渲染同一个组件，那时没有 PlayerView 可读。
   it('falls back to the creation snapshot when no live resources are supplied', () => {
     render(<CharacterBasicInfo character={character()} attributes={ATTRIBUTES} />)

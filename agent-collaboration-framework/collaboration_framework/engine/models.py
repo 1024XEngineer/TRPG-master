@@ -69,6 +69,9 @@ class ActorCondition(ContractModel):
     removal_event_id: str | None = Field(default=None, min_length=1)
 
 
+from collaboration_framework.contracts.sanity import SanityLedger
+
+
 class ActorState(ContractModel):
     player_id: str = Field(min_length=1)
     name: str = Field(min_length=1)
@@ -78,6 +81,7 @@ class ActorState(ContractModel):
     resources: ActorResources = Field(default_factory=ActorResources)
     conditions: tuple[str, ...] = ()
     condition_states: tuple[ActorCondition, ...] = ()
+    sanity: SanityLedger | None = None
 
     @model_validator(mode="after")
     def normalize_conditions(self) -> ActorState:
@@ -504,6 +508,7 @@ class EngineRuntimeSnapshot(ContractModel):
     module_id: str = Field(min_length=1)
     module_version: str = Field(min_length=1)
     module_content: ModuleContentV3
+    event_history: tuple[DomainEvent, ...] = ()
     game_state: GameState
     revision: str = Field(min_length=1)
 

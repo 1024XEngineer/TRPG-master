@@ -275,6 +275,7 @@ class ApplyContext:
     offset: int
     simulation: bool = False
     action_request_id: str | None = None
+    resource_decrease_limit: int | None = None
 
 
 @dataclass(frozen=True)

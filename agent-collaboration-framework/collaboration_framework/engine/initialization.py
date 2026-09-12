@@ -16,6 +16,7 @@ from collaboration_framework.contracts import (
 )
 
 from .models import ActorState, GameState, WorldTimePoint, WorldTimeState
+from collaboration_framework.contracts.sanity import SanityLedger
 
 
 def create_initial_game_state(
@@ -39,7 +40,7 @@ def create_initial_game_state(
     return GameState(
         room_id=room_id,
         scene_id=initial.start_location_id,
-        actors=dict(actors),
+        actors={key: actor.model_copy(update={"sanity": actor.sanity or SanityLedger()}) for key, actor in actors.items()},
         entities=entities,
         world_time=world_time or _world_time_for(module_content),
         discovered_facts=tuple(sorted(initial.revealed_information_ids)),

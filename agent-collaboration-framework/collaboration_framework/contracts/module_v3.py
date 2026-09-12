@@ -974,6 +974,9 @@ class InitialStateSpec(ContractModel):
 # --------------------------------------------------------------------------- #
 
 
+from .sanity import SanitySource
+
+
 class ModuleContentV3(ContractModel):
     """v3 模组文件（#212 §3.1）。
 
@@ -1006,6 +1009,7 @@ class ModuleContentV3(ContractModel):
     locations: tuple[LocationSpecV3, ...] = Field(min_length=1)
     location_edges: tuple[LocationEdgeSpec, ...] = ()
     rules: tuple[RuleSpecV3, ...] = ()
+    sanity_sources: tuple[SanitySource, ...] = Field(default=(), exclude_if=lambda value: not value)
 
     core_resolution: CoreResolutionSpec = Field(default_factory=CoreResolutionSpec)
     ending_policy: EndingPolicySpec = Field(default_factory=EndingPolicySpec)

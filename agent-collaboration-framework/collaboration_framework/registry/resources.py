@@ -48,7 +48,10 @@ def apply_resource(
             raise ContractError("RESOURCE_DICE_UNAVAILABLE")
         amount, rolls = ctx.services.roll_quantity(effect.quantity)
     requested_delta = amount if effect.direction == "increase" else -amount
-    after = before + requested_delta
+    effective_delta = requested_delta
+    if requested_delta < 0 and ctx.resource_decrease_limit is not None:
+        effective_delta = -min(amount, ctx.resource_decrease_limit)
+    after = before + effective_delta
     minimum = RESOURCES[effect.resource_id].minimum
     if minimum is not None:
         after = max(minimum, after)

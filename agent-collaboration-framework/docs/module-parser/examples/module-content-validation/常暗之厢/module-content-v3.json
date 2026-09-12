@@ -4797,7 +4797,8 @@
               "initiation_kind": "passive_rule",
               "parameters": {
                 "failure_loss": "1d4",
-                "success_loss": "1"
+                "success_loss": "1",
+                "sanity_source": "constant_darkness.rear_bodies"
               },
               "profile_id": "coc7.sanity"
             },
@@ -4872,7 +4873,8 @@
               "initiation_kind": "passive_rule",
               "parameters": {
                 "failure_loss": "1d6",
-                "success_loss": "1"
+                "success_loss": "1",
+                "sanity_source": "constant_darkness.rear_maw"
               },
               "profile_id": "coc7.sanity"
             },
@@ -4947,7 +4949,7 @@
       "point_id": "hour_00"
     }
   },
-  "version": "3.0.1",
+  "version": "3.0.2",
   "world_profile": {
     "era": "2013 年",
     "forbidden_content": [
@@ -4962,5 +4964,13 @@
     "technology_level": "2013 年民用技术；手机可用但无信号，列车为常规电车",
     "tone": "密闭、紧迫、血腥而克制的超自然追逐恐怖"
   },
-  "world_ref": "coc-7e"
+  "world_ref": "coc-7e",
+  "sanity_sources": [
+    {
+      "id": "constant_darkness.rear_bodies"
+    },
+    {
+      "id": "constant_darkness.rear_maw"
+    }
+  ]
 }

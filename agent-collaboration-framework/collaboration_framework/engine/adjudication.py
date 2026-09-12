@@ -2276,7 +2276,8 @@ class AdjudicationEngineService:
             return runtime, prefix_events
         outcome = handler(
             CheckOutcomeContext(
-                check=spec, result=check_run.final_result or check_run.roll
+                check=spec, result=check_run.final_result or check_run.roll,
+                runtime=runtime, actor_id=decision.actor_id, origin=origin
             )
         )
         state, resource_events = self._apply_effect(
@@ -2287,6 +2288,7 @@ class AdjudicationEngineService:
             request_id=request_id,
             actor_id=decision.actor_id,
             offset=len(prefix_events) + 1,
+            resource_decrease_limit=outcome.decrease_limit,
         )
         resource_event = resource_events[0]
         fact = self._event_from_state(
@@ -2299,6 +2301,7 @@ class AdjudicationEngineService:
             visibility="hidden",
             payload={
                 **resource_event.payload,
+                **outcome.audit,
                 "outcome_id": check_run.check_id,
                 "resource_event_id": resource_event.event_id,
                 "check_id": check_run.check_id,
@@ -2308,6 +2311,8 @@ class AdjudicationEngineService:
                 "degree": (check_run.final_result or check_run.roll).degree,
             },
         )
+        if outcome.record is not None:
+            state = outcome.record(state, fact)
         return runtime.model_copy(update={"game_state": state}), (
             *prefix_events,
             *resource_events,
@@ -3002,6 +3007,7 @@ class AdjudicationEngineService:
         request_id: str,
         actor_id: str,
         offset: int,
+        resource_decrease_limit: int | None = None,
     ) -> tuple[GameState, tuple[DomainEvent, ...]]:
         """Execute one already-validated effect.
 
@@ -3049,6 +3055,7 @@ class AdjudicationEngineService:
                 actor_id=actor_id,
                 offset=offset,
                 action_request_id=ACTIVE_ACTION_ID.get(),
+                resource_decrease_limit=resource_decrease_limit,
             ),
         )
         if result.event_type is None:

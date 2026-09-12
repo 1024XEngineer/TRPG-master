@@ -116,6 +116,17 @@ def _semantic_issues(content: ModuleContentV3) -> list[ValidationIssue]:
                 )
             )
 
+    from collaboration_framework.registry.sanity_sources import resolve_source
+    from collaboration_framework.contracts import ContractError
+    for ri, rule in enumerate(content.rules):
+        for si, step in enumerate(rule.execution.steps):
+            check = getattr(step, "check", None)
+            if getattr(check, "profile_id", None) == "coc7.sanity":
+                try:
+                    resolve_source(content, check, rule.id, step.id)
+                except ContractError as error:
+                    issues.append(ValidationIssue(severity="error", code=str(error), path=f"rules.{ri}.execution.steps.{si}.check.parameters", message=str(error)))
+
     # --- knowledge goals -------------------------------------------------- #
     for index, goal in enumerate(content.knowledge_goals):
         for target in goal.target_information_ids:

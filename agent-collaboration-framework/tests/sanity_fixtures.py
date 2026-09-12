@@ -24,6 +24,10 @@ from tests.test_projection_v3 import ACTOR, PLAYER, ROOM, game_state, module
 
 def sandbox_content(*, parameters=None, effects=None):
     content = module()
+    if parameters and ("habit_cap" in parameters or "sanity_source" in parameters):
+        from collaboration_framework.contracts.sanity import SanitySource
+        parameters = {**parameters, "sanity_source": "test.creature"}
+        content = content.model_copy(update={"sanity_sources": (SanitySource(id="test.creature", habit_cap=parameters.get("habit_cap")),)})
     rule = next(
         r for r in content.rules if r.id == "first_sight_of_douglas"
     ).to_json_dict()

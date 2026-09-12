@@ -1,7 +1,7 @@
 {
   "content_schema_version": 3,
   "module_id": "silver-lock",
-  "version": "3.0.4",
+  "version": "3.0.5",
   "opening_key_facts": [
     "调查员在陌生房间昏沉醒来。",
     "天花板上的旧黄灯管闪着昏暗的光。",
@@ -3001,7 +3001,8 @@
               "initiation_kind": "passive_rule",
               "parameters": {
                 "success_loss": "0",
-                "failure_loss": "1d6"
+                "failure_loss": "1d6",
+                "sanity_source": "coc7.rat_thing"
               }
             },
             "result_routes": {
@@ -3078,7 +3079,8 @@
               "initiation_kind": "passive_rule",
               "parameters": {
                 "success_loss": "1",
-                "failure_loss": "1d3"
+                "failure_loss": "1d3",
+                "sanity_source": "silver_lock.door_ghost"
               }
             },
             "result_routes": {
@@ -3376,5 +3378,14 @@
       "虚构调查员死亡或 HP/SAN 变化",
       "生成速写本固定清单以外的物品"
     ]
-  }
+  },
+  "sanity_sources": [
+    {
+      "id": "coc7.rat_thing",
+      "habit_cap": 6
+    },
+    {
+      "id": "silver_lock.door_ghost"
+    }
+  ]
 }

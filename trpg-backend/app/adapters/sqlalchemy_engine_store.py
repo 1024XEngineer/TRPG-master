@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from datetime import UTC, datetime
+from typing import Literal, cast
 
 from collaboration_framework.contracts import (
     ActionRequest,
@@ -429,7 +430,32 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
                 )
             await self._session.refresh(game_session)
 
+        history = ()
+        if any(actor.sanity is None for actor in game_state.actors.values()):
+            rows = (
+                await self._session.scalars(
+                    select(GameEvent)
+                    .where(GameEvent.room_id == self._room_id)
+                    .order_by(GameEvent.sequence)
+                )
+            ).all()
+            history = tuple(
+                DomainEvent(
+                    event_id=row.event_id,
+                    sequence=row.sequence,
+                    type=row.type,
+                    room_id=row.room_id,
+                    actor_id=row.actor_id,
+                    client_action_id=row.client_action_id,
+                    cause=row.cause,
+                    visibility=cast(Literal["public", "private", "hidden"], row.visibility),
+                    payload=row.payload,
+                )
+                for row in rows
+            )
+
         return EngineRuntimeSnapshot(
+            event_history=history,
             module_id=module_version.module_id,
             module_version=module_version.version,
             module_content=module_content,

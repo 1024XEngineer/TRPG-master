@@ -51,7 +51,7 @@ COC7_CHECK_PROFILES: Mapping[str, CheckProfileRegistration] = MappingProxyType(
             method_summary="眼前的景象直接冲击神智",
             player_safe_reason="规则要求此刻进行一次理智检定",
             recognised_parameters=frozenset(
-                {"success_loss", "failure_loss", "habit_cap"}
+                {"success_loss", "failure_loss", "habit_cap", "sanity_source"}
             ),
         ),
     }

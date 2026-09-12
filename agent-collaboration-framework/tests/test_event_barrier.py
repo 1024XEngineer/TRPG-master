@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from collaboration_framework.contracts.sanity import SanityLedger
+
 import json
 import unittest
 
@@ -96,6 +98,7 @@ def noon_state() -> GameState:
                 source_character_id="character",
                 source_character_version=1,
                 resources=ActorResources(san=55, luck=50),
+                sanity=SanityLedger(),
             )
         },
         entities={"case_tracker": {"night_seen": False}},
@@ -254,6 +257,7 @@ def two_rules_state() -> GameState:
                 source_character_id="character",
                 source_character_version=1,
                 resources=ActorResources(san=55, luck=50),
+                sanity=SanityLedger(),
             )
         },
         entities={

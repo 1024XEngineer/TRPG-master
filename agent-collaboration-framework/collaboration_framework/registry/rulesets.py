@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
+from .sanity_ledger import development_phase, acknowledge_history
 from .check_profiles import COC7_CHECK_PROFILES, CheckProfileRegistration
 from .check_outcomes import CheckOutcomeHandler, coc7_sanity_outcome
 
@@ -314,7 +315,7 @@ COC7_ADAPTER = RulesetAdapter(
     world_ref="coc-7e",
     check_profiles=COC7_CHECK_PROFILES,
     check_outcome_handlers={"coc7.sanity": coc7_sanity_outcome},
-    world_actions={"coc7.apply_condition": _coc7_apply_condition},
+    world_actions={"coc7.apply_condition": _coc7_apply_condition, "coc7.investigator_development": development_phase, "coc7.acknowledge_sanity_history": acknowledge_history},
 )
 
 DEFAULT_RULESET_REGISTRY = RulesetAdapterRegistry((COC7_ADAPTER,))

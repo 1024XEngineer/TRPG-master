@@ -296,6 +296,7 @@ class _InMemoryEngineTransaction(EngineTransaction):
             module_content=module.model_copy(deep=True),
             game_state=data.game_state.model_copy(deep=True),
             revision=data.revision,
+            event_history=data.domain_events if any(a.sanity is None for a in data.game_state.actors.values()) else (),
         )
 
     async def find_completed_action(

@@ -74,6 +74,18 @@ describe('CharacterBasicInfo', () => {
     expect(screen.queryByLabelText('当前状态')).not.toBeInTheDocument()
   })
 
+  it('shows a due recovery check without implying insanity has expired', () => {
+    const view = (status: string, hours?: number) => <CharacterBasicInfo character={character()} attributes={ATTRIBUTES}
+      liveConditions={[{ id: 'indefinite_insanity', name: '不定性疯狂', recovery_status: status, review_after_hours: hours }]} />
+    const { rerender } = render(view('in_treatment', 24))
+    expect(screen.getByLabelText('当前状态')).toHaveTextContent('24 个游戏小时后可复查')
+    rerender(view('review_due', 0))
+    expect(screen.getByLabelText('当前状态')).toHaveTextContent('不定性疯狂 · 可进行恢复检查')
+    expect(screen.getByLabelText('当前状态')).not.toHaveTextContent('剩余 0')
+    rerender(view('interrupted'))
+    expect(screen.getByLabelText('当前状态')).toHaveTextContent('治疗已中断')
+  })
+
   // 建卡完成页在开局前渲染同一个组件，那时没有 PlayerView 可读。
   it('falls back to the creation snapshot when no live resources are supplied', () => {
     render(<CharacterBasicInfo character={character()} attributes={ATTRIBUTES} />)

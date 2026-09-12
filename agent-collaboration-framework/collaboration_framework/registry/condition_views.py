@@ -31,7 +31,23 @@ def condition_views(actor, absolute_hour):
             if c.expiry and c.expiry.absolute_hour is not None
             else None,
             bout_type=BOUT_NAMES.get(c.details.get("bout_type")),
+            **recovery_view(actor, c.condition_id, absolute_hour),
         )
         for c in actor.condition_states
         if c.status == "active"
     )
+
+
+def recovery_view(actor, condition_id, absolute_hour):
+    if condition_id != "indefinite_insanity":
+        return {}
+    course = actor.sanity.treatment if actor.sanity else None
+    if course is None or course.status == "recovered":
+        return {"recovery_status": "care_required"}
+    if course.status == "interrupted":
+        return {"recovery_status": "interrupted"}
+    remaining = max(0, course.due_absolute_hour - absolute_hour)
+    return {
+        "recovery_status": "review_due" if remaining == 0 else "in_treatment",
+        "review_after_hours": remaining,
+    }

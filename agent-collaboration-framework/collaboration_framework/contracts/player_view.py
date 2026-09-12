@@ -42,6 +42,10 @@ class ActorConditionView(ContractModel):
     name: str
     remaining_hours: int | None = Field(default=None, ge=0)
     bout_type: str | None = None
+    recovery_status: (
+        Literal["care_required", "in_treatment", "review_due", "interrupted"] | None
+    ) = None
+    review_after_hours: int | None = Field(default=None, ge=0)
 
 
 class ProjectionSelfActor(ContractModel):

@@ -51,6 +51,8 @@ def apply_resource(
     effective_delta = requested_delta
     if requested_delta < 0 and ctx.resource_decrease_limit is not None:
         effective_delta = -min(amount, ctx.resource_decrease_limit)
+    if requested_delta > 0 and ctx.resource_increase_limit is not None:
+        effective_delta = min(amount, ctx.resource_increase_limit)
     after = before + effective_delta
     minimum = RESOURCES[effect.resource_id].minimum
     if minimum is not None:

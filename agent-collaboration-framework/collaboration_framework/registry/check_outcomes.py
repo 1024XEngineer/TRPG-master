@@ -27,6 +27,19 @@ from collaboration_framework.contracts.resources import (
 
 
 class OutcomeServices(Protocol):
+    def resource(
+        self,
+        state: GameState,
+        effect: ChangeActorResourceEffect,
+        *,
+        increase_limit: int | None = None,
+    ) -> tuple[GameState, DomainEvent]: ...
+    def task(
+        self, state: GameState, *, key: str, absolute_hour: int
+    ) -> tuple[GameState, str]: ...
+    def cancel_task(
+        self, state: GameState, *, task_id: str, reason: str
+    ) -> GameState: ...
     def quantity(self, quantity: DiceQuantity) -> tuple[int, tuple[int, ...]]: ...
     def condition(
         self,
@@ -130,7 +143,11 @@ def coc7_sanity_outcome(context: CheckOutcomeContext) -> CheckOutcome:
         context.origin.rule_id,
         context.origin.step_id,
     )
-    ledger = ledger_for(context.runtime, context.actor_id)
+    from .sanity_periods import ensure_window
+
+    ledger = ensure_window(
+        context.runtime, context.actor_id, ledger_for(context.runtime, context.actor_id)
+    )
     cap = source.habit_cap if source else None
     if cap is not None and ledger.coverage == "legacy_gap":
         raise ContractError(
@@ -148,6 +165,8 @@ def coc7_sanity_outcome(context: CheckOutcomeContext) -> CheckOutcome:
         decrease_limit=limit,
         audit={
             "sanity_source": source.id if source else None,
+            "sanity_window_id": ledger.window.id if ledger.window else None,
+            "window_coverage": ledger.window.coverage if ledger.window else None,
             "habit_cap": cap,
             "source_remaining": limit,
             "history_coverage": ledger.coverage,

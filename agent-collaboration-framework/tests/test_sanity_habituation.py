@@ -256,3 +256,49 @@ async def test_unproven_old_history_requires_an_explicit_baseline():
     assert not any(
         e.type == "actor.sanity_loss" for e in store.inspect_domain_events(ROOM)
     )
+
+
+async def test_explicit_history_confirmation_executes_then_preserves_the_declared_cap():
+    from collaboration_framework.engine import InMemoryEngineStore
+    from tests.sanity_fixtures import with_world_actions, invoke_world_action
+
+    content = with_world_actions(
+        sandbox_content(
+            parameters={"success_loss": "0", "failure_loss": "1d6", "habit_cap": 6}
+        ),
+        {
+            "confirm": (
+                "coc7.acknowledge_sanity_history",
+                {
+                    "cutover_id": "known-session-history",
+                    "reason": "Keeper supplied prior loss",
+                    "habituation": {"test.creature": 5},
+                },
+            )
+        },
+    )
+    state = (
+        make_store(content)
+        .inspect_state(ROOM)
+        .model_copy(update={"event_sequence": 30})
+    )
+    state.actors[ACTOR] = state.actors[ACTOR].model_copy(update={"sanity": None})
+    store = InMemoryEngineStore()
+    store.register_room(module_content=content, initial_state=state)
+    result = await invoke_world_action(store, "confirm")
+    assert result.status == "resolved"
+    await settle(store, dice=(4,), request_id="after-confirmation")
+    actor = store.inspect_state(ROOM).actors[ACTOR]
+    assert actor.resources.san == 59
+    assert actor.sanity.habituation == {"test.creature": 6}
+    await invoke_world_action(store, "confirm", tag="repeat-confirmation")
+    assert store.inspect_state(ROOM).actors[ACTOR].sanity.habituation == {
+        "test.creature": 6
+    }
+    assert (
+        sum(
+            e.type == "actor.sanity_history_confirmed"
+            for e in store.inspect_domain_events(ROOM)
+        )
+        == 1
+    )

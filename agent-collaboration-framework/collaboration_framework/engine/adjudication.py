@@ -56,7 +56,11 @@ from collaboration_framework.registry.check_outcomes import CheckOutcomeContext
 
 from .agenda_execution import RuleSettlement, SettlementResult
 from .dice import DiceRoller, coc7_success_level, passes_difficulty
-from .outcome_effects import OutcomeEffectSession, expire_conditions, bind_authored_expiries
+from .outcome_effects import (
+    OutcomeEffectSession,
+    expire_conditions,
+    bind_authored_expiries,
+)
 from .models import CheckConsequenceParent
 from .command_randomness import ACTIVE_ACTION_ID, ACTIVE_DICE, recoverable_dice
 from .models import (
@@ -708,11 +712,20 @@ class AdjudicationEngineService:
                 request.adjudication.source_revision,
                 runtime.revision,
             )
-            active_action = await transaction.find_active_action_for_player(request.player_id)
+            active_action = await transaction.find_active_action_for_player(
+                request.player_id
+            )
             if active_action is not None:
-                active_check = await transaction.find_pending_check_by_action(active_action)
-                if active_check is not None and active_check.consequence_parent is not None:
-                    raise ContractError("CHECK_CONSEQUENCE_PENDING: finish the required follow-up check first")
+                active_check = await transaction.find_pending_check_by_action(
+                    active_action
+                )
+                if (
+                    active_check is not None
+                    and active_check.consequence_parent is not None
+                ):
+                    raise ContractError(
+                        "CHECK_CONSEQUENCE_PENDING: finish the required follow-up check first"
+                    )
             allow_party_time_advance = False
             allow_party_scene_transition = False
             if consent_player_ids is not None:
@@ -985,7 +998,9 @@ class AdjudicationEngineService:
                     player_safe_reason="所选检定方式不在当前可用列表中",
                 )
             roll = self._roll(option.target_value, option.difficulty)
-            rule_check = decision.consequence_spec or self._rule_check_spec(runtime, decision.rule_origin)
+            rule_check = decision.consequence_spec or self._rule_check_spec(
+                runtime, decision.rule_origin
+            )
             post_options = self._post_roll_options(
                 runtime,
                 actor_id=decision.actor_id,
@@ -1085,7 +1100,13 @@ class AdjudicationEngineService:
                 final,
                 request_id=request.request_id,
                 action_request_id=decision.action_request_id,
-                outcome="success" if (final.parent_passed if final.parent_passed is not None else roll.passed) else "failure",
+                outcome="success"
+                if (
+                    final.parent_passed
+                    if final.parent_passed is not None
+                    else roll.passed
+                )
+                else "failure",
                 player_id=decision.player_id,
                 actor_id=decision.actor_id,
                 check_run=self._run_view(check_run),
@@ -1307,7 +1328,13 @@ class AdjudicationEngineService:
                 final,
                 request_id=request.request_id,
                 action_request_id=check_run.action_request_id,
-                outcome="success" if (final.parent_passed if final.parent_passed is not None else final_roll.passed) else "failure",
+                outcome="success"
+                if (
+                    final.parent_passed
+                    if final.parent_passed is not None
+                    else final_roll.passed
+                )
+                else "failure",
                 player_id=decision.player_id,
                 actor_id=decision.actor_id,
                 check_run=self._run_view(resolved_run),
@@ -1318,7 +1345,11 @@ class AdjudicationEngineService:
                 if rule_effects_excluded
                 else (
                     check_run.adjudication.success_effects
-                    if (final.parent_passed if final.parent_passed is not None else final_roll.passed)
+                    if (
+                        final.parent_passed
+                        if final.parent_passed is not None
+                        else final_roll.passed
+                    )
                     else check_run.adjudication.failure_effects
                 )
             )
@@ -2187,61 +2218,128 @@ class AdjudicationEngineService:
         )
 
     def _settle_check(
-        self, runtime: EngineRuntimeSnapshot, *, request_id: str,
-        decision: PendingCheckDecision, check_run: CheckRun, passed: bool,
+        self,
+        runtime: EngineRuntimeSnapshot,
+        *,
+        request_id: str,
+        decision: PendingCheckDecision,
+        check_run: CheckRun,
+        passed: bool,
         prefix_events: tuple[DomainEvent, ...],
     ) -> ActionFinalization:
         runtime, prefix_events, followup = self._apply_check_outcome(
-            runtime, request_id=request_id, decision=decision,
-            check_run=check_run, prefix_events=prefix_events)
+            runtime,
+            request_id=request_id,
+            decision=decision,
+            check_run=check_run,
+            prefix_events=prefix_events,
+        )
         if followup is not None:
-            return self._defer_check_outcome(runtime, request_id=request_id,
-                decision=decision, check_run=check_run, events=prefix_events, spec=followup)
+            return self._defer_check_outcome(
+                runtime,
+                request_id=request_id,
+                decision=decision,
+                check_run=check_run,
+                events=prefix_events,
+                spec=followup,
+            )
         parent = decision.consequence_parent
         carried = ()
         if parent is not None:
-            prefix_events = (*prefix_events, self._check_resolved_event(runtime.game_state,
-                runtime=runtime, request_id=request_id, actor_id=decision.actor_id,
-                check_run=check_run, passed=passed, offset=len(prefix_events)+1))
+            prefix_events = (
+                *prefix_events,
+                self._check_resolved_event(
+                    runtime.game_state,
+                    runtime=runtime,
+                    request_id=request_id,
+                    actor_id=decision.actor_id,
+                    check_run=check_run,
+                    passed=passed,
+                    offset=len(prefix_events) + 1,
+                ),
+            )
             decision, check_run = parent.decision, parent.check
             passed = (check_run.final_result or check_run.roll).passed
             carried = parent.carried_events
         origin = decision.rule_origin
         if origin is not None and origin.resumes_agenda:
-            final = self._resume_rule_check(runtime, request_id=request_id, decision=decision,
-                check_run=check_run, passed=passed, prefix_events=prefix_events)
+            final = self._resume_rule_check(
+                runtime,
+                request_id=request_id,
+                decision=decision,
+                check_run=check_run,
+                passed=passed,
+                prefix_events=prefix_events,
+            )
         else:
-            final = self._finalize_action(runtime, request_id=request_id,
-                adjudication=decision.adjudication, passed=passed, player_id=decision.player_id,
-                prefix_events=prefix_events, check_run=check_run, carried_events=carried)
+            final = self._finalize_action(
+                runtime,
+                request_id=request_id,
+                adjudication=decision.adjudication,
+                passed=passed,
+                player_id=decision.player_id,
+                prefix_events=prefix_events,
+                check_run=check_run,
+                carried_events=carried,
+            )
         return replace(final, parent_passed=passed) if parent is not None else final
 
-    def _defer_check_outcome(self, runtime, *, request_id, decision, check_run, events, spec):
-        option = self._passive_check_option(runtime.game_state, decision.actor_id,
-            CheckStep(id="check_consequence", check=spec, result_routes={"failure": "finish"}),
-            world_ref=runtime.module_content.world_ref)
+    def _defer_check_outcome(
+        self, runtime, *, request_id, decision, check_run, events, spec
+    ):
+        option = self._passive_check_option(
+            runtime.game_state,
+            decision.actor_id,
+            CheckStep(
+                id="check_consequence", check=spec, result_routes={"failure": "finish"}
+            ),
+            world_ref=runtime.module_content.world_ref,
+        )
         if option is None:
             raise ContractError("CHECK_CONSEQUENCE_TARGET_UNAVAILABLE")
-        pending = PendingCheckDecision(decision_id=self._new_id("check_decision"),
-            room_id=decision.room_id, player_id=decision.player_id, actor_id=decision.actor_id,
-            action_request_id=decision.action_request_id, source_revision=runtime.revision,
-            status="awaiting_skill_choice", adjudication=decision.adjudication,
-            options=(option,), rule_origin=decision.rule_origin, allow_cancel=False,
-            consequence_spec=spec, consequence_parent=CheckConsequenceParent(decision=decision,
-                check=check_run, carried_events=events))
-        required = self._event(runtime, offset=len(events)+1, request_id=request_id,
-            actor_id=decision.actor_id, event_type="check.decision_required",
-            payload={"decision_id":pending.decision_id,"action_request_id":decision.action_request_id}, visibility="private")
+        pending = PendingCheckDecision(
+            decision_id=self._new_id("check_decision"),
+            room_id=decision.room_id,
+            player_id=decision.player_id,
+            actor_id=decision.actor_id,
+            action_request_id=decision.action_request_id,
+            source_revision=runtime.revision,
+            status="awaiting_skill_choice",
+            adjudication=decision.adjudication,
+            options=(option,),
+            rule_origin=decision.rule_origin,
+            allow_cancel=False,
+            consequence_spec=spec,
+            consequence_parent=CheckConsequenceParent(
+                decision=decision, check=check_run, carried_events=events
+            ),
+        )
+        required = self._event(
+            runtime,
+            offset=len(events) + 1,
+            request_id=request_id,
+            actor_id=decision.actor_id,
+            event_type="check.decision_required",
+            payload={
+                "decision_id": pending.decision_id,
+                "action_request_id": decision.action_request_id,
+            },
+            visibility="private",
+        )
         events = (*events, required)
         state = runtime.game_state
         origin = decision.rule_origin
         if origin is not None and origin.agenda_id is not None:
             agenda = state.rule_agendas[origin.agenda_id]
             agendas = dict(state.rule_agendas)
-            agendas[origin.agenda_id] = agenda.model_copy(update={"pending_check_id":pending.decision_id,
-                "carried_events": (*agenda.carried_events, *events)})
-            state = state.model_copy(update={"rule_agendas":agendas})
-        state = state.model_copy(update={"event_sequence":required.sequence})
+            agendas[origin.agenda_id] = agenda.model_copy(
+                update={
+                    "pending_check_id": pending.decision_id,
+                    "carried_events": (*agenda.carried_events, *events),
+                }
+            )
+            state = state.model_copy(update={"rule_agendas": agendas})
+        state = state.model_copy(update={"event_sequence": required.sequence})
         return ActionFinalization(state=state, events=events, pending_decision=pending)
 
     def _apply_check_outcome(
@@ -2292,35 +2390,73 @@ class AdjudicationEngineService:
         )
         if handler is None:
             return runtime, prefix_events, None
-        services = OutcomeEffectSession(runtime, request_id=request_id, actor_id=decision.actor_id,
-            dice=ACTIVE_DICE.get() or self._dice, offset=len(prefix_events))
-        context = CheckOutcomeContext(check=spec, result=check_run.final_result or check_run.roll,
-            runtime=runtime, actor_id=decision.actor_id, origin=origin, check_id=check_run.check_id, services=services)
+        services = OutcomeEffectSession(
+            runtime,
+            request_id=request_id,
+            actor_id=decision.actor_id,
+            dice=ACTIVE_DICE.get() or self._dice,
+            offset=len(prefix_events),
+        )
+        context = CheckOutcomeContext(
+            check=spec,
+            result=check_run.final_result or check_run.roll,
+            runtime=runtime,
+            actor_id=decision.actor_id,
+            origin=origin,
+            check_id=check_run.check_id,
+            services=services,
+        )
         outcome = handler(context)
         state, fact = runtime.game_state, None
         if outcome.effect is not None:
-            state, resource_events = self._apply_effect(runtime, state, outcome.effect,
-                room_id=state.room_id, request_id=request_id, actor_id=decision.actor_id,
-                offset=len(prefix_events)+1, resource_decrease_limit=outcome.decrease_limit)
+            state, resource_events = self._apply_effect(
+                runtime,
+                state,
+                outcome.effect,
+                room_id=state.room_id,
+                request_id=request_id,
+                actor_id=decision.actor_id,
+                offset=len(prefix_events) + 1,
+                resource_decrease_limit=outcome.decrease_limit,
+            )
             resource_event = resource_events[0]
             assert outcome.event_type is not None
-            fact = self._event_from_state(state, room_id=state.room_id, request_id=request_id,
-                actor_id=decision.actor_id, offset=len(prefix_events)+len(resource_events)+1,
-                event_type=outcome.event_type, visibility="hidden", payload={**resource_event.payload,
-                    **outcome.audit, "outcome_id":check_run.check_id,"resource_event_id":resource_event.event_id,
-                    "check_id":check_run.check_id,"rule_origin":origin.to_json_dict(),
-                    "module_id":runtime.module_id,"module_version":runtime.module_version,
-                    "degree":context.result.degree})
+            fact = self._event_from_state(
+                state,
+                room_id=state.room_id,
+                request_id=request_id,
+                actor_id=decision.actor_id,
+                offset=len(prefix_events) + len(resource_events) + 1,
+                event_type=outcome.event_type,
+                visibility="hidden",
+                payload={
+                    **resource_event.payload,
+                    **outcome.audit,
+                    "outcome_id": check_run.check_id,
+                    "resource_event_id": resource_event.event_id,
+                    "check_id": check_run.check_id,
+                    "rule_origin": origin.to_json_dict(),
+                    "module_id": runtime.module_id,
+                    "module_version": runtime.module_version,
+                    "degree": context.result.degree,
+                },
+            )
             prefix_events = (*prefix_events, *resource_events, fact)
             if outcome.record is not None:
                 state = outcome.record(state, fact)
         followup = None
         if outcome.resolve is not None:
             services.offset = len(prefix_events)
-            progress = outcome.resolve(replace(context, runtime=runtime.model_copy(update={"game_state":state}), fact=fact))
+            progress = outcome.resolve(
+                replace(
+                    context,
+                    runtime=runtime.model_copy(update={"game_state": state}),
+                    fact=fact,
+                )
+            )
             state, followup = progress.state, progress.followup
             prefix_events = (*prefix_events, *services.events)
-        return runtime.model_copy(update={"game_state":state}), prefix_events, followup
+        return runtime.model_copy(update={"game_state": state}), prefix_events, followup
 
     def _resume_rule_check(
         self,
@@ -2708,8 +2844,10 @@ class AdjudicationEngineService:
             return None
         attributes = actor.state.get("attributes")
         target_value = (
-            attributes.get(profile.resource) if isinstance(attributes, dict) else None
-        ) if profile.target_kind == "attribute" else getattr(actor.resources, profile.resource, None)
+            (attributes.get(profile.resource) if isinstance(attributes, dict) else None)
+            if profile.target_kind == "attribute"
+            else getattr(actor.resources, profile.resource, None)
+        )
         if type(target_value) is not int or not 0 <= target_value <= 100:
             return None
         return PendingCheckOption(
@@ -3014,6 +3152,7 @@ class AdjudicationEngineService:
         actor_id: str,
         offset: int,
         resource_decrease_limit: int | None = None,
+        resource_increase_limit: int | None = None,
     ) -> tuple[GameState, tuple[DomainEvent, ...]]:
         """Execute one already-validated effect.
 
@@ -3062,6 +3201,7 @@ class AdjudicationEngineService:
                 offset=offset,
                 action_request_id=ACTIVE_ACTION_ID.get(),
                 resource_decrease_limit=resource_decrease_limit,
+                resource_increase_limit=resource_increase_limit,
             ),
         )
         if result.event_type is None:
@@ -3093,9 +3233,34 @@ class AdjudicationEngineService:
                     visibility=extra.visibility,
                 )
             )
-        state, expiry_events = expire_conditions(runtime, result.state, tuple(emitted),
-            request_id=request_id, dice=ACTIVE_DICE.get() or self._dice, offset=offset+len(emitted)-1)
-        return state, (*emitted, *expiry_events)
+        state, expiry_events = expire_conditions(
+            runtime,
+            result.state,
+            tuple(emitted),
+            request_id=request_id,
+            dice=ACTIVE_DICE.get() or self._dice,
+            offset=offset + len(emitted) - 1,
+        )
+        adapter = ruleset_registry.DEFAULT_RULESET_REGISTRY.adapter_for(
+            runtime.module_content.world_ref
+        )
+        services = OutcomeEffectSession(
+            runtime,
+            request_id=request_id,
+            actor_id=actor_id,
+            dice=ACTIVE_DICE.get() or self._dice,
+            offset=offset + len(emitted) + len(expiry_events) - 1,
+        )
+        if adapter is not None:
+            for event in emitted:
+                handler = adapter.event_handlers.get(event.type)
+                if handler is not None:
+                    state = handler(
+                        ruleset_registry.RulesetEventContext(
+                            runtime=runtime, state=state, event=event, services=services
+                        )
+                    )
+        return state, (*emitted, *expiry_events, *services.events)
 
     def _apply_time_task_step(
         self,
@@ -3227,8 +3392,23 @@ class AdjudicationEngineService:
         action = ruleset_registry.require_world_action(
             runtime.module_content.world_ref, step.action_id
         )
-        services = OutcomeEffectSession(runtime, request_id=request_id, actor_id=actor_id,
-            dice=ACTIVE_DICE.get() or self._dice, offset=offset-1)
+        services = OutcomeEffectSession(
+            runtime,
+            request_id=request_id,
+            actor_id=actor_id,
+            dice=ACTIVE_DICE.get() or self._dice,
+            offset=offset - 1,
+        )
+        services.resource_runner = lambda state, effect, limit: self._apply_effect(
+            runtime,
+            state,
+            effect,
+            room_id=runtime.game_state.room_id,
+            request_id=request_id,
+            actor_id=actor_id,
+            offset=offset + len(services.events),
+            resource_increase_limit=limit,
+        )
         result = action(
             ruleset_registry.RulesetActionContext(
                 state=state,
@@ -3243,14 +3423,17 @@ class AdjudicationEngineService:
                 ),
             )
         )
-        result = replace(result, state=bind_authored_expiries(runtime, state, result.state, actor_id))
+        result = replace(
+            result, state=bind_authored_expiries(runtime, state, result.state, actor_id)
+        )
         if result.event_type is None:
             return result.state, tuple(services.events)
-        return result.state, (*services.events,
+        return result.state, (
+            *services.events,
             self._event_from_state(
                 result.state,
                 room_id=runtime.game_state.room_id,
-                offset=offset+len(services.events),
+                offset=offset + len(services.events),
                 request_id=request_id,
                 actor_id=actor_id,
                 event_type=result.event_type,

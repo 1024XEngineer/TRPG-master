@@ -24,9 +24,12 @@ async def start_sanity_check(db, store_factory, *, san=60, roll=81):
     session = await db.get(GameSession, room_id)
     state = GameState.model_validate(session.state_json)
     actor = state.actors[actor_id]
+    from collaboration_framework.registry.sanity_periods import new_ledger
+
     state.actors[actor_id] = actor.model_copy(
         update={
             "resources": actor.resources.model_copy(update={"san": san}),
+            "sanity": new_ledger(san, state.world_time.current.absolute_hour),
         }
     )
     session.state_json = state.to_json_dict()

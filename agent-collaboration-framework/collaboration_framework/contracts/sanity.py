@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Literal
+from datetime import date
 from pydantic import Field
 from .common import ContractModel
 
@@ -24,6 +25,7 @@ class SanityLoss(ContractModel):
     absolute_hour: int | None = Field(default=None, ge=0)
     module_id: str
     module_version: str
+    window_id: str | None = None
 
 
 class SanityLedger(ContractModel):
@@ -36,11 +38,17 @@ class SanityLedger(ContractModel):
     coverage_start_sequence: int = Field(default=0, ge=0)
     history_gaps: tuple[str, ...] = ()
     bouts: tuple[MadnessBout, ...] = ()
+    window: SanityWindow | None = None
+    previous_windows: tuple[SanityWindow, ...] = ()
+    treatment: SanityTreatment | None = None
+    treatment_history: tuple[SanityTreatment, ...] = ()
 
 
 class SanityPolicy(ContractModel):
     # Summary mode is an authored Keeper choice. Auto only summarizes solo play.
     bout_mode: Literal["auto", "summary", "rounds"] = "auto"
+    window_boundary: Literal["keeper_rest", "world_day"] = "keeper_rest"
+    calendar_anchor: date | None = None
 
 
 class MadnessBout(ContractModel):
@@ -63,6 +71,31 @@ class MadnessBout(ContractModel):
     duration_roll: int = Field(ge=1, le=10)
     duration_hours: int = Field(ge=1, le=10)
     started_absolute_hour: int = Field(ge=0)
+
+
+class SanityWindow(ContractModel):
+    id: str
+    day_index: int = Field(ge=0)
+    start_absolute_hour: int = Field(ge=0)
+    start_sequence: int = Field(ge=0)
+    baseline_san: int = Field(ge=0)
+    loss_total: int = Field(default=0, ge=0)
+    consumed_outcomes: tuple[str, ...] = ()
+    triggered_by: str | None = None
+    coverage: Literal["period_start", "upgrade_cutover"] = "period_start"
+
+
+class SanityTreatment(ContractModel):
+    treatment_id: str
+    kind: Literal["private", "institution"]
+    status: Literal["active", "interrupted", "recovered"] = "active"
+    started_absolute_hour: int = Field(ge=0)
+    next_review_month: int = Field(default=1, ge=1)
+    due_absolute_hour: int = Field(ge=0)
+    task_id: str
+    stage: Literal["treatment", "sanity_recheck"] = "treatment"
+    reviews: tuple[str, ...] = ()
+    interruption_outcome_id: str | None = None
 
 
 SanityLedger.model_rebuild()

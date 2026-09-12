@@ -24,11 +24,17 @@ from collaboration_framework.contracts import ModuleContentV3
 from .check_outcomes import OutcomeServices
 
 if TYPE_CHECKING:
-    from collaboration_framework.engine.models import GameState
+    from collaboration_framework.engine.models import (
+        GameState,
+        EngineRuntimeSnapshot,
+        DomainEvent,
+    )
 
 from .sanity_ledger import development_phase, acknowledge_history
 from .check_profiles import COC7_CHECK_PROFILES, CheckProfileRegistration
 from .check_outcomes import CheckOutcomeHandler, coc7_sanity_outcome
+from .sanity_periods import on_time_point
+from .sanity_treatment import start_treatment, review_treatment, treatment_due
 from .insanity import insanity_int_outcome, safe_rest, end_bout
 
 
@@ -192,6 +198,17 @@ def _coc7_apply_condition(context: RulesetActionContext) -> RulesetActionResult:
 
 
 @dataclass(frozen=True)
+class RulesetEventContext:
+    runtime: EngineRuntimeSnapshot
+    state: GameState
+    event: DomainEvent
+    services: OutcomeServices
+
+
+RulesetEventHandler = Callable[[RulesetEventContext], "GameState"]
+
+
+@dataclass(frozen=True)
 class RulesetAdapter:
     """The runtime capability catalogue owned by one ``world_ref``.
 
@@ -205,6 +222,7 @@ class RulesetAdapter:
         default_factory=dict
     )
     world_actions: Mapping[str, RulesetAction] = field(default_factory=dict)
+    event_handlers: Mapping[str, RulesetEventHandler] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.world_ref.strip():
@@ -213,6 +231,7 @@ class RulesetAdapter:
             "check_profiles",
             "check_outcome_handlers",
             "world_actions",
+            "event_handlers",
         ):
             value = getattr(self, field_name)
             object.__setattr__(self, field_name, MappingProxyType(dict(value)))
@@ -327,6 +346,10 @@ class RulesetAdapterRegistry:
 COC7_ADAPTER = RulesetAdapter(
     world_ref="coc-7e",
     check_profiles=COC7_CHECK_PROFILES,
+    event_handlers={
+        "time.point_entered": on_time_point,
+        "time.task_due": treatment_due,
+    },
     check_outcome_handlers={
         "coc7.sanity": coc7_sanity_outcome,
         "coc7.insanity_int": insanity_int_outcome,
@@ -334,6 +357,8 @@ COC7_ADAPTER = RulesetAdapter(
     world_actions={
         "coc7.apply_condition": _coc7_apply_condition,
         "coc7.safe_rest": safe_rest,
+        "coc7.start_treatment": start_treatment,
+        "coc7.review_treatment": review_treatment,
         "coc7.end_bout": end_bout,
         "coc7.investigator_development": development_phase,
         "coc7.acknowledge_sanity_history": acknowledge_history,

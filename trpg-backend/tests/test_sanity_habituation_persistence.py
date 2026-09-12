@@ -21,7 +21,7 @@ from tests.test_engine_runtime import _start_room
 from tests.test_issue398_passive_check import _arm_first_sight, _committed_state, _see_true_form
 
 
-async def prepare_chain(db, store_factory, *, losses=("1d6", "1d6", "1d6"), cap=6):
+async def prepare_chain(db, store_factory, *, losses=("1d6", "1d6", "1d6"), cap=6, configure=None):
     room, players, _ = await _start_room(db, room_number=196)
     actor_id = await _arm_first_sight(db, room.id)
     session = await db.get(GameSession, room.id)
@@ -50,6 +50,8 @@ async def prepare_chain(db, store_factory, *, losses=("1d6", "1d6", "1d6"), cap=
     rule["execution"]["branches"][0]["entry_step_id"] = mark["id"]
     payload["rules"] = [rule]
     payload["sanity_sources"] = [{"id": "test.creature", "habit_cap": cap}]
+    if configure is not None:
+        configure(payload)
     content = ModuleContentV3.model_validate(payload)
     db.add(
         ModuleVersion(
@@ -64,9 +66,12 @@ async def prepare_chain(db, store_factory, *, losses=("1d6", "1d6", "1d6"), cap=
     session.module_version = content.version
     state = GameState.model_validate(session.state_json)
     actor = state.actors[actor_id]
+    from collaboration_framework.registry.sanity_periods import new_ledger
+
     state.actors[actor_id] = actor.model_copy(
         update={
             "resources": actor.resources.model_copy(update={"san": 60}),
+            "sanity": new_ledger(60, state.world_time.current.absolute_hour),
             "state": {**actor.state, "attributes": {"INT": 70}},
         }
     )

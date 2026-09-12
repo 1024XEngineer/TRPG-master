@@ -16,7 +16,7 @@ from collaboration_framework.contracts import (
 )
 
 from .models import ActorState, GameState, WorldTimePoint, WorldTimeState
-from collaboration_framework.contracts.sanity import SanityLedger
+from collaboration_framework.registry.sanity_periods import new_ledger
 
 
 def create_initial_game_state(
@@ -28,6 +28,12 @@ def create_initial_game_state(
 ) -> GameState:
     """Hydrate the module-declared opening location and entity state defaults."""
 
+    initial_time = world_time or _world_time_for(module_content)
+    boundary = (
+        module_content.sanity_policy.window_boundary
+        if module_content.sanity_policy
+        else "keeper_rest"
+    )
     initial = module_content.initial_state
     entities = {entity.id: dict(entity.state) for entity in module_content.entities}
     # `initial_state.entity_state` is an authored override on top of each
@@ -40,9 +46,21 @@ def create_initial_game_state(
     return GameState(
         room_id=room_id,
         scene_id=initial.start_location_id,
-        actors={key: actor.model_copy(update={"sanity": actor.sanity or SanityLedger()}) for key, actor in actors.items()},
+        actors={
+            key: actor.model_copy(
+                update={
+                    "sanity": actor.sanity
+                    or new_ledger(
+                        actor.resources.san,
+                        initial_time.current.absolute_hour,
+                        boundary,
+                    )
+                }
+            )
+            for key, actor in actors.items()
+        },
         entities=entities,
-        world_time=world_time or _world_time_for(module_content),
+        world_time=initial_time,
         discovered_facts=tuple(sorted(initial.revealed_information_ids)),
         item_instances=items,
         party_item_knowledge={

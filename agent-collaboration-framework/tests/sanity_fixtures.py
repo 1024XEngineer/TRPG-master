@@ -25,12 +25,39 @@ from tests.test_projection_v3 import ACTOR, PLAYER, ROOM, game_state, module
 def sandbox_content(*, parameters=None, effects=None):
     content = module()
     from collaboration_framework.contracts import TimePointSpec
-    points = tuple(point.model_copy(update={"order": i}) for i, point in enumerate(sorted((*content.time_policy.default_points, TimePointSpec(id="hour_12", hour_of_day=12, order=1)), key=lambda p: p.hour_of_day)))
-    content = content.model_copy(update={"time_policy": content.time_policy.model_copy(update={"default_points": points})})
+
+    points = tuple(
+        point.model_copy(update={"order": i})
+        for i, point in enumerate(
+            sorted(
+                (
+                    *content.time_policy.default_points,
+                    TimePointSpec(id="hour_12", hour_of_day=12, order=1),
+                ),
+                key=lambda p: p.hour_of_day,
+            )
+        )
+    )
+    content = content.model_copy(
+        update={
+            "time_policy": content.time_policy.model_copy(
+                update={"default_points": points}
+            )
+        }
+    )
     if parameters and ("habit_cap" in parameters or "sanity_source" in parameters):
         from collaboration_framework.contracts.sanity import SanitySource
+
         parameters = {**parameters, "sanity_source": "test.creature"}
-        content = content.model_copy(update={"sanity_sources": (SanitySource(id="test.creature", habit_cap=parameters.get("habit_cap")),)})
+        content = content.model_copy(
+            update={
+                "sanity_sources": (
+                    SanitySource(
+                        id="test.creature", habit_cap=parameters.get("habit_cap")
+                    ),
+                )
+            }
+        )
     rule = next(
         r for r in content.rules if r.id == "first_sight_of_douglas"
     ).to_json_dict()
@@ -70,9 +97,17 @@ def make_store(content=None, *, san=60, before_commit=None):
     content = content or sandbox_content()
     state = game_state(content)
     actor = state.actors[ACTOR]
+    from collaboration_framework.registry.sanity_periods import new_ledger
+
+    boundary = (
+        content.sanity_policy.window_boundary
+        if content.sanity_policy
+        else "keeper_rest"
+    )
     state.actors[ACTOR] = actor.model_copy(
         update={
             "resources": ActorResources(hp=10, san=san, mp=10, luck=50, mythos=0),
+            "sanity": new_ledger(san, state.world_time.current.absolute_hour, boundary),
             "state": {**actor.state, "attributes": {"INT": 70, "STR": 45}},
         }
     )
@@ -150,11 +185,34 @@ def with_world_actions(content, actions):
     for name, (action_id, parameters) in actions.items():
         rule = rules[0].to_json_dict()
         rule["id"] = "command_" + name
-        rule["trigger"] = {"kind": "event", "event_type": "entity.state_changed", "entry_branch_id": "default", "when": {
-            "op": "predicate", "predicate": "entity_state_is", "args": {"entity_id": "cemetery_figure", "key": "test_command", "value": name}}}
-        rule["execution"] = {"branches": [{"id": "default", "entry_step_id": "invoke"}], "steps": [
-            {"id": "invoke", "kind": "invoke_ruleset_action", "action_id": action_id, "actor_binding": "actor", "parameters": parameters, "next_step_id": "finish"},
-            {"id": "finish", "kind": "finish"}]}
+        rule["trigger"] = {
+            "kind": "event",
+            "event_type": "entity.state_changed",
+            "entry_branch_id": "default",
+            "when": {
+                "op": "predicate",
+                "predicate": "entity_state_is",
+                "args": {
+                    "entity_id": "cemetery_figure",
+                    "key": "test_command",
+                    "value": name,
+                },
+            },
+        }
+        rule["execution"] = {
+            "branches": [{"id": "default", "entry_step_id": "invoke"}],
+            "steps": [
+                {
+                    "id": "invoke",
+                    "kind": "invoke_ruleset_action",
+                    "action_id": action_id,
+                    "actor_binding": "actor",
+                    "parameters": parameters,
+                    "next_step_id": "finish",
+                },
+                {"id": "finish", "kind": "finish"},
+            ],
+        }
         rules.append(RuleSpecV3.model_validate(rule))
     return content.model_copy(update={"rules": tuple(rules)})
 
@@ -163,6 +221,25 @@ async def invoke_world_action(store, name, *, tag=None, dice=()):
     async with store.transaction(ROOM) as tx:
         runtime = await tx.load_runtime()
     request = trigger(runtime.revision, tag or name)
-    effect = ChangeEntityStateEffect(entity_id="cemetery_figure", key="test_command", value=name)
-    request = request.model_copy(update={"adjudication": request.adjudication.model_copy(update={"success_effects": (ChangeEntityStateEffect(entity_id="cemetery_figure", key="true_form_seen", value=False), effect)})})
-    return await AdjudicationEngineService(store, dice=DiceRoller(SequenceDiceSource(dice))).submit(request)
+    effect = ChangeEntityStateEffect(
+        entity_id="cemetery_figure", key="test_command", value=name
+    )
+    request = request.model_copy(
+        update={
+            "adjudication": request.adjudication.model_copy(
+                update={
+                    "success_effects": (
+                        ChangeEntityStateEffect(
+                            entity_id="cemetery_figure",
+                            key="true_form_seen",
+                            value=False,
+                        ),
+                        effect,
+                    )
+                }
+            )
+        }
+    )
+    return await AdjudicationEngineService(
+        store, dice=DiceRoller(SequenceDiceSource(dice))
+    ).submit(request)

@@ -2882,6 +2882,28 @@
           ],
           "title": "Bout Mode",
           "type": "string"
+        },
+        "window_boundary": {
+          "default": "keeper_rest",
+          "enum": [
+            "keeper_rest",
+            "world_day"
+          ],
+          "title": "Window Boundary",
+          "type": "string"
+        },
+        "calendar_anchor": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Calendar Anchor"
         }
       },
       "title": "SanityPolicy",

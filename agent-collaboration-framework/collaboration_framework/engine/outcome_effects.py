@@ -25,6 +25,7 @@ class OutcomeEffectSession:
         )
         self.offset = offset
         self.events = []
+        self.resource_runner = None
 
     def quantity(self, quantity: DiceQuantity):
         return self.dice.quantity(quantity)
@@ -47,13 +48,78 @@ class OutcomeEffectSession:
         self.events.append(event)
         return event
 
+    def resource(self, state, effect, *, increase_limit=None):
+        if self.resource_runner is None:
+            from collaboration_framework.contracts import ContractError
+
+            raise ContractError("RULESET_RESOURCE_SERVICES_UNAVAILABLE")
+        state, events = self.resource_runner(state, effect, increase_limit)
+        self.events.extend(events)
+        return state, events[0]
+
+    def task(self, state, *, key, absolute_hour):
+        step = CreateTimeTaskStep(
+            id="ruleset_timer",
+            next_step_id="finish",
+            task=TimeTaskSpec(
+                task_key="ruleset_" + sha256(key.encode()).hexdigest()[:32],
+                target=TimeTaskTargetSpec(
+                    day_index=absolute_hour // 24, hour_of_day=absolute_hour % 24
+                ),
+                visibility="hidden",
+                on_due_branch_id="notify",
+                bindings={"actor_id": self.actor_id},
+            ),
+        )
+        state, task, _ = create_time_task(
+            self.runtime.module_content, state, step, rule_id="engine_ruleset"
+        )
+        self.emit(
+            "time.task_created",
+            {
+                "actor_id": self.actor_id,
+                "task_id": task.task_id,
+                "occurrence_id": task.occurrence_id,
+            },
+            visibility="hidden",
+        )
+        return state, task.task_id
+
+    def cancel_task(self, state, *, task_id, reason):
+        from collaboration_framework.contracts import CancelTimeTaskStep
+        from .time_tasks import cancel_time_task
+
+        task = state.time_tasks.get(task_id)
+        if task is None or task.status != "scheduled":
+            return state
+        state, _ = cancel_time_task(
+            state,
+            CancelTimeTaskStep(
+                id="ruleset_cancel",
+                task_key=task.task_key,
+                bindings=task.bindings,
+                reason_code=reason,
+                next_step_id="finish",
+            ),
+            rule_id=task.rule_id,
+        )
+        self.emit(
+            "time.task_cancelled",
+            {"actor_id": self.actor_id, "task_id": task_id, "reason": reason},
+            visibility="hidden",
+        )
+        return state
+
     def condition(self, state, *, condition_id, key, source, hours, details):
         if any(
             c.application_key == key
             for c in state.actors[self.actor_id].condition_states
         ):
             return state
-        if any(c.condition_id == condition_id and c.status == "active" for c in state.actors[self.actor_id].condition_states):
+        if any(
+            c.condition_id == condition_id and c.status == "active"
+            for c in state.actors[self.actor_id].condition_states
+        ):
             return state
         expiry = None
         if hours is not None:

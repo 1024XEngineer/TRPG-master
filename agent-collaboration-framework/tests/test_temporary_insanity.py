@@ -117,7 +117,7 @@ async def test_below_threshold_and_zero_loss_do_not_require_int():
         assert store.inspect_state(ROOM).actors[ACTOR].conditions == ()
 
 
-async def advance_time(store, tag):
+async def advance_time(store, tag, *, consent=False):
     from collaboration_framework.contracts import (
         AdvanceWorldTimeEffect,
         ActionTarget,
@@ -136,9 +136,15 @@ async def advance_time(store, tag):
             "success_effects": (AdvanceWorldTimeEffect(),),
         }
     )
-    return await AdjudicationEngineService(store).submit(
-        request.model_copy(update={"adjudication": action})
-    )
+    command = request.model_copy(update={"adjudication": action})
+    if consent:
+        return await AdjudicationEngineService(store).submit_with_time_consent(
+            command,
+            consent_player_ids=tuple(
+                sorted({a.player_id for a in runtime.game_state.actors.values()})
+            ),
+        )
+    return await AdjudicationEngineService(store).submit(command)
 
 
 async def test_bout_ends_before_temporary_insanity_at_real_occurrences():

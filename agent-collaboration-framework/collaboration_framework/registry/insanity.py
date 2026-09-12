@@ -27,6 +27,53 @@ def after_sanity_loss(context: CheckOutcomeContext) -> OutcomeProgress:
     actor = state.actors[context.actor_id]
     if actual <= 0 or "madness_bout" in actor.conditions:
         return OutcomeProgress(state)
+    ledger = actor.sanity
+    assert ledger is not None
+    window = ledger.window
+    if context.fact.payload.get("sanity_window_id") != (window.id if window else None):
+        return OutcomeProgress(state)
+    from .sanity_treatment import interrupt_treatment
+
+    state = interrupt_treatment(
+        context.services,
+        state,
+        context.actor_id,
+        str(context.fact.payload["outcome_id"]),
+    )
+    if actor.resources.san == 0:
+        return OutcomeProgress(state)
+    ledger = state.actors[context.actor_id].sanity
+    assert ledger is not None
+    if (
+        "indefinite_insanity" not in actor.conditions
+        and window is not None
+        and window.triggered_by is None
+        and window.baseline_san > 0
+        and window.loss_total * 5 >= window.baseline_san
+    ):
+        require_summary(context)
+        key = str(context.fact.payload["outcome_id"])
+        ledger = ledger.model_copy(
+            update={"window": window.model_copy(update={"triggered_by": key})}
+        )
+        state = replace_ledger(state, context.actor_id, ledger)
+        state = context.services.remove(
+            state, condition_id="temporary_insanity", reason="indefinite_insanity"
+        )
+        state = context.services.condition(
+            state,
+            condition_id="indefinite_insanity",
+            key="indefinite:" + key,
+            source="coc7.insanity",
+            hours=None,
+            details={},
+        )
+        state = start_bout(context, state, key)
+        context.services.emit(
+            "actor.indefinite_insanity",
+            {"actor_id": context.actor_id, "source_outcome_id": key},
+        )
+        return OutcomeProgress(state)
     if (
         "temporary_insanity" in actor.conditions
         or "indefinite_insanity" in actor.conditions
@@ -67,7 +114,10 @@ def resolve_int(context: CheckOutcomeContext) -> OutcomeProgress:
         )
     ):
         raise ContractError("INSANITY_LOSS_ORIGIN_MISSING")
-    if set(state.actors[context.actor_id].conditions) & {"temporary_insanity", "indefinite_insanity"}:
+    if set(state.actors[context.actor_id].conditions) & {
+        "temporary_insanity",
+        "indefinite_insanity",
+    }:
         return OutcomeProgress(state)
     if not context.result.passed:
         context.services.emit(
@@ -217,6 +267,11 @@ def safe_rest(context):
         update={"safe_rests": (*actor.sanity.safe_rests, rest_id)}
     )
     state = replace_ledger(state, context.actor_id, ledger)
+    from .sanity_periods import reset_window
+
+    state = reset_window(
+        state, context.actor_id, ledger, "rest:" + rest_id, state.event_sequence
+    )
     return RulesetActionResult(
         state=state,
         event_type="actor.rested_safely",

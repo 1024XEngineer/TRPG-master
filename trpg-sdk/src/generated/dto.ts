@@ -72,6 +72,8 @@ export interface ActorConditionView {
   name: string;
   remaining_hours?: number | null;
   bout_type?: string | null;
+  recovery_status?: ("care_required" | "in_treatment" | "review_due" | "interrupted") | null;
+  review_after_hours?: number | null;
 }
 
 export interface ActorResourceView {

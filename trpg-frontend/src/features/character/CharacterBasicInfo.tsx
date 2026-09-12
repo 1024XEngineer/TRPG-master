@@ -148,7 +148,7 @@ export function CharacterBasicInfo({
   occupationName?: string | null
   attributes: readonly RadarAttribute[]
   liveResources?: LiveResources
-  liveConditions?: readonly { id: string; name: string; remaining_hours?: number | null; bout_type?: string | null }[]
+  liveConditions?: readonly { id: string; name: string; remaining_hours?: number | null; bout_type?: string | null; recovery_status?: string | null; review_after_hours?: number | null }[]
   portraitAction?: { kind: 'preview' } | { kind: 'generate'; onActivate: () => void } | { kind: 'static' }
 }) {
   // 当前值优先，没有运行时投影时才落回建卡快照。
@@ -186,6 +186,10 @@ export function CharacterBasicInfo({
             <span key={condition.id} className="rounded border border-brass/30 px-2 py-1">
               {condition.name}{condition.bout_type ? ` · ${condition.bout_type}` : ''}
               {condition.remaining_hours != null ? ` · 剩余 ${condition.remaining_hours} 个游戏小时` : ''}
+              {condition.recovery_status === 'care_required' ? ' · 需要治疗或守秘人确认恢复' : ''}
+              {condition.recovery_status === 'in_treatment' ? ` · 治疗中，${condition.review_after_hours} 个游戏小时后可复查` : ''}
+              {condition.recovery_status === 'review_due' ? ' · 可进行恢复检查' : ''}
+              {condition.recovery_status === 'interrupted' ? ' · 治疗已中断，需要重新安排' : ''}
             </span>
           ))}
         </div>

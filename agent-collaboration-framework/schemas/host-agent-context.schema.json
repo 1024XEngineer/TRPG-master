@@ -62,6 +62,37 @@
           ],
           "default": null,
           "title": "Bout Type"
+        },
+        "recovery_status": {
+          "anyOf": [
+            {
+              "enum": [
+                "care_required",
+                "in_treatment",
+                "review_due",
+                "interrupted"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recovery Status"
+        },
+        "review_after_hours": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Review After Hours"
         }
       },
       "required": [

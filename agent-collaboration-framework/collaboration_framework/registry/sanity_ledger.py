@@ -45,12 +45,18 @@ def append_loss(ledger: SanityLedger, event: DomainEvent) -> SanityLedger:
         absolute_hour=p.get("absolute_hour"),
         module_id=p["module_id"],
         module_version=p["module_version"],
+        window_id=p.get("sanity_window_id"),
     )
     totals = dict(ledger.habituation)
     if loss.source_id is not None:
         totals[loss.source_id] = totals.get(loss.source_id, 0) + loss.actual
-    return ledger.model_copy(
-        update={"losses": (*ledger.losses, loss), "habituation": totals}
+    from .sanity_periods import count_loss
+
+    return count_loss(
+        ledger.model_copy(
+            update={"losses": (*ledger.losses, loss), "habituation": totals}
+        ),
+        loss,
     )
 
 
@@ -86,7 +92,12 @@ def replace_ledger(state: GameState, actor_id: str, ledger: SanityLedger) -> Gam
 def development_phase(context):
     from .rulesets import RulesetActionError, RulesetActionResult
 
-    if set(context.parameters) != {"phase_id"} or context.actor_binding != "actor":
+    if (
+        set(context.parameters) - {"phase_id", "recover_indefinite"}
+        or "phase_id" not in context.parameters
+        or type(context.parameters.get("recover_indefinite", False)) is not bool
+        or context.actor_binding != "actor"
+    ):
         raise RulesetActionError(
             "DEVELOPMENT_PHASE_INVALID", "发展阶段需要稳定 phase_id 和 actor"
         )
@@ -106,8 +117,19 @@ def development_phase(context):
             "development_phases": (*ledger.development_phases, phase_id),
         }
     )
+    state = replace_ledger(context.state, context.actor_id, ledger)
+    if context.parameters.get("recover_indefinite") and not context.simulation:
+        from .sanity_treatment import recover_indefinite
+
+        if context.services is None:
+            raise RulesetActionError(
+                "RULESET_EFFECT_SERVICES_UNAVAILABLE", "缺少条件执行器"
+            )
+        state = recover_indefinite(
+            context.services, state, context.actor_id, "development:" + phase_id
+        )
     return RulesetActionResult(
-        state=replace_ledger(context.state, context.actor_id, ledger),
+        state=state,
         event_type="actor.habituation_decayed",
         payload={"actor_id": context.actor_id, "phase_id": phase_id},
     )

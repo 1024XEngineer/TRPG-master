@@ -76,7 +76,7 @@ export const ONBOARDING_STEPS: readonly OnboardingStep[] = [
     route: '/room/play',
     target: 'tool-bar',
     title: '随时使用游戏工具',
-    description: '底部可以打开角色卡、技能、地图和速记；需要主动掷骰时，使用输入框左侧的骰子按钮。',
+    description: '底部可以打开角色卡、技能、地图和线索。地图可折叠查看，红点提示新增内容，关闭对应卡片后消除；在线索页可查看场景物品，并新增记录，写好后点击保存。需要主动掷骰时，使用输入框左侧的骰子按钮。',
   },
 ] as const
 

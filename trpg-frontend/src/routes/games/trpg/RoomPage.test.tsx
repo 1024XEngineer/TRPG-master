@@ -389,6 +389,30 @@ function playerViewFixture(): AgentPlayerView {
   }
 }
 
+function informationPanelView(): AgentPlayerView {
+  const view = playerViewFixture()
+  return {
+    ...view,
+    scene_id: 'study',
+    scene: { ...view.scene, id: 'study', name: '旧宅书房', loose_items: [{
+      id: 'key', name: '铜钥匙', source_label: '书桌', quantity: 1, condition: 'intact', version: 1,
+    }] },
+    known_locations: [
+      { id: 'manor', kind: 'site', name: '旧宅', description: '宅邸外观', parent_location_id: null, region_id: null, existence: 'known', localization: 'located', access: 'reachable', visited: true },
+      { id: 'study', kind: 'room', name: '旧宅书房', description: '书房详情', parent_location_id: 'manor', region_id: null, existence: 'known', localization: 'located', access: 'reachable', visited: true },
+      { id: 'shelf', kind: 'site', name: '书房暗格', description: '暗格详情', parent_location_id: 'study', region_id: null, existence: 'known', localization: 'located', access: 'blocked', visited: false },
+    ],
+    known_information: [{
+      id: 'letter', title: '寄来的信', summary: '信封上有一枚猫爪印。', content: '信封上有一枚猫爪印。',
+      related_entities: [], related_scenes: ['study'], scope: 'party',
+    }],
+  }
+}
+
+function updatePanelView(view: AgentPlayerView) {
+  act(() => emitWsMessage({ type: 'view.updated', payload: { playerId: view.player_id, playerView: view } }))
+}
+
 function conversationHistory(): RoomConversationEvent[] {
   return [
     {
@@ -3165,6 +3189,217 @@ describe('RoomPage conversation history', () => {
     expect(screen.queryByRole('dialog', { name: '待处理检定' })).not.toBeInTheDocument()
   })
 
+  it('combines clues and legacy notes while keeping manual drafts and explicit saving', async () => {
+    const view = informationPanelView()
+    mockGetPlayerView.mockReturnValue(view)
+    localStorage.setItem('aidm-notes-room-1', '原来的手写笔记')
+    localStorage.setItem('aidm-room-panels:["room-1","player-1"]', JSON.stringify({
+      version: 1, initialized: false, seen: {}, unread: {},
+      collapsed: { items: true, information: true, 'location-details:manor': true, 'item:key': true, 'information:letter': true },
+    }))
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: '地图' }))
+    const map = screen.getByRole('dialog', { name: '地图' })
+    expect(map).toHaveClass('room-play__bottom-panel--character-paper')
+    expect(within(map).queryByText('寄来的信')).not.toBeInTheDocument()
+    expect(within(map).getByText('宅邸外观')).toBeVisible()
+    expect(within(map).queryByText('当前场景物品')).not.toBeInTheDocument()
+    fireEvent.click(within(map).getByRole('button', { name: '关闭面板' }))
+    fireEvent.click(screen.getByRole('button', { name: '线索' }))
+    const clues = screen.getByRole('dialog', { name: '线索' })
+    const itemsHeading = within(clues).getByRole('heading', { name: '当前场景物品' })
+    const cluesHeading = within(clues).getByRole('heading', { name: '已知线索' })
+    expect(within(clues).queryByRole('button', { name: '当前场景物品' })).not.toBeInTheDocument()
+    expect(within(clues).queryByRole('button', { name: '已知线索' })).not.toBeInTheDocument()
+    expect(itemsHeading.compareDocumentPosition(cluesHeading) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
+    expect(within(clues).getByText('状态：intact')).toBeVisible()
+    expect(within(clues).queryByRole('button', { name: '寄来的信' })).not.toBeInTheDocument()
+    expect(within(clues).getByText('信封上有一枚猫爪印。')).toBeVisible()
+    expect(within(clues).getByText('原来的手写笔记')).toBeVisible()
+    expect(within(clues).queryByText('我的笔记')).not.toBeInTheDocument()
+    fireEvent.click(within(clues).getByRole('button', { name: '编辑记录：手写笔记' }))
+    const notes = within(clues).getByRole('textbox', { name: '记录内容' })
+    expect(notes).toHaveValue('原来的手写笔记')
+    fireEvent.change(notes, { target: { value: '补充一条自己的推测' } })
+    fireEvent.click(within(clues).getByRole('button', { name: '关闭面板' }))
+    expect(localStorage.getItem('aidm-notes-room-1')).toBe('原来的手写笔记')
+    expect(localStorage.getItem('aidm-records-room-1')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '线索' }))
+    expect(within(clues).getByRole('textbox', { name: '记录内容' })).toHaveValue('补充一条自己的推测')
+    fireEvent.click(within(clues).getByRole('button', { name: '保存' }))
+    expect(JSON.parse(localStorage.getItem('aidm-records-room-1')!).records).toEqual([
+      expect.objectContaining({ id: 'legacy-notes', content: '补充一条自己的推测' }),
+    ])
+    expect(localStorage.getItem('aidm-notes-room-1')).toBe('原来的手写笔记')
+    expect(within(clues).queryByRole('img', { name: '有新增内容' })).not.toBeInTheDocument()
+  })
+
+  it('keeps scene items above clues even when empty and acknowledges their updates with the clues panel', async () => {
+    const view = informationPanelView()
+    mockGetPlayerView.mockReturnValue(view)
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+    const changed = { ...view, scene: { ...view.scene,
+      loose_items: view.scene.loose_items!.map((item) => ({ ...item, quantity: 2 })),
+    } }
+    updatePanelView(changed)
+    const mapButton = screen.getByRole('button', { name: '地图' })
+    const cluesButton = screen.getByRole('button', { name: '线索' })
+    expect(within(mapButton).queryByRole('img')).not.toBeInTheDocument()
+    expect(within(cluesButton).getByRole('img', { name: '有新增内容' })).toBeInTheDocument()
+    fireEvent.click(mapButton)
+    fireEvent.click(within(screen.getByRole('dialog', { name: '地图' })).getByRole('button', { name: '关闭面板' }))
+    expect(within(cluesButton).getByRole('img', { name: '有新增内容' })).toBeInTheDocument()
+    fireEvent.click(cluesButton)
+    const clues = screen.getByRole('dialog', { name: '线索' })
+    expect(within(within(clues).getByRole('heading', { name: '已知线索' })).queryByRole('img')).not.toBeInTheDocument()
+    fireEvent.click(within(clues).getByRole('button', { name: '关闭面板' }))
+    expect(within(cluesButton).queryByRole('img')).not.toBeInTheDocument()
+    fireEvent.click(cluesButton)
+    expect(within(clues).getByText('铜钥匙 ×2')).toBeVisible()
+    updatePanelView({ ...changed, scene: { ...changed.scene, loose_items: [] } })
+    expect(within(clues).getByRole('heading', { name: '当前场景物品' })).toBeVisible()
+    expect(within(clues).getByText('当前场景暂无物品')).toBeVisible()
+    updatePanelView(changed)
+    expect(within(cluesButton).queryByRole('img')).not.toBeInTheDocument()
+    updatePanelView({ ...changed, scene: { ...changed.scene,
+      loose_items: changed.scene.loose_items.map((item) => ({ ...item, condition: 'damaged' })),
+    } })
+    expect(within(cluesButton).getByRole('img', { name: '有新增内容' })).toBeInTheDocument()
+  })
+
+  it('propagates hidden descendant dots and keeps each fold after closing or receiving updates', async () => {
+    const view = informationPanelView()
+    mockGetPlayerView.mockReturnValue(view)
+    const { container } = renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: '地图' }))
+    const map = screen.getByRole('dialog', { name: '地图' })
+    fireEvent.click(within(map).getByRole('button', { name: '旧宅书房的下级地点' }))
+    fireEvent.click(within(map).getByRole('button', { name: '旧宅的下级地点' }))
+    expect(within(map).queryByRole('heading', { name: '书房暗格' })).not.toBeInTheDocument()
+    updatePanelView({ ...view, known_locations: view.known_locations!.map((location) =>
+      location.id === 'shelf' ? { ...location, description: '暗格中又发现一封信' } : location) })
+    expect(within(within(map).getByRole('heading', { name: '旧宅' })).getByRole('img', { name: '有新增内容' })).toBeInTheDocument()
+    expect(within(map).getByRole('button', { name: '旧宅的下级地点' })).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(within(map).getByRole('button', { name: '已知地点（按层级）' }))
+    fireEvent.click(container.querySelector('[data-panel-backdrop="地图"]')!)
+    fireEvent.click(screen.getByRole('button', { name: '地图' }))
+    expect(within(map).getByRole('button', { name: '已知地点（按层级）' })).toHaveAttribute('aria-expanded', 'false')
+    expect(within(map).queryByRole('img', { name: '有新增内容' })).not.toBeInTheDocument()
+    fireEvent.click(within(map).getByRole('button', { name: '已知地点（按层级）' }))
+    expect(within(map).getByRole('button', { name: '旧宅的下级地点' })).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(within(map).getByRole('button', { name: '旧宅的下级地点' }))
+    expect(within(map).getByRole('button', { name: '旧宅书房的下级地点' })).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(within(map).getByRole('button', { name: '旧宅书房的下级地点' }))
+    expect(within(map).getByText('暗格中又发现一封信')).toBeVisible()
+  })
+
+  it('moves the current-location marker to the visible ancestor and restores it on expansion', async () => {
+    const base = informationPanelView()
+    const view = { ...base, scene_id: 'shelf', scene: { ...base.scene, id: 'shelf', name: '书房暗格' } }
+    mockGetPlayerView.mockReturnValue(view)
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: '地图' }))
+    const map = screen.getByRole('dialog', { name: '地图' })
+    const expectCurrentAt = (name: string) => {
+      const markers = within(map).getAllByText('当前位置', { exact: true })
+      expect(markers).toHaveLength(1)
+      expect(within(markers[0].closest('.room-play__location-row') as HTMLElement)
+        .getByRole('heading', { name })).toBeVisible()
+    }
+    expectCurrentAt('书房暗格')
+    fireEvent.click(within(map).getByRole('button', { name: '旧宅书房的下级地点' }))
+    expectCurrentAt('旧宅书房')
+    fireEvent.click(within(map).getByRole('button', { name: '旧宅的下级地点' }))
+    expectCurrentAt('旧宅')
+    fireEvent.click(within(map).getByRole('button', { name: '关闭面板' }))
+    fireEvent.click(screen.getByRole('button', { name: '地图' }))
+    expectCurrentAt('旧宅')
+    fireEvent.click(within(map).getByRole('button', { name: '旧宅的下级地点' }))
+    expectCurrentAt('旧宅书房')
+    fireEvent.click(within(map).getByRole('button', { name: '旧宅书房的下级地点' }))
+    expectCurrentAt('书房暗格')
+  })
+
+  it('updates the current-location marker when travelling out of a collapsed branch', async () => {
+    const base = informationPanelView()
+    const view = { ...base, known_locations: [...base.known_locations!, {
+      ...base.known_locations![0], id: 'garden', name: '庭院', description: '庭院里的石径',
+    }] }
+    mockGetPlayerView.mockReturnValue(view)
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: '地图' }))
+    const map = screen.getByRole('dialog', { name: '地图' })
+    fireEvent.click(within(map).getByRole('button', { name: '旧宅的下级地点' }))
+    expect(within(map).getByText('当前位置')).toHaveAttribute('title', '当前位置：旧宅书房')
+    updatePanelView({ ...view, scene_id: 'garden', scene: { ...view.scene, id: 'garden', name: '庭院' } })
+    const markers = within(map).getAllByText('当前位置', { exact: true })
+    expect(markers).toHaveLength(1)
+    expect(within(markers[0].closest('.room-play__location-row') as HTMLElement)
+      .getByRole('heading', { name: '庭院' })).toBeVisible()
+    expect(within(map).getByRole('button', { name: '旧宅的下级地点' })).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it.each(['close', 'backdrop', 'toolbar', 'switch', 'speech', 'members'] as const)(
+    'acknowledges only the map through the %s close path, including folded locations', async (method) => {
+      const view = informationPanelView()
+      mockGetPlayerView.mockReturnValue(view)
+      const { container } = renderRoomPage()
+      await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+      const changed = { ...view,
+        known_locations: view.known_locations!.map((location) => ({ ...location, description: location.description + '补充信息' })),
+        known_information: view.known_information.map((information) => ({ ...information, summary: '新发现的信件内容' })),
+      }
+      updatePanelView(changed)
+      const mapButton = screen.getByRole('button', { name: '地图' })
+      const cluesButton = screen.getByRole('button', { name: '线索' })
+      expect(within(mapButton).getByRole('img', { name: '有新增内容' })).toBeInTheDocument()
+      expect(within(cluesButton).getByRole('img', { name: '有新增内容' })).toBeInTheDocument()
+      fireEvent.click(mapButton)
+      const map = screen.getByRole('dialog', { name: '地图' })
+      fireEvent.click(within(map).getByRole('button', { name: '已知地点（按层级）' }))
+      expect(within(map).getByRole('button', { name: '已知地点（按层级）' })).toHaveAttribute('aria-expanded', 'false')
+      if (method === 'close') fireEvent.click(within(map).getByRole('button', { name: '关闭面板' }))
+      if (method === 'backdrop') fireEvent.click(container.querySelector('[data-panel-backdrop="地图"]')!)
+      if (method === 'toolbar') fireEvent.click(mapButton)
+      if (method === 'switch') fireEvent.click(cluesButton)
+      if (method === 'speech') fireEvent.click(screen.getByRole('button', { name: '主持人语音' }))
+      if (method === 'members') fireEvent.click(screen.getByRole('button', { name: '房间成员' }))
+      expect(within(mapButton).queryByRole('img', { name: '有新增内容' })).not.toBeInTheDocument()
+      expect(within(cluesButton).getByRole('img', { name: '有新增内容' })).toBeInTheDocument()
+      updatePanelView({ ...changed, revision: 'different-revision', known_information: [...changed.known_information].reverse() })
+      expect(within(mapButton).queryByRole('img', { name: '有新增内容' })).not.toBeInTheDocument()
+      updatePanelView({ ...changed,
+        known_locations: changed.known_locations.map((location) => ({ ...location, description: location.description + '又有新发现' })),
+      })
+      expect(within(mapButton).getByRole('img', { name: '有新增内容' })).toBeInTheDocument()
+    },
+  )
+
+  it('keeps clues visible after reopening and clears clue dots without clearing the map', async () => {
+    const view = informationPanelView()
+    mockGetPlayerView.mockReturnValue(view)
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+    updatePanelView({ ...view,
+      known_locations: view.known_locations!.map((location) => ({ ...location, description: location.description + '补充信息' })),
+      known_information: view.known_information.map((information) => ({ ...information, summary: '新增内容' })),
+    })
+    fireEvent.click(screen.getByRole('button', { name: '线索' }))
+    const clues = screen.getByRole('dialog', { name: '线索' })
+    expect(within(clues).getByText('新增内容')).toBeVisible()
+    fireEvent.click(within(clues).getByRole('button', { name: '关闭面板' }))
+    expect(within(screen.getByRole('button', { name: '线索' })).queryByRole('img')).not.toBeInTheDocument()
+    expect(within(screen.getByRole('button', { name: '地图' })).getByRole('img', { name: '有新增内容' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '线索' }))
+    expect(within(clues).getByText('新增内容')).toBeVisible()
+    expect(within(clues).queryByRole('img', { name: '有新增内容' })).not.toBeInTheDocument()
+  })
+
   it('shows the authoritative world clock and ending state from the PlayerView', async () => {
     renderRoomPage()
     await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
@@ -3336,10 +3571,10 @@ describe('RoomPage conversation history', () => {
         },
       }),
     )
-    fireEvent.click(screen.getByRole('button', { name: '地图' }))
+    fireEvent.click(screen.getByRole('button', { name: '线索' }))
 
     expect(screen.getByText('当前场景物品')).toBeInTheDocument()
-    expect(screen.getByText('一枚普通石子')).toBeInTheDocument()
+    expect(screen.getByText('一枚普通石子')).toBeVisible()
     expect(screen.getByText('状态：intact')).toBeInTheDocument()
   })
 

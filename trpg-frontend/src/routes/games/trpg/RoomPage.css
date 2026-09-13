@@ -957,6 +957,331 @@
   overscroll-behavior: contain;
 }
 
+.room-play__bottom-panel--map {
+  overflow: hidden;
+  padding-top: 2.75rem;
+}
+
+.room-play__bottom-panel--map > .room-play__bottom-panel-content {
+  max-height: calc(70vh - 6.5rem) !important;
+  max-height: calc(70dvh - 6.5rem) !important;
+  overscroll-behavior: contain;
+}
+
+.room-play__bottom-panel,
+.room-play__toolbar {
+  --room-information-red: #b0443e;
+}
+
+.room-play__toolbar-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.room-play__unread-dot {
+  display: inline-block;
+  width: 0.4rem;
+  height: 0.4rem;
+  margin-left: 0.35rem;
+  flex: 0 0 0.4rem;
+  vertical-align: middle;
+  border-radius: 50%;
+  background: var(--room-information-red);
+}
+
+.room-play__information-section {
+  padding: 0.45rem 0 0.65rem;
+  border-top: 1px solid rgb(157 106 45 / 24%);
+}
+
+.room-play__information-section-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.room-play__information-actions {
+  flex-shrink: 0;
+}
+
+.room-play__information-summary,
+.room-play__information-heading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  min-width: 0;
+  min-height: 2.5rem;
+  padding: 0.4rem 0.25rem;
+  color: #49321c;
+  text-align: left;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.room-play__information-name {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.room-play__information-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.room-play__information-name > .room-play__unread-dot {
+  margin-left: 0;
+}
+
+.room-play__information-summary > svg,
+.room-play__location-branch > svg {
+  width: 0.9rem;
+  height: 0.9rem;
+  flex-shrink: 0;
+  color: #856a47;
+}
+
+.room-play__information-summary > svg {
+  transform: rotate(-90deg);
+}
+
+.room-play__information-summary > svg.is-expanded {
+  transform: rotate(0);
+}
+
+.room-play__location-branch > svg.is-expanded {
+  transform: rotate(90deg);
+}
+
+.room-play__information-summary:focus-visible,
+.room-play__location-branch:focus-visible {
+  outline: 2px solid #856a47;
+  outline-offset: 2px;
+  border-radius: 0.2rem;
+}
+
+.room-play__information-list {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.room-play__information-entry {
+  min-width: 0;
+  padding: 0 0.5rem;
+  border: 1px solid rgb(157 106 45 / 16%);
+  border-radius: 0.3rem;
+  background: rgb(255 250 232 / 36%);
+}
+
+.room-play__information-title {
+  padding: 0.6rem 0.25rem 0.35rem;
+  color: #49321c;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.room-play__information-entry > .room-play__information-content {
+  padding: 0 0.25rem 0.65rem;
+  color: #796449;
+  font-size: 0.73rem;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.room-play__location-tree,
+.room-play__location-children,
+.room-play__map-items {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.room-play__location-tree,
+.room-play__map-items {
+  padding-inline: 0.5rem 0.25rem;
+}
+
+.room-play__location-children {
+  margin-top: 0.3rem;
+  margin-inline-start: 0.75rem;
+  padding-inline-start: 0.45rem;
+  border-inline-start: 1px solid rgb(133 106 71 / 38%);
+}
+
+.room-play__location-tree .room-play__location-description {
+  padding-inline-start: 1.75rem;
+}
+
+.room-play__location-entry {
+  min-width: 0;
+  padding: 0.2rem 0;
+}
+
+.room-play__location-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.room-play__location-name {
+  color: #49321c;
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.6;
+}
+
+.room-play__location-branch,
+.room-play__location-branch-spacer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  min-height: 1.5rem;
+  flex: 0 0 1.5rem;
+}
+
+.room-play__location-status {
+  flex-shrink: 0;
+  font-size: 0.65rem;
+  font-weight: 600;
+}
+
+.room-play__location-description {
+  color: #796449;
+  font-size: 0.73rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.room-play__location-blocked {
+  color: var(--room-information-red);
+}
+
+.room-play__information-entry--manual {
+  border-style: dashed;
+  border-color: rgb(133 106 71 / 46%);
+  background: rgb(255 250 232 / 12%);
+}
+
+.room-play__record-header {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.room-play__record-header > .room-play__information-title {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.room-play__record-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  gap: 0.25rem;
+  min-height: 2rem;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid rgb(133 106 71 / 26%);
+  border-radius: 0.25rem;
+  color: #684528;
+  background: rgb(255 250 232 / 22%);
+  font-size: 0.73rem;
+  white-space: nowrap;
+}
+
+.room-play__record-action > svg {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+
+.room-play__record-action.is-primary {
+  color: #fffaf0;
+  background: #8a6d40;
+}
+
+.room-play__record-action.is-danger {
+  color: var(--room-information-red);
+}
+
+.room-play__record-delete-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0;
+  color: #684528;
+  font-size: 0.73rem;
+}
+
+.room-play__record-delete-confirm > span {
+  flex: 1;
+}
+
+.room-play__record-delete-confirm > .room-play__record-error {
+  flex-basis: 100%;
+}
+
+.room-play__record-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.room-play__record-editor {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.65rem;
+}
+
+.room-play__record-editor > input,
+.room-play__record-editor > textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 0.4rem;
+  border: 1px solid rgb(133 106 71 / 25%);
+  border-radius: 0.2rem;
+  color: #49321c;
+  background: rgb(255 250 232 / 32%);
+  font-size: 0.8rem;
+}
+
+.room-play__record-editor > textarea {
+  min-height: 6rem;
+  max-height: 40dvh;
+  resize: vertical;
+  line-height: 1.6;
+}
+
+.room-play__record-action:focus-visible,
+.room-play__record-editor > input:focus-visible,
+.room-play__record-editor > textarea:focus-visible {
+  outline: 2px solid #856a47;
+  outline-offset: 2px;
+}
+
+.room-play__record-editor-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
+.room-play__record-error {
+  padding: 0.5rem 0.25rem;
+  color: var(--room-information-red);
+  font-size: 0.73rem;
+}
+
 /* 连续幸运骰占手机框 72%，确保结果和确认按钮无需滚动即可同时看到。 */
 .room-play__bottom-panel--sequential-dice {
   height: 72% !important;
@@ -1062,34 +1387,6 @@
 
 .room-play__skill-tab:active {
   background-color: rgb(92 54 24 / 22%);
-}
-
-.room-play__notes-textarea {
-  min-height: 25rem;
-  border: 0;
-  border-radius: 0;
-  line-height: 2.05;
-  background-color: transparent;
-  background-image: repeating-linear-gradient(
-    to bottom,
-    transparent 0,
-    transparent calc(2.05em - 1px),
-    rgb(126 86 47 / 28%) calc(2.05em - 1px),
-    rgb(126 86 47 / 28%) 2.05em
-  );
-  background-position: 0 0.42rem;
-  background-attachment: local;
-  box-shadow: none;
-}
-
-.room-play__notes-save-status {
-  position: relative;
-  color: #684225;
-  font-size: 0.68rem;
-  font-weight: 600;
-  margin-bottom: -2.1rem;
-  pointer-events: none;
-  transform: translateY(-2.1rem);
 }
 
 .room-play__skill-grid {

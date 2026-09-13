@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { RoomSocketServerError, TurnFailedError, type RoomSocketConnectionState, type AdjudicationPendingPayload, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type CheckResultPayload, type EndingDraft, type NarrationPushPayload, type RoomActionStatePayload, type RoomConversationEvent, type RoomPlayerSummary, type SceneTransitionPendingPayload, type TimeAdvancePendingPayload } from 'trpg-sdk'
-import { ArrowLeft, Users, Map, MapPin, BookOpen, ScrollText, Star, X, SendHorizontal, Plus, Save, FlagOff, Heart, Brain, Volume2, Pause, Play, Square, RotateCcw, Mic, LoaderCircle, Clock3, Check } from 'lucide-react'
-import { useCallback, useState, useRef, useEffect, useMemo, type Dispatch, type FormEvent, type SetStateAction } from 'react'
+import { ArrowLeft, Users, Map, MapPin, BookOpen, ScrollText, Star, X, SendHorizontal, FlagOff, Heart, Brain, Volume2, Pause, Play, Square, RotateCcw, Mic, LoaderCircle, Clock3, Check, ChevronRight } from 'lucide-react'
+import { useCallback, useState, useRef, useEffect, useMemo, type Dispatch, type FormEvent, type ReactNode, type SetStateAction } from 'react'
 import { useRoomStore } from '@/stores/room-store'
 import { useAuthStore } from '@/stores/auth-store'
 import { useRoomCharacter } from '@/hooks/useRoomCharacter'
@@ -11,6 +11,9 @@ import { useRoomPlayers } from '@/hooks/useRoomPlayers'
 import { usePlayerPortraits } from '@/hooks/usePlayerPortraits'
 import { useRuleset } from '@/hooks/useRuleset'
 import { useHostSpeech } from '@/hooks/useHostSpeech'
+import { useRoomPanelState, type RoomPanelEntry } from '@/hooks/useRoomPanelState'
+import { InformationDisclosure, InformationSection, UnreadDot } from '@/features/room-information/InformationDisclosure'
+import { ClueRecords } from '@/features/room-information/ClueRecords'
 import { INSECURE_SPEECH_UNAVAILABLE_REASON, useSpeechInput } from '@/hooks/useSpeechInput'
 import { Dice3DStage, supports3DDice, type Dice3DHandle, type DiceRollToken } from '@/features/dice3d'
 import { OnboardingTrigger } from '@/features/onboarding'
@@ -251,10 +254,11 @@ const EMPTY_ROOM_PLAYERS: RoomPlayerSummary[] = []
 
 interface MapLocation {
   id: string
-  icon: string
   name: string
   desc: string
   depth: number
+  ancestors?: string[]
+  fingerprint?: string
   access?: 'unknown' | 'reachable' | 'blocked'
   visited?: boolean
   isCurrent?: boolean
@@ -291,7 +295,6 @@ function mapLocationsFromPlayerView(playerView: AgentPlayerView | null): MapLoca
   if (!playerView) {
     return [{
       id: 'waiting-for-view',
-      icon: '📍',
       name: '等待场景同步',
       desc: '进入游戏后由规则引擎提供当前位置',
       depth: 0,
@@ -310,7 +313,7 @@ function mapLocationsFromPlayerView(playerView: AgentPlayerView | null): MapLoca
     }
     const ordered: MapLocation[] = []
     const visited = new Set<string>()
-    const walk = (parentId: string | null, depth: number) => {
+    const walk = (parentId: string | null, depth: number, ancestors: string[] = []) => {
       for (const location of children.get(parentId) ?? []) {
         if (visited.has(location.id)) continue
         visited.add(location.id)
@@ -324,25 +327,20 @@ function mapLocationsFromPlayerView(playerView: AgentPlayerView | null): MapLoca
               : '已知地点'
         ordered.push({
           id: location.id,
-          icon: isCurrent
-            ? '📍'
-            : location.kind === 'region'
-              ? '🗺️'
-              : location.kind === 'connector'
-                ? '🛣️'
-                : location.kind === 'room'
-                  ? '🚪'
-                  : '🏛️',
           name: location.name,
           desc: isCurrent
             ? playerView.scene.description || '当前所在场景'
             : location.description || status,
           depth,
+          ancestors,
+          // Current-position decoration changes on travel, not on discovery.
+          fingerprint: JSON.stringify([location.name, location.description, location.kind,
+            location.access, location.localization, location.visited, location.parent_location_id]),
           access: location.access,
           visited: location.visited,
           isCurrent,
         })
-        walk(location.id, depth + 1)
+        walk(location.id, depth + 1, [...ancestors, location.id])
       }
     }
     walk(null, 0)
@@ -357,7 +355,6 @@ function mapLocationsFromPlayerView(playerView: AgentPlayerView | null): MapLoca
   }
   const current: MapLocation = {
     id: playerView.scene.id,
-    icon: '📍',
     name: playerView.scene.name,
     desc: playerView.scene.description || '当前所在场景',
     depth: 0,
@@ -370,13 +367,70 @@ function mapLocationsFromPlayerView(playerView: AgentPlayerView | null): MapLoca
     seen.add(id)
     return [{
       id,
-      icon: exit.destination ? '🧭' : '🚪',
       name: exit.destination?.name ?? exit.name,
       desc: exit.description || `可经「${exit.name}」到达`,
       depth: 0,
     }]
   })
   return [current, ...exits]
+}
+
+function MapLocationTree({ locations, unreadIds, isExpanded, onToggle }: {
+  locations: MapLocation[]
+  unreadIds: ReadonlySet<string>
+  isExpanded: (id: string) => boolean
+  onToggle: (id: string) => void
+}) {
+  const children = new globalThis.Map<string | null, MapLocation[]>()
+  for (const location of locations) {
+    const parentId = location.ancestors?.at(-1) ?? null
+    children.set(parentId, [...(children.get(parentId) ?? []), location])
+  }
+  const current = locations.find((location) => location.isCurrent)
+  // The first collapsed ancestor is the visible row containing the current place.
+  const currentMarkerId = current?.ancestors?.find((id) =>
+    !isExpanded(`location-children:${id}`)) ?? current?.id
+
+  function renderBranches(parentId: string | null): ReactNode {
+    return children.get(parentId)?.map((location) => {
+      const hasChildren = children.has(location.id)
+      const foldKey = `location-children:${location.id}`
+      const expanded = isExpanded(foldKey)
+      const showsCurrent = currentMarkerId === location.id
+      return (
+        <li key={location.id} className="room-play__location-entry">
+          <div className="room-play__location-row">
+            {hasChildren ? (
+              <button
+                type="button" className="room-play__location-branch"
+                aria-label={`${location.name}的下级地点`}
+                aria-expanded={expanded}
+                onClick={() => onToggle(foldKey)}
+              >
+                <ChevronRight aria-hidden="true" className={expanded ? 'is-expanded' : ''} />
+              </button>
+            ) : <span className="room-play__location-branch-spacer" aria-hidden="true" />}
+            <h5 className="room-play__information-name room-play__location-name" aria-label={location.name}>
+              <span className="room-play__information-text">{location.name}</span>
+              {unreadIds.has(location.id) && <UnreadDot />}
+            </h5>
+            {(showsCurrent || location.access === 'blocked') && (
+              <span className="room-play__location-status">
+                {showsCurrent ? <span className="text-mold" title={`当前位置：${current?.name}`}>当前位置</span>
+                  : <span className="room-play__location-blocked">受阻</span>}
+              </span>
+            )}
+          </div>
+          <p className="room-play__location-description">{location.desc}</p>
+          {hasChildren && expanded && (
+            <ul className="room-play__location-children">{renderBranches(location.id)}</ul>
+          )}
+        </li>
+      )
+    })
+  }
+
+  return <ul className="room-play__location-tree">{renderBranches(null)}</ul>
 }
 
 const PHASE_LABELS: Record<AgentTurnPhase, string> = {
@@ -723,8 +777,13 @@ function BottomPanel({ open, onClose, title, children, heightVh, className = '' 
 
   return (
     <>
-      {open && <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />}
+      {open && <div data-panel-backdrop={title} className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />}
       <div
+        role="dialog"
+        aria-label={title}
+        aria-modal={open ? true : undefined}
+        aria-hidden={!open}
+        inert={!open}
         className={`room-play__bottom-panel ${className} fixed bottom-0 left-0 right-0 z-50 bg-card rounded-t-2xl shadow-xl transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] max-w-[430px] mx-auto ${open ? 'translate-y-0' : 'translate-y-full'}`}
         style={heightVh ? { height: `${maxH}vh` } : { maxHeight: `${maxH}vh` }}
       >
@@ -1619,7 +1678,6 @@ export default function RoomPage() {
   const [actionErrorIsGuidance, setActionErrorIsGuidance] = useState(false)
   const [actionErrorCode, setActionErrorCode] = useState<string | null>(null)
   const [actionErrorCorrelationId, setActionErrorCorrelationId] = useState<string | null>(null)
-  const [openPanel, setOpenPanel] = useState<string | null>(null)
   const [sheetPage, setSheetPage] = useState<'info' | 'background'>('info')
   const [skillsTab, setSkillsTab] = useState<'occupation' | 'interest'>('occupation')
   const [showDice, setShowDice] = useState(false)
@@ -1634,14 +1692,6 @@ export default function RoomPage() {
     setChannel('action')
     setShowDice(true)
   }, [])
-  const notesKey = roomId ? `aidm-notes-${roomId}` : null
-  // ★ 之前"📋 案件笔记"标题是直接塞进 textarea 初始内容里的普通文本，用户
-  // 一编辑/全选删除就会把标题本身也删掉。改成占位符（placeholder），真正
-  // 的内容默认是空白，标题不会被误删，也不占用户还没写的正文空间。
-  const [notes, setNotes] = useState(
-    () => (notesKey && localStorage.getItem(notesKey)) || ''
-  )
-  const [lastSaved, setLastSaved] = useState<string | null>(() => (notesKey ? localStorage.getItem(notesKey) : null) ? new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const composerInputRef = useRef<HTMLTextAreaElement>(null)
   const recipientMenuRef = useRef<HTMLDivElement>(null)
@@ -1687,7 +1737,29 @@ export default function RoomPage() {
         ? `${busyActionOwnerRef.current}的行动正在处理中`
         : null
   const displayedProgressLabel = processingProgressLabel ?? progressLabel
-  const mapLocations = mapLocationsFromPlayerView(playerView)
+  const mapLocations = useMemo(() => mapLocationsFromPlayerView(playerView), [playerView])
+  const panelEntries = useMemo<RoomPanelEntry[] | null>(() => {
+    if (!playerView || playerView.room_id !== roomId || playerView.player_id !== playerId) return null
+    return [
+      ...mapLocations.map((loc): RoomPanelEntry => ({
+        id: `location:${loc.id}`, panel: 'map',
+        content: loc.fingerprint ?? JSON.stringify([loc.name, loc.desc, loc.access]),
+      })),
+      ...(playerView.scene.loose_items ?? []).map((item): RoomPanelEntry => ({
+        id: `item:${item.id}`, panel: 'notes',
+        content: JSON.stringify([item.name, item.quantity, item.condition]),
+      })),
+      ...playerView.known_information.map((info): RoomPanelEntry => ({
+        id: `information:${info.id}`, panel: 'notes',
+        content: JSON.stringify([info.title, info.summary]),
+      })),
+    ]
+  }, [mapLocations, playerView, roomId, playerId])
+  const { openPanel, setOpenPanel, isExpanded, toggleExpanded, isUnread, hasUnread } =
+    useRoomPanelState(roomId, playerId, panelEntries)
+  const unreadLocationIds = new Set(mapLocations
+    .filter((loc) => isUnread(`location:${loc.id}`))
+    .flatMap((loc) => [loc.id, ...(loc.ancestors ?? [])]))
   const visibleNpcs = useMemo(
     () => (playerView?.scene.visible_entities ?? []).filter((entity) => {
       if (entity.kind !== 'npc') return false
@@ -2769,17 +2841,21 @@ export default function RoomPage() {
           { icon: ScrollText, label: '角色卡', key: 'sheet' },
           { icon: Star, label: '技能', key: 'skills' },
           { icon: Map, label: '地图', key: 'map' },
-          { icon: BookOpen, label: '笔记', key: 'notes' },
+          { icon: BookOpen, label: '线索', key: 'notes' },
         ].map((item) => (
           <button
             key={item.key}
             type="button"
+            aria-label={item.label}
+            aria-description={(item.key === 'map' || item.key === 'notes') && hasUnread(item.key) ? '有新增内容' : undefined}
             aria-pressed={openPanel === item.key}
             onClick={() => setOpenPanel(openPanel === item.key ? null : item.key)}
             className={openPanel === item.key ? 'is-active' : ''}
           >
             <item.icon aria-hidden="true" strokeWidth={1.7} />
-            <span>{item.label}</span>
+            <span className="room-play__toolbar-label">{item.label}
+              {(item.key === 'map' || item.key === 'notes') && hasUnread(item.key) && <UnreadDot />}
+            </span>
           </button>
         ))}
       </div>
@@ -3351,7 +3427,11 @@ export default function RoomPage() {
       </BottomPanel>
 
       {/* Panel: 地图 */}
-      <BottomPanel open={openPanel === 'map'} onClose={() => setOpenPanel(null)} title="地图">
+      <BottomPanel
+        open={openPanel === 'map'} onClose={() => setOpenPanel(null)} title="地图"
+        heightVh={70}
+        className="room-play__bottom-panel--character-paper room-play__bottom-panel--map"
+      >
         <div className={`room-play__location-preview ${currentLocationImage ? 'has-image' : ''}`}>
           {currentLocationImage ? (
             <img
@@ -3418,95 +3498,47 @@ export default function RoomPage() {
             </div>
           </div>
         )}
-        <h4 className="text-xs font-semibold text-brass-dark mb-2.5">已知地点（按层级）</h4>
-        <div className="space-y-1.5">
-          {mapLocations.map((loc) => (
-            <div key={loc.id} style={{ paddingLeft: `${12 + loc.depth * 18}px` }} className={`flex items-center gap-3 pr-3 py-2 rounded ${
-              loc.isCurrent ? 'bg-[rgba(74,138,74,0.06)] border border-[rgba(74,138,74,0.15)]' : 'hover:bg-panel'
-            }`}>
-              <span className="text-lg">{loc.icon}</span>
-              <div className="flex-1">
-                <div className="text-sm font-medium text-text-primary">{loc.name}</div>
-                <div className="text-[11px] text-text-muted">{loc.desc}</div>
-              </div>
-              {!loc.isCurrent && loc.access === 'blocked' && (
-                <span className="text-[10px] font-semibold text-amber-700 flex-shrink-0">受阻</span>
-              )}
-              {loc.isCurrent && <span className="text-[10px] font-semibold text-mold flex-shrink-0">▶ 当前位置</span>}
-            </div>
-          ))}
-        </div>
-        {playerView?.scene.loose_items?.length ? (
-          <>
-            <div className="h-px bg-border-light my-3.5" />
-            <h4 className="text-xs font-semibold text-brass-dark mb-2.5">当前场景物品</h4>
-            <div className="space-y-2">
-              {playerView.scene.loose_items.map(item => (
-                <div key={item.id} className="rounded-md bg-panel px-3 py-2">
-                  <div className="text-sm font-medium text-text-primary">
-                    {item.name}{item.quantity > 1 ? ` ×${item.quantity}` : ''}
-                  </div>
-                  <div className="text-[11px] text-text-muted mt-0.5">
-                    状态：{item.condition}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </>
-        ) : null}
-        {playerView && playerView.known_information.length > 0 && (
-          <>
-            <div className="h-px bg-border-light my-3.5" />
-            <h4 className="text-xs font-semibold text-brass-dark mb-2.5">已知信息</h4>
-            <div className="space-y-2">
-              {playerView.known_information.map((information) => (
-                <div key={information.id} className="rounded-md bg-panel px-3 py-2">
-                  <div className="text-sm font-medium text-text-primary">
-                    {information.title}
-                  </div>
-                  <div className="text-[11px] leading-relaxed text-text-muted mt-0.5">
-                    {information.summary}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
+        <InformationDisclosure
+          title="已知地点（按层级）" expanded={isExpanded('locations')}
+          onToggle={() => toggleExpanded('locations')} unread={unreadLocationIds.size > 0}
+        >
+          <MapLocationTree
+            locations={mapLocations} unreadIds={unreadLocationIds}
+            isExpanded={isExpanded} onToggle={toggleExpanded}
+          />
+        </InformationDisclosure>
       </BottomPanel>
 
-      {/* Panel: 速记 */}
+      {/* Panel: 线索（场景物品、已知信息与手动记录） */}
       <BottomPanel
         open={openPanel === 'notes'}
         onClose={() => setOpenPanel(null)}
-        title="速记本"
+        title="线索"
         heightVh={65}
         className="room-play__bottom-panel--character-paper room-play__bottom-panel--notes"
       >
-        <div className="flex gap-2 mb-3">
-          <button onClick={() => setNotes(prev => {
-              const tag = `[🔍 新线索 ${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}]`
-              const existingNotes = prev.trimStart()
-              return existingNotes ? `${tag}\n\n${existingNotes}` : `${tag}\n`
-            })}
-            className="flex-1 py-2 rounded-sm bg-panel border border-border-light text-text-muted text-xs font-medium flex items-center justify-center gap-1 active:bg-border-light">
-            <Plus className="w-3.5 h-3.5" /> 添加线索标签
-          </button>
-          <button onClick={() => {
-              if (!notesKey) return
-              localStorage.setItem(notesKey, notes)
-              setLastSaved(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }))
-            }}
-            className="px-4 py-2 rounded-sm bg-brass text-white text-xs font-medium flex items-center justify-center gap-1 active:bg-brass-dark">
-            <Save className="w-3.5 h-3.5" /> 保存
-          </button>
-        </div>
-        <textarea
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          placeholder="📋 案件笔记"
-          className="room-play__notes-textarea w-full text-sm text-text-body px-1 py-2 resize-none outline-none font-mono placeholder:text-text-dim"
+        <InformationSection
+          title="当前场景物品"
+          unread={playerView?.scene.loose_items?.some((item) => isUnread(`item:${item.id}`)) ?? false}
+        >
+          {playerView?.scene.loose_items?.length ? (
+            <ul className="room-play__map-items">
+              {playerView.scene.loose_items.map((item) => (
+                <li key={item.id} className="room-play__location-entry">
+                  <h5 className="room-play__information-name room-play__location-name">
+                    <span className="room-play__information-text">{item.name}{item.quantity > 1 ? ` ×${item.quantity}` : ''}</span>
+                    {isUnread(`item:${item.id}`) && <UnreadDot />}
+                  </h5>
+                  <p className="room-play__location-description">状态：{item.condition}</p>
+                </li>
+              ))}
+            </ul>
+          ) : <p className="text-xs text-text-muted py-2">{playerView ? '当前场景暂无物品' : '等待场景同步'}</p>}
+        </InformationSection>
+        <ClueRecords
+          roomId={roomId} information={playerView?.known_information ?? []}
+          isUnread={isUnread}
         />
-        <div className="room-play__notes-save-status mt-2 text-right">{lastSaved ? `最后保存: ${lastSaved}` : '尚未保存'}</div>
       </BottomPanel>
 
       {/* Panel: 主持人语音 */}

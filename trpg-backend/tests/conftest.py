@@ -7,6 +7,7 @@
 """
 
 import asyncio
+import os
 import tempfile
 from collections.abc import AsyncGenerator, Callable, Generator
 from pathlib import Path
@@ -55,7 +56,7 @@ _TEST_DB_PATH = Path(tempfile.mkdtemp(prefix="trpg-test-")) / "test.db"
 # 循环里）又拿到这个绑定在旧循环上的连接，就会挂死。NullPool 让每次都开一个
 # 干净的新连接，避免跨事件循环复用。
 test_engine = create_async_engine(
-    f"sqlite+aiosqlite:///{_TEST_DB_PATH}",
+    os.environ.get("TRPG_TEST_DATABASE_URL", f"sqlite+aiosqlite:///{_TEST_DB_PATH}"),
     poolclass=NullPool,
     connect_args={"timeout": 30},
 )

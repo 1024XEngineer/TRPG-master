@@ -140,6 +140,7 @@ export function CharacterBasicInfo({
   occupationName,
   attributes,
   liveResources,
+  liveConditions = [],
   portraitAction,
 }: {
   character: CompletedCharacter
@@ -147,6 +148,7 @@ export function CharacterBasicInfo({
   occupationName?: string | null
   attributes: readonly RadarAttribute[]
   liveResources?: LiveResources
+  liveConditions?: readonly { id: string; name: string; remaining_hours?: number | null; bout_type?: string | null; recovery_status?: string | null; review_after_hours?: number | null }[]
   portraitAction?: { kind: 'preview' } | { kind: 'generate'; onActivate: () => void } | { kind: 'static' }
 }) {
   // 当前值优先，没有运行时投影时才落回建卡快照。
@@ -161,8 +163,7 @@ export function CharacterBasicInfo({
     if (live !== null) attributeValues[attribute.key] = live
   }
 
-  // 初始值不能就这么消失：SAN 的初始值决定不定性疯狂的阈值（1/5），幸运的初始
-  // 值是成长上限的参考。只列出真正变过的项，没变时这一行不渲染。
+  // 保留建卡初始值供比较；疯狂累计基准由引擎在游戏窗口开始时记录。
   const changed = [
     // 只认数字：`db` 是字符串且从不作为资源投影；老角色卡还可能整个缺 `mp`
     // 这类键，那时没有「初始值」可言，列出来只会是 `MP undefined`。
@@ -179,6 +180,20 @@ export function CharacterBasicInfo({
 
   return (
     <>
+      {liveConditions.length > 0 && (
+        <div aria-label="当前状态" className="flex flex-wrap gap-2 text-sm">
+          {liveConditions.map(condition => (
+            <span key={condition.id} className="rounded border border-brass/30 px-2 py-1">
+              {condition.name}{condition.bout_type ? ` · ${condition.bout_type}` : ''}
+              {condition.remaining_hours != null ? ` · 剩余 ${condition.remaining_hours} 个游戏小时` : ''}
+              {condition.recovery_status === 'care_required' ? ' · 需要治疗或守秘人确认恢复' : ''}
+              {condition.recovery_status === 'in_treatment' ? ` · 治疗中，${condition.review_after_hours} 个游戏小时后可复查` : ''}
+              {condition.recovery_status === 'review_due' ? ' · 可进行恢复检查' : ''}
+              {condition.recovery_status === 'interrupted' ? ' · 治疗已中断，需要重新安排' : ''}
+            </span>
+          ))}
+        </div>
+      )}
       <div className="character-ready-sheet__profile">
         <div
           className="character-ready-sheet__portrait rounded-sm flex items-center justify-center text-2xl overflow-hidden"

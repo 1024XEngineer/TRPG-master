@@ -176,7 +176,41 @@ async def _is_stale(db: AsyncSession, record: TimeAdvanceProposalRecord) -> bool
         return True
     state = GameState.model_validate(session.state_json)
     current_players = sorted({actor.player_id for actor in state.actors.values()})
-    return current_players != sorted(record.required_player_ids)
+    if current_players != sorted(record.required_player_ids):
+        return True
+    # Reading an early PR #532 snapshot retires mechanical stops without
+    # changing its revision. A proposal frozen before that upgrade may now
+    # refer to a different jump; fresh proposals for the new target stay valid.
+    migrated = any(
+        task.cancel_reason_code == "mechanical_deadline_migrated"
+        and session.state_json.get("time_tasks", {}).get(key, {}).get("status") == "scheduled"
+        for key, task in state.time_tasks.items()
+    )
+    if not migrated:
+        return False
+    version = await db.get(ModuleVersion, (session.module_id, session.module_version))
+    if version is None:
+        return True
+    module = ModuleContentV3.model_validate(version.content_json)
+    target_time = state.world_time
+    try:
+        for effect in _adjudication(record).success_effects:
+            if not isinstance(effect, AdvanceWorldTimeEffect):
+                continue
+            target_time = advanced_to_next(module, target_time, active_occurrences(state))
+            state, _ = settle_due_tasks(state, target_time)
+            if (
+                effect.to_point_id is not None
+                and effect.to_point_id != target_time.current_point_id
+            ):
+                return True
+    except ContractError:
+        return True
+    return (
+        target_time.current_point_id,
+        target_time.current.day_index,
+        target_time.current.hour_of_day,
+    ) != (record.target_point_id, record.target_day_index, record.target_hour_of_day)
 
 
 def _response_lock(room_id: str) -> asyncio.Lock:

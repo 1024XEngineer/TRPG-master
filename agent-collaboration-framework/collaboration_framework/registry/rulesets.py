@@ -15,12 +15,27 @@ the CoC7 adapter therefore registers only the already executable
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass, field, replace
 from types import MappingProxyType
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
+from collaboration_framework.contracts import ModuleContentV3
+from .check_outcomes import OutcomeServices
+
+if TYPE_CHECKING:
+    from collaboration_framework.engine.models import (
+        GameState,
+        EngineRuntimeSnapshot,
+        DomainEvent,
+    )
+
+from .sanity_ledger import development_phase, acknowledge_history
 from .check_profiles import COC7_CHECK_PROFILES, CheckProfileRegistration
+from .check_outcomes import CheckOutcomeHandler, coc7_sanity_outcome
+from .sanity_periods import on_time_point
+from .sanity_treatment import start_treatment, review_treatment, treatment_due
+from .insanity import insanity_int_outcome, safe_rest, end_bout
 
 
 class RulesetRegistryError(LookupError):
@@ -37,27 +52,33 @@ class RulesetActionError(ValueError):
 
 @dataclass(frozen=True)
 class RulesetActionContext:
-    state: Any
+    state: GameState
     actor_id: str
     actor_binding: str
     parameters: Mapping[str, Any]
     request_id: str
     operation_key: str
+    services: OutcomeServices | None = None
+    module_content: ModuleContentV3 | None = None
+    simulation: bool = False
 
 
 @dataclass(frozen=True)
 class RulesetActionResult:
-    state: Any
+    state: GameState
     event_type: str | None = None
     payload: dict[str, Any] = field(default_factory=dict)
 
 
-RulesetAction = Any
+RulesetAction = Callable[[RulesetActionContext], RulesetActionResult]
 
 
 COC7_CONDITION_IDS: frozenset[str] = frozenset(
     {
         "unconscious",
+        "temporary_insanity",
+        "indefinite_insanity",
+        "madness_bout",
         "unconscious_until_night",
         "arrested_during_prohibition",
         "drowning",
@@ -100,7 +121,9 @@ def _coc7_apply_condition(context: RulesetActionContext) -> RulesetActionResult:
             "RULESET_ACTION_INVALID_PARAMETERS",
             "condition reason 必须是非空字符串",
         )
-    expiry_value = context.parameters.get("expiry", context.parameters.get("lifecycle_ref"))
+    expiry_value = context.parameters.get(
+        "expiry", context.parameters.get("lifecycle_ref")
+    )
     expiry = None
     if expiry_value is not None:
         if not isinstance(expiry_value, dict):
@@ -111,9 +134,11 @@ def _coc7_apply_condition(context: RulesetActionContext) -> RulesetActionResult:
         try:
             kind = expiry_value.get("kind")
             reference_id = expiry_value.get("reference_id")
-            if kind not in {"time_point", "time_task"} or not isinstance(
-                reference_id, str
-            ) or not reference_id.strip():
+            if (
+                kind not in {"time_point", "time_task"}
+                or not isinstance(reference_id, str)
+                or not reference_id.strip()
+            ):
                 raise ValueError("invalid expiry")
             expiry = {"kind": kind, "reference_id": reference_id}
         except ValueError as exc:
@@ -123,14 +148,17 @@ def _coc7_apply_condition(context: RulesetActionContext) -> RulesetActionResult:
             ) from exc
     actor = context.state.actors.get(context.actor_id)
     if actor is None:
-        raise RulesetActionError("RULESET_ACTION_TARGET_UNKNOWN", "规则动作目标角色不存在")
+        raise RulesetActionError(
+            "RULESET_ACTION_TARGET_UNKNOWN", "规则动作目标角色不存在"
+        )
     records = list(actor.condition_states)
     existing = next(
         (item for item in records if item.application_key == context.operation_key),
         None,
     )
     if existing is not None or any(
-        item.condition_id == condition_id and item.status == "active" for item in records
+        item.condition_id == condition_id and item.status == "active"
+        for item in records
     ):
         return RulesetActionResult(state=context.state)
     record = {
@@ -170,21 +198,31 @@ def _coc7_apply_condition(context: RulesetActionContext) -> RulesetActionResult:
 
 
 @dataclass(frozen=True)
+class RulesetEventContext:
+    runtime: EngineRuntimeSnapshot
+    state: GameState
+    event: DomainEvent
+    services: OutcomeServices
+
+
+RulesetEventHandler = Callable[[RulesetEventContext], "GameState"]
+
+
+@dataclass(frozen=True)
 class RulesetAdapter:
     """The runtime capability catalogue owned by one ``world_ref``.
 
-    Handler and executor values are intentionally typed as ``Any`` in this
-    boundary. Their concrete call contracts belong to the Engine and will be
-    narrowed when the corresponding capabilities are implemented. The
-    registry still gives those capabilities a stable, world-scoped home now.
+    Check handlers consume typed final results and return generic effects.
+    World actions share the same stable, world-scoped catalogue.
     """
 
     world_ref: str
-    check_profiles: Mapping[str, CheckProfileRegistration] = field(
+    check_profiles: Mapping[str, CheckProfileRegistration] = field(default_factory=dict)
+    check_outcome_handlers: Mapping[str, CheckOutcomeHandler] = field(
         default_factory=dict
     )
-    check_outcome_handlers: Mapping[str, Any] = field(default_factory=dict)
     world_actions: Mapping[str, RulesetAction] = field(default_factory=dict)
+    event_handlers: Mapping[str, RulesetEventHandler] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.world_ref.strip():
@@ -193,6 +231,7 @@ class RulesetAdapter:
             "check_profiles",
             "check_outcome_handlers",
             "world_actions",
+            "event_handlers",
         ):
             value = getattr(self, field_name)
             object.__setattr__(self, field_name, MappingProxyType(dict(value)))
@@ -200,10 +239,10 @@ class RulesetAdapter:
     def check_profile_for(self, profile_id: str) -> CheckProfileRegistration | None:
         return self.check_profiles.get(profile_id)
 
-    def check_outcome_handler_for(self, profile_id: str) -> Any | None:
+    def check_outcome_handler_for(self, profile_id: str) -> CheckOutcomeHandler | None:
         return self.check_outcome_handlers.get(profile_id)
 
-    def world_action_for(self, action_id: str) -> Any | None:
+    def world_action_for(self, action_id: str) -> RulesetAction | None:
         return self.world_actions.get(action_id)
 
 
@@ -269,7 +308,9 @@ class RulesetAdapterRegistry:
             )
         return profile
 
-    def check_outcome_handler_for(self, world_ref: str, profile_id: str) -> Any | None:
+    def check_outcome_handler_for(
+        self, world_ref: str, profile_id: str
+    ) -> CheckOutcomeHandler | None:
         adapter = self.adapter_for(world_ref)
         return (
             adapter.check_outcome_handler_for(profile_id)
@@ -277,7 +318,9 @@ class RulesetAdapterRegistry:
             else None
         )
 
-    def require_check_outcome_handler(self, world_ref: str, profile_id: str) -> Any:
+    def require_check_outcome_handler(
+        self, world_ref: str, profile_id: str
+    ) -> CheckOutcomeHandler:
         handler = self.check_outcome_handler_for(world_ref, profile_id)
         if handler is None:
             raise RulesetRegistryError(
@@ -300,10 +343,30 @@ class RulesetAdapterRegistry:
         return action
 
 
+def _coc7_time_point(context):
+    state = on_time_point(context)
+    return treatment_due(replace(context, state=state))
+
+
 COC7_ADAPTER = RulesetAdapter(
     world_ref="coc-7e",
     check_profiles=COC7_CHECK_PROFILES,
-    world_actions={"coc7.apply_condition": _coc7_apply_condition},
+    event_handlers={
+        "time.point_entered": _coc7_time_point,
+    },
+    check_outcome_handlers={
+        "coc7.sanity": coc7_sanity_outcome,
+        "coc7.insanity_int": insanity_int_outcome,
+    },
+    world_actions={
+        "coc7.apply_condition": _coc7_apply_condition,
+        "coc7.safe_rest": safe_rest,
+        "coc7.start_treatment": start_treatment,
+        "coc7.review_treatment": review_treatment,
+        "coc7.end_bout": end_bout,
+        "coc7.investigator_development": development_phase,
+        "coc7.acknowledge_sanity_history": acknowledge_history,
+    },
 )
 
 DEFAULT_RULESET_REGISTRY = RulesetAdapterRegistry((COC7_ADAPTER,))
@@ -331,11 +394,15 @@ def check_profile_for(
     return DEFAULT_RULESET_REGISTRY.check_profile_for(world_ref, profile_id)
 
 
-def check_outcome_handler_for(world_ref: str, profile_id: str) -> Any | None:
+def check_outcome_handler_for(
+    world_ref: str, profile_id: str
+) -> CheckOutcomeHandler | None:
     return DEFAULT_RULESET_REGISTRY.check_outcome_handler_for(world_ref, profile_id)
 
 
-def require_check_outcome_handler(world_ref: str, profile_id: str) -> Any:
+def require_check_outcome_handler(
+    world_ref: str, profile_id: str
+) -> CheckOutcomeHandler:
     return DEFAULT_RULESET_REGISTRY.require_check_outcome_handler(world_ref, profile_id)
 
 

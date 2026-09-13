@@ -129,6 +129,7 @@ class PlayerViewProjector:
                     for item in snapshot.self_actor.resources
                 ),
                 conditions=snapshot.self_actor.conditions,
+                condition_details=snapshot.self_actor.condition_details,
                 equipment=snapshot.self_actor.equipment,
                 background_summary=snapshot.self_actor.background_summary,
                 public_status_summary=snapshot.self_actor.public_status_summary,

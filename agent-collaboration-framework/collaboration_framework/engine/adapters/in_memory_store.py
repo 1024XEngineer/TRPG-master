@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime
+from copy import deepcopy
 
 from collaboration_framework.contracts import (
     ContractError,
@@ -48,6 +49,7 @@ class _RoomData:
 class _RoomRecord:
     data: _RoomData
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    randomness: dict[str, dict] = field(default_factory=dict)
 
 
 class InMemoryEngineStore:
@@ -83,6 +85,15 @@ class InMemoryEngineStore:
                 check_runs={},
             )
         )
+
+    async def prepare_randomness(self, *, room_id, operation_key, create):
+        record = self._record(room_id)
+        async with record.lock:
+            if operation_key in record.randomness:
+                return deepcopy(record.randomness[operation_key]), False
+            snapshot = create()
+            record.randomness[operation_key] = deepcopy(snapshot)
+            return snapshot, True
 
     @asynccontextmanager
     async def transaction(self, room_id: str) -> AsyncIterator[EngineTransaction]:
@@ -285,6 +296,7 @@ class _InMemoryEngineTransaction(EngineTransaction):
             module_content=module.model_copy(deep=True),
             game_state=data.game_state.model_copy(deep=True),
             revision=data.revision,
+            event_history=data.domain_events if any(a.sanity is None for a in data.game_state.actors.values()) else (),
         )
 
     async def find_completed_action(

@@ -6,13 +6,14 @@
  * 问题。
  */
 import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync, rmSync } from 'node:fs'
+import { existsSync, globSync, rmSync } from 'node:fs'
 import { createServer } from 'node:net'
-import { delimiter, dirname, resolve } from 'node:path'
+import { delimiter, dirname, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const BACKEND_DIR = resolve(HERE, '../../trpg-backend')
+const E2E_DIR = resolve(HERE, '..')
 
 /**
  * 刻意**不用**开发默认的 8000 端口。
@@ -28,6 +29,39 @@ const BASE_URL = `http://127.0.0.1:${PORT}`
 const TSX_CLI = resolve(HERE, '../node_modules/tsx/dist/cli.mjs')
 const TEST_PATTERN = process.argv[2] ?? process.env.E2E_ONLY ?? 'tests/*.e2e.ts'
 const TEST_NAME_PATTERN = process.env.E2E_TEST_NAME_PATTERN
+
+// 有限骰列属于后端进程，不能让并行用例争用。同一入口负责全量与单文件的配置，
+// 每条 SAN 穿行各自启动后端和新数据库，默认用例仍使用固定骰值 1。
+const SCENARIO_DICE: Record<string, Record<string, number[]>> = {
+  'tests/sanity-settlement.e2e.ts': { '100': [81], '6': [4] },
+  'tests/sanity-habituation.e2e.ts': { '100': [81, 81, 81], '6': [4, 4, 3] },
+  'tests/temporary-insanity.e2e.ts': { '100': [81, 21], '6': [5], '10': [8, 3, 2] },
+  'tests/indefinite-insanity.e2e.ts': { '100': [81, 81, 81, 81], '6': [4, 4, 3, 1], '10': [3, 2] },
+}
+
+interface TestScenario {
+  label: string
+  files: string[]
+  diceBySides?: string
+}
+
+function selectedScenarios(): TestScenario[] {
+  const files = globSync(TEST_PATTERN, { cwd: E2E_DIR })
+    .map(file => relative(E2E_DIR, resolve(E2E_DIR, file)).split(sep).join('/'))
+    .sort()
+  if (files.length === 0) throw new Error(`没有匹配的 E2E 文件：${TEST_PATTERN}`)
+  const defaults = files.filter(file => !SCENARIO_DICE[file])
+  return [
+    ...(defaults.length ? [{
+      label: '默认场景', files: defaults, diceBySides: process.env.E2E_DICE_BY_SIDES,
+    }] : []),
+    ...files.filter(file => SCENARIO_DICE[file]).map(file => ({
+      label: file,
+      files: [file],
+      diceBySides: process.env.E2E_DICE_BY_SIDES ?? JSON.stringify(SCENARIO_DICE[file]),
+    })),
+  ]
+}
 
 /**
  * 每次跑都用**全新的 e2e.db**。
@@ -90,9 +124,9 @@ function venvExecutable(name: string): string {
   return resolve(VENV_BIN, `${name}${EXECUTABLE_SUFFIX}`)
 }
 
-function run(command: string, args: string[], label: string): Promise<void> {
+function run(command: string, args: string[], label: string, env: NodeJS.ProcessEnv): Promise<void> {
   return new Promise((resolvePromise, rejectPromise) => {
-    const child = spawn(command, args, { cwd: BACKEND_DIR, env: backendEnv, stdio: 'inherit' })
+    const child = spawn(command, args, { cwd: BACKEND_DIR, env, stdio: 'inherit' })
     child.on('exit', (code) =>
       code === 0 ? resolvePromise() : rejectPromise(new Error(`${label} 退出码 ${code}`))
     )
@@ -159,66 +193,91 @@ async function main(): Promise<number> {
       ? 'Host 模型：trpg-backend/.env 配置的真实 provider（E2E_REAL_MODEL=1）'
       : 'Host 模型：Fake（设 E2E_REAL_MODEL=1 走真实 provider）'
   )
+  let exitCode = 0
+  for (const scenario of selectedScenarios()) {
+    console.log(`E2E 场景：${scenario.label}（${scenario.files.length} 个文件）`)
+    const result = await runScenario(scenario)
+    if (result !== 0) exitCode = result
+  }
+  return exitCode
+}
+
+async function runScenario(scenario: TestScenario): Promise<number> {
   await assertPortFree(PORT)
-  rmSync(DB_FILE, { force: true })
-  await run(venvExecutable('alembic'), ['upgrade', 'head'], 'alembic')
-  await run(venvExecutable('python'), ['scripts/load_paper_chase.py'], '追书人 loader')
+  for (const suffix of ['', '-wal', '-shm']) rmSync(DB_FILE + suffix, { force: true })
+  const env = { ...backendEnv, TEST_DICE_BY_SIDES: scenario.diceBySides ?? 'null' }
+  await run(venvExecutable('alembic'), ['upgrade', 'head'], 'alembic', env)
+  await run(venvExecutable('python'), ['scripts/load_paper_chase.py'], '追书人 loader', env)
   await run(
     venvExecutable('python'),
     [resolve(HERE, 'seed_multiplayer_fixture.py')],
-    'E2E 多人模组夹具'
+    'E2E 多人模组夹具',
+    env,
   )
 
+  backendExitCode = undefined
   backend = spawn(
     venvExecutable('uvicorn'),
     ['app.main:app', '--host', '127.0.0.1', '--port', String(PORT)],
-    { cwd: BACKEND_DIR, env: backendEnv, stdio: ['ignore', 'ignore', 'inherit'] }
+    { cwd: BACKEND_DIR, env, stdio: ['ignore', 'ignore', 'inherit'] }
   )
   backend.on('exit', (code) => {
     backendExitCode = code ?? 1
   })
-  await waitForBackend()
-
-  return await new Promise<number>((resolvePromise) => {
-    const tests = spawn(
-      process.execPath,
-      [
-        TSX_CLI,
-        '--test',
-        '--test-reporter=spec',
-        ...(TEST_NAME_PATTERN ? ['--test-name-pattern', TEST_NAME_PATTERN] : []),
-        TEST_PATTERN,
-      ],
-      {
-        cwd: resolve(HERE, '..'),
-        env: { ...process.env, E2E_BASE_URL: BASE_URL },
-        stdio: 'inherit',
-      }
-    )
-    tests.on('exit', (code) => resolvePromise(code ?? 1))
-    tests.on('error', (error) => {
-      console.error(error)
-      resolvePromise(1)
+  try {
+    await waitForBackend()
+    return await new Promise<number>((resolvePromise) => {
+      const tests = spawn(
+        process.execPath,
+        [
+          TSX_CLI,
+          '--test',
+          '--test-reporter=spec',
+          ...(TEST_NAME_PATTERN ? ['--test-name-pattern', TEST_NAME_PATTERN] : []),
+          ...scenario.files,
+        ],
+        {
+          cwd: E2E_DIR,
+          env: { ...process.env, E2E_BASE_URL: BASE_URL },
+          stdio: 'inherit',
+        }
+      )
+      tests.on('exit', (code) => resolvePromise(code ?? 1))
+      tests.on('error', (error) => {
+        console.error(error)
+        resolvePromise(1)
+      })
     })
+  } finally {
+    await shutdown()
+  }
+}
+
+async function shutdown(): Promise<void> {
+  const child = backend
+  backend = undefined
+  if (!child || child.exitCode !== null || child.signalCode !== null) return
+  // 等旧进程释放端口和数据库，再启动下一场景；只清理本脚本创建的子进程。
+  await new Promise<void>((resolvePromise) => {
+    const timer = setTimeout(() => child.kill('SIGKILL'), 10_000)
+    child.once('close', () => {
+      clearTimeout(timer)
+      resolvePromise()
+    })
+    child.kill('SIGTERM')
   })
 }
 
-function shutdown(): void {
-  backend?.kill('SIGTERM')
-}
-
 process.on('SIGINT', () => {
-  shutdown()
-  process.exit(130)
+  void shutdown().then(() => process.exit(130))
 })
 
 main()
   .then((code) => {
-    shutdown()
-    process.exit(code)
+    process.exitCode = code
   })
-  .catch((error) => {
+  .catch(async (error) => {
     console.error(error)
-    shutdown()
-    process.exit(1)
+    await shutdown()
+    process.exitCode = 1
   })

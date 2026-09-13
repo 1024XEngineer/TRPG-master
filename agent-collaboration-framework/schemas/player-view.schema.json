@@ -27,6 +27,81 @@
       "title": "ActionDeclarationOption",
       "type": "object"
     },
+    "ActorConditionView": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "remaining_hours": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Remaining Hours"
+        },
+        "bout_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bout Type"
+        },
+        "recovery_status": {
+          "anyOf": [
+            {
+              "enum": [
+                "care_required",
+                "in_treatment",
+                "review_due",
+                "interrupted"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recovery Status"
+        },
+        "review_after_hours": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Review After Hours"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "title": "ActorConditionView",
+      "type": "object"
+    },
     "ActorResourceView": {
       "additionalProperties": false,
       "properties": {
@@ -722,6 +797,14 @@
             "type": "string"
           },
           "title": "Conditions",
+          "type": "array"
+        },
+        "condition_details": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ActorConditionView"
+          },
+          "title": "Condition Details",
           "type": "array"
         },
         "equipment": {

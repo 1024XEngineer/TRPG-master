@@ -28,12 +28,14 @@ class RulesetAdapterRegistryTests(unittest.TestCase):
     def test_registered_action_has_a_real_executor(self) -> None:
         adapter = rulesets.require_adapter("coc-7e")
 
-        self.assertEqual(adapter.check_outcome_handlers, {})
+        self.assertIn("coc7.sanity", adapter.check_outcome_handlers)
         self.assertIn("coc7.apply_condition", adapter.world_actions)
-        self.assertIsNone(
+        self.assertIsNotNone(
             rulesets.check_outcome_handler_for("coc-7e", "coc7.sanity")
         )
-        self.assertIsNotNone(rulesets.world_action_for("coc-7e", "coc7.apply_condition"))
+        self.assertIsNotNone(
+            rulesets.world_action_for("coc-7e", "coc7.apply_condition")
+        )
 
     def test_unknown_world_has_an_explicit_failure_path(self) -> None:
         self.assertFalse(rulesets.is_registered("other-world"))

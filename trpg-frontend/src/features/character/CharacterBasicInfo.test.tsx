@@ -51,6 +51,41 @@ describe('CharacterBasicInfo', () => {
     )
   })
 
+  it('updates SAN after settlement and preserves zero across rerenders', () => {
+    const view = (san: number) => <CharacterBasicInfo character={character()} attributes={ATTRIBUTES} liveResources={{ san }} />
+    const { rerender } = render(view(60))
+    expect(screen.getByTestId('derived-stat-san')).toHaveTextContent('60')
+    rerender(view(56))
+    expect(screen.getByTestId('derived-stat-san')).toHaveTextContent('56')
+    rerender(view(0))
+    expect(screen.getByTestId('derived-stat-san')).toHaveTextContent(/^0$/)
+  })
+
+  it('updates and removes authoritative insanity states independently', () => {
+    const temp = { id: 'temporary_insanity', name: '临时疯狂', remaining_hours: 8 }
+    const bout = { id: 'madness_bout', name: '疯狂发作', remaining_hours: 2, bout_type: '失忆' }
+    const view = (conditions: typeof temp[]) => <CharacterBasicInfo character={character()} attributes={ATTRIBUTES} liveConditions={conditions} />
+    const { rerender } = render(view([temp, bout]))
+    expect(screen.getByLabelText('当前状态')).toHaveTextContent('临时疯狂 · 剩余 8 个游戏小时')
+    expect(screen.getByLabelText('当前状态')).toHaveTextContent('疯狂发作 · 失忆')
+    rerender(view([{ ...temp, remaining_hours: 6 }]))
+    expect(screen.getByLabelText('当前状态')).not.toHaveTextContent('疯狂发作')
+    rerender(view([]))
+    expect(screen.queryByLabelText('当前状态')).not.toBeInTheDocument()
+  })
+
+  it('shows a due recovery check without implying insanity has expired', () => {
+    const view = (status: string, hours?: number) => <CharacterBasicInfo character={character()} attributes={ATTRIBUTES}
+      liveConditions={[{ id: 'indefinite_insanity', name: '不定性疯狂', recovery_status: status, review_after_hours: hours }]} />
+    const { rerender } = render(view('in_treatment', 24))
+    expect(screen.getByLabelText('当前状态')).toHaveTextContent('24 个游戏小时后可复查')
+    rerender(view('review_due', 0))
+    expect(screen.getByLabelText('当前状态')).toHaveTextContent('不定性疯狂 · 可进行恢复检查')
+    expect(screen.getByLabelText('当前状态')).not.toHaveTextContent('剩余 0')
+    rerender(view('interrupted'))
+    expect(screen.getByLabelText('当前状态')).toHaveTextContent('治疗已中断')
+  })
+
   // 建卡完成页在开局前渲染同一个组件，那时没有 PlayerView 可读。
   it('falls back to the creation snapshot when no live resources are supplied', () => {
     render(<CharacterBasicInfo character={character()} attributes={ATTRIBUTES} />)

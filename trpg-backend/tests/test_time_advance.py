@@ -931,3 +931,114 @@ async def test_cancelling_a_rule_failed_execution_clears_its_failure_code(
     assert cancelled.execution.rule_failure_code is None
     # 真正的验收：这份 execution 能被重新读回来，而不是下一次读取才抛。
     AdjudicationExecution.model_validate(cancelled.execution.to_json_dict())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy", [False, True])
+async def test_mechanical_deadline_does_not_split_party_time_proposal(
+    db_session,
+    engine_store_factory,
+    legacy,
+):
+    from collaboration_framework.engine.conditions import apply_condition
+    from collaboration_framework.engine.models import ConditionExpiry
+
+    room, players, _ = await _start_room(
+        db_session,
+        room_number=3498,
+        player_count=2,
+        prepare_checkpoint=False,
+    )
+    session = await db_session.get(GameSession, room.id)
+    state = GameState.model_validate(session.state_json)
+    state = apply_condition(
+        state,
+        actor_id="actor_1",
+        condition_id="temporary_insanity",
+        source="coc7.sanity",
+        application_reason="check_consequence",
+        application_key="test-deadline",
+        expiry=ConditionExpiry(kind="absolute_hour", absolute_hour=15),
+    ).state
+    if legacy:
+        version = await db_session.get(ModuleVersion, (session.module_id, session.module_version))
+        module = ModuleContentV3.model_validate(version.content_json)
+        state, task, _ = create_time_task(
+            module,
+            state,
+            CreateTimeTaskStep(
+                id="legacy",
+                next_step_id="finish",
+                task=TimeTaskSpec(
+                    task_key="condition_legacy",
+                    target=TimeTaskTargetSpec(day_index=0, hour_of_day=15),
+                    on_due_branch_id="expire",
+                    visibility="hidden",
+                    bindings={"actor_id": "actor_1", "application_key": "test-deadline"},
+                ),
+            ),
+            rule_id="engine_condition",
+        )
+    payload = state.model_dump(mode="json")
+    if legacy:
+        payload["actors"]["actor_1"]["condition_states"][0]["expiry"] = {
+            "kind": "time_task",
+            "reference_id": task.task_id,
+            "absolute_hour": 15,
+        }
+    session.state_json = payload
+    await db_session.commit()
+    command = _request(
+        room_id=room.id,
+        player_id=players[0].id,
+        actor_id="actor_1",
+        revision=session.state_version,
+        action_id="time-mechanical-deadline",
+    )
+    await time_advance.create_from_adjudication(db_session, command)
+    record = await time_advance._active_record(db_session, room.id)
+    assert record is not None
+    assert record.target_point_id == "hour_18"
+    assert record.target_hour_of_day == 18
+    assert record.target_label == "夜晚"
+    engine = AdjudicationEngineService(engine_store_factory())
+
+    async def approve(record):
+        return await time_advance.respond(
+            db_session,
+            engine=engine,
+            room_id=room.id,
+            player_id=players[1].id,
+            proposal_id=record.proposal_id,
+            proposal_version=record.proposal_version,
+            source_revision=str(record.source_revision),
+            accept=True,
+        )
+
+    if legacy:
+        # Reproduce a proposal frozen by the pre-update build at the removed stop.
+        record.target_point_id = task.occurrence_id
+        record.target_hour_of_day = 15
+        record.target_label = "下午"
+        await db_session.commit()
+        stale, _, _ = await approve(record)
+        assert stale.status == "stale"
+        assert await _time_event_count(db_session, room.id) == 0
+        command = command.model_copy(
+            update={
+                "adjudication": command.adjudication.model_copy(
+                    update={"request_id": "fresh-mechanical-deadline"}
+                )
+            }
+        )
+        await time_advance.create_from_adjudication(db_session, command)
+        record = await time_advance._active_record(db_session, room.id)
+        assert record is not None
+        assert record.target_hour_of_day == 18
+    resolved, _, _ = await approve(record)
+    assert resolved.status == "approved"
+    assert await _time_event_count(db_session, room.id) == 1
+    await db_session.refresh(session)
+    final = GameState.model_validate(session.state_json)
+    assert final.world_time.current.hour_of_day == 18
+    assert "temporary_insanity" not in final.actors["actor_1"].conditions

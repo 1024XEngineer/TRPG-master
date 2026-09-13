@@ -23,6 +23,7 @@ from pydantic import (
 from pydantic.json_schema import SkipJsonSchema
 
 from .common import ContractModel
+from .resources import ChangeActorResourceEffect
 
 CheckDifficulty: TypeAlias = Literal["regular", "hard", "extreme"]
 CheckDegree: TypeAlias = Literal[
@@ -187,6 +188,7 @@ ActionEffect = Annotated[
     | EnsureRuntimeEntityEffect
     | MoveEntityEffect
     | ChangeEntityStateEffect
+    | ChangeActorResourceEffect
     | ConsumeEntityEffect
     | MarkCoreResolvedEffect
     | SetEndingAvailabilityEffect

@@ -27,6 +27,7 @@ from typing import Annotated, Literal, TypeAlias
 
 from pydantic import Field, JsonValue, model_validator
 
+from .sanity import SanitySource, SanityPolicy
 from .adjudication import ActionEffect, CheckDegree
 from .common import ContractModel
 from .inventory import ItemComponent
@@ -1006,6 +1007,8 @@ class ModuleContentV3(ContractModel):
     locations: tuple[LocationSpecV3, ...] = Field(min_length=1)
     location_edges: tuple[LocationEdgeSpec, ...] = ()
     rules: tuple[RuleSpecV3, ...] = ()
+    sanity_sources: tuple[SanitySource, ...] = Field(default=(), exclude_if=lambda value: not value)
+    sanity_policy: SanityPolicy | None = Field(default=None, exclude_if=lambda value: value is None)
 
     core_resolution: CoreResolutionSpec = Field(default_factory=CoreResolutionSpec)
     ending_policy: EndingPolicySpec = Field(default_factory=EndingPolicySpec)

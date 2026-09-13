@@ -11,37 +11,9 @@ path at all. Now that a passive check reaches the player, something has to
 answer "roll what, against what number" without asking the Agent — that answer
 is the profile.
 
-## Scope: rolling only
-
-A profile says which value on the sheet the d100 is compared against. It does
-**not** say what the result costs. `coc7.sanity`'s `failure_loss: 1d6` is a
-real parameter of a real rule, and this module deliberately does not consume
-it: writing `actor.resources` is #401 的 E7 单元, and #398 §范围 excludes every
-CoC rule semantic. So the profile registers those keys as *recognised* — the
-rule is not malformed for declaring them — while the loss itself stays unspent.
-
-## Why only one entry
-
-`registry/world_actions.py` states the rule this table follows: "Adding a name
-here is a claim that the Engine can execute it, so it belongs in the same
-change that adds the executor, never ahead of one." `coc7.sanity` is the only
-profile that any published module uses in a passive rule check (追书人 ×2、
-银之锁 ×2), and it is the only one this issue can execute. `coc7.skill` appears
-only on `active_action` steps, which reach the player through the Agent's
-candidate menu and never through this table.
-
-The table is owned by the CoC7 adapter. Runtime dispatch should use
-`registry.rulesets` so profile ids are always resolved in a `world_ref` scope.
-The compatibility helpers below remain for migration-era callers.
-
-#483 让主动检定开始消费作者声明的技能、难度与权限，但**没有**因此登记
-`coc7.skill`。它没有固定的 `resource`——目标值来自 `actor.state["skills"][skill_id]`，
-不是 `ActorResources` 上某个字段——所以 `_passive_check_option` 依然执行不了它。
-登记它只会让发布期校验开始放行引擎跑不动的 `passive_rule` 步，把一个发布期就能拦住
-的错误推迟到运行时。主动路径的目标值走 `_validated_options`，从不经过这张表。
-
-同理，#483 只消费决定「掷什么、怎么掷」的 `skill_id`；`success_loss` /
-`failure_loss` / `habit_cap` 仍旧是 recognised-but-unspent，归 #486 / #487。
+Profiles resolve check targets; world-owned outcome handlers consume final results.
+The CoC7 SAN handler now applies success/failure loss via the generic numeric effect.
+Habituation and insanity belong to the following capability increments.
 """
 
 from __future__ import annotations
@@ -66,6 +38,7 @@ class CheckProfileRegistration:
     method_summary: str
     player_safe_reason: str
     default_difficulty: CheckDifficulty = "regular"
+    target_kind: str = "resource"
     # 本 Profile 认得、但**本期不消费**的参数键。列出来是为了把「规则写错了」
     # 和「引擎还没做到」区分开：前者该在发布期拒绝，后者不该。
     recognised_parameters: frozenset[str] = field(default_factory=frozenset)
@@ -73,13 +46,18 @@ class CheckProfileRegistration:
 
 COC7_CHECK_PROFILES: Mapping[str, CheckProfileRegistration] = MappingProxyType(
     {
+        "coc7.insanity_int": CheckProfileRegistration(
+            display_name="智力", resource="INT", target_kind="attribute",
+            method_summary="理解刚才冲击的意义", player_safe_reason="这次理智损失需要进行智力检定",
+            recognised_parameters=frozenset({"outcome_id"}),
+        ),
         "coc7.sanity": CheckProfileRegistration(
             display_name="理智",
             resource="san",
             method_summary="眼前的景象直接冲击神智",
             player_safe_reason="规则要求此刻进行一次理智检定",
             recognised_parameters=frozenset(
-                {"success_loss", "failure_loss", "habit_cap"}
+                {"success_loss", "failure_loss", "habit_cap", "sanity_source"}
             ),
         ),
     }

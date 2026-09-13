@@ -126,7 +126,12 @@ async def _create_building_room(
         players.append(player)
         characters.append(character)
     room.host_player_id = players[0].id
-    db.add_all([room, *players, *characters])
+    # Flush FK parents explicitly; the SQLite fixture previously hid this ordering bug.
+    db.add(room)
+    await db.flush()
+    db.add_all(players)
+    await db.flush()
+    db.add_all(characters)
     await db.commit()
     return room, players, characters
 

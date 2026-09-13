@@ -13,6 +13,7 @@ on:
     branches: [main]
     paths:
       - "trpg-backend/**"
+      - "agent-collaboration-framework/**"
       - "trpg-sdk/scripts/generate-types.ts"
       - "trpg-sdk/src/generated/**"
       - "trpg-sdk/package.json"
@@ -21,6 +22,7 @@ on:
   pull_request:
     paths:
       - "trpg-backend/**"
+      - "agent-collaboration-framework/**"
       - "trpg-sdk/scripts/generate-types.ts"
       - "trpg-sdk/src/generated/**"
       - "trpg-sdk/package.json"
@@ -63,6 +65,9 @@ jobs:
       - name: Type check with ty
         run: uv run ty check
 
+      - name: Run framework tests
+        run: uv run pytest -c pyproject.toml ../agent-collaboration-framework/tests
+
       - name: Run tests
         run: uv run pytest
 
@@ -100,6 +105,15 @@ jobs:
         run: uv run alembic upgrade head
       - name: Verify portrait task index
         run: uv run python scripts/check_portrait_postgres.py
+      - name: Verify resource settlement transactions on PostgreSQL
+        env:
+          TRPG_TEST_DATABASE_URL: postgresql+asyncpg://trpg:trpg@127.0.0.1:5432/trpg_test
+        run: >-
+          uv run pytest -q
+          tests/test_sanity_settlement_persistence.py
+          tests/test_sanity_habituation_persistence.py
+          tests/test_temporary_insanity_persistence.py
+          tests/test_indefinite_insanity_persistence.py
 
   # 漂移检查（issue #75 决策 3）：重新跑一遍完整的 DTO -> JSON Schema -> TS
   # 生成管线，用 git diff 确认 trpg-sdk/src/generated/ 跟刚生成的结果一致。

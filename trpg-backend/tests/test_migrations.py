@@ -15,7 +15,7 @@ ENGINE_IDENTITY_PREVIOUS_REVISION = "9c4e7a2b1d6f"
 # 约束放宽（b8c9d0e1f2a3）再接在它之后，最后是模组快照的死字段剥离。
 # 时间点回填与摘要复合游标各自形成分支后，由空迁移重新汇合；记忆投影与摘要
 # 来源收据迁移依次接在汇合点之后，形成当前单一 head。
-HEAD_REVISION = "k4l5m6n7o8p9"
+HEAD_REVISION = "l5m6n7o8p9q0"
 
 
 def _run_alembic(database: Path, *args: str) -> subprocess.CompletedProcess[str]:

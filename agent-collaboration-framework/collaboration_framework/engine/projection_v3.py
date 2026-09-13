@@ -106,7 +106,7 @@ def project_v3(
         scene_id=location.id,
         phase=state.phase,
         revision=runtime.revision,
-        self_actor=_self_actor(actor_id, actor, inventory),
+        self_actor=_self_actor(actor_id, actor, inventory, state.world_time.current.absolute_hour),
         scene=ProjectionScene(
             id=location.id,
             name=location.player_visible_name or location.name,
@@ -652,9 +652,12 @@ def _self_actor(
     actor_id: str,
     actor,
     inventory: tuple[InventoryItemView, ...],
+    absolute_hour: int,
 ) -> ProjectionSelfActor:
+    from collaboration_framework.registry.condition_views import condition_views
     actor_state = actor.state
     return ProjectionSelfActor(
+        condition_details=condition_views(actor, absolute_hour),
         id=actor_id,
         name=actor.name,
         occupation=_optional_text(actor_state.get("occupation")),

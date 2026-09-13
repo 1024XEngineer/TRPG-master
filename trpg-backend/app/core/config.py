@@ -126,6 +126,7 @@ class Settings(BaseSettings):
     # use the Engine's cryptographic dice source; this value is honored only
     # when APP_ENV=test.
     test_fixed_dice_roll: int | None = Field(default=None, ge=1, le=100)
+    test_dice_by_sides: dict[str, list[int]] | None = None
 
     # 角色生图是建卡完成后的可选操作，入口默认开启。没有远程 Key 时
     # auto provider 仍然使用离线 mock，不会因为修改默认值而产生费用。

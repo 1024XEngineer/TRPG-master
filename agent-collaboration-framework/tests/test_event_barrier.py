@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from collaboration_framework.contracts.sanity import SanityLedger
+
 import json
 import unittest
 
@@ -96,6 +98,7 @@ def noon_state() -> GameState:
                 source_character_id="character",
                 source_character_version=1,
                 resources=ActorResources(san=55, luck=50),
+                sanity=SanityLedger(),
             )
         },
         entities={"case_tracker": {"night_seen": False}},
@@ -254,6 +257,7 @@ def two_rules_state() -> GameState:
                 source_character_id="character",
                 source_character_version=1,
                 resources=ActorResources(san=55, luck=50),
+                sanity=SanityLedger(),
             )
         },
         entities={
@@ -336,16 +340,23 @@ class QueuedRuleDrainTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         store = InMemoryEngineStore()
         store.register_room(module_content=module(), initial_state=two_rules_state())
-        engine = AdjudicationEngineService(store)
+        engine = AdjudicationEngineService(
+            store, dice=DiceRoller(SequenceDiceSource([1, 1]))
+        )
 
         first = await engine.submit(examine_grave("grave-1", "0"))
 
         # 优先级高的先跑：食尸鬼群的理智检定先弹出来。
         self.assertEqual(first.status, "awaiting_skill_choice")
-        self.assertIs(store.inspect_state(ROOM).entities["case_tracker"]["crowd_sight_resolved"], True)
+        self.assertIs(
+            store.inspect_state(ROOM).entities["case_tracker"]["crowd_sight_resolved"],
+            True,
+        )
         # 而道格拉斯那条还排在队列里，尚未触发。
         self.assertIs(
-            store.inspect_state(ROOM).entities["case_tracker"]["first_ghoul_sight_resolved"],
+            store.inspect_state(ROOM).entities["case_tracker"][
+                "first_ghoul_sight_resolved"
+            ],
             False,
         )
 
@@ -357,7 +368,9 @@ class QueuedRuleDrainTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second.pending_decision.options[0].display_name, "理智")
         self.assertFalse(second.pending_decision.allow_cancel)
         self.assertIs(
-            store.inspect_state(ROOM).entities["case_tracker"]["first_ghoul_sight_resolved"],
+            store.inspect_state(ROOM).entities["case_tracker"][
+                "first_ghoul_sight_resolved"
+            ],
             True,
         )
         # 两次检定挂在同一个 action_request_id 上——这正是迁移 b8c9d0e1f2a3 存在的理由。
@@ -371,12 +384,16 @@ class QueuedRuleDrainTests(unittest.IsolatedAsyncioTestCase):
         # 两条规则都跑完了，游标不留痕。
         self.assertEqual(state.rule_agendas, {})
 
-    async def test_a_suspended_agenda_carries_its_queue_across_the_request(self) -> None:
+    async def test_a_suspended_agenda_carries_its_queue_across_the_request(
+        self,
+    ) -> None:
         """挂起时队列真的落库了，而不是靠同一次请求的内存活着。"""
 
         store = InMemoryEngineStore()
         store.register_room(module_content=module(), initial_state=two_rules_state())
-        engine = AdjudicationEngineService(store)
+        engine = AdjudicationEngineService(
+            store, dice=DiceRoller(SequenceDiceSource([1, 1]))
+        )
 
         await engine.submit(examine_grave("grave-1", "0"))
 
@@ -421,7 +438,9 @@ def failing_chain_module() -> ModuleContentV3:
     return ModuleContentV3.model_validate(data)
 
 
-def three_effect_action(request_id: str, source_revision: str) -> SubmitAdjudicationRequest:
+def three_effect_action(
+    request_id: str, source_revision: str
+) -> SubmitAdjudicationRequest:
     """三个效果的动作。第一个就会唤醒规则，后两个要等屏障放行。"""
 
     return SubmitAdjudicationRequest(
@@ -468,7 +487,9 @@ class FailedChainDoesNotVetoTheActionTests(unittest.IsolatedAsyncioTestCase):
             module_content=failing_chain_module(),
             initial_state=two_rules_state(),
         )
-        engine = AdjudicationEngineService(store)
+        engine = AdjudicationEngineService(
+            store, dice=DiceRoller(SequenceDiceSource([1, 1]))
+        )
 
         execution = await engine.submit(three_effect_action("grave-1", "0"))
 
@@ -490,7 +511,9 @@ class FailedChainDoesNotVetoTheActionTests(unittest.IsolatedAsyncioTestCase):
         # 这两个效果没再参与规则结算，审计里说清楚有几个。
         self.assertEqual(failure.payload["unsettled_effect_count"], 2)
         # 排在失败那条后面的规则同样没跑过。
-        self.assertEqual(failure.payload["skipped_rule_ids"], ["first_sight_of_douglas"])
+        self.assertEqual(
+            failure.payload["skipped_rule_ids"], ["first_sight_of_douglas"]
+        )
         self.assertEqual(store.inspect_state(ROOM).rule_agendas, {})
 
 
@@ -514,7 +537,9 @@ class UnsupportedBoundaryTests(unittest.IsolatedAsyncioTestCase):
             module_content=ModuleContentV3.model_validate(data),
             initial_state=two_rules_state(),
         )
-        engine = AdjudicationEngineService(store)
+        engine = AdjudicationEngineService(
+            store, dice=DiceRoller(SequenceDiceSource([1, 1]))
+        )
 
         execution = await engine.submit(three_effect_action("grave-1", "0"))
 
@@ -603,7 +628,9 @@ class RuleOwnedCheckAuthorityTests(unittest.IsolatedAsyncioTestCase):
             module_content=self._module_with_passive_check(actor_binding="target"),
             initial_state=two_rules_state(),
         )
-        engine = AdjudicationEngineService(store)
+        engine = AdjudicationEngineService(
+            store, dice=DiceRoller(SequenceDiceSource([1, 1]))
+        )
 
         execution = await engine.submit(examine_grave("grave-1", "0"))
 

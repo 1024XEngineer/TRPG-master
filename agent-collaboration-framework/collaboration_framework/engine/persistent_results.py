@@ -299,7 +299,30 @@ def committed_results_from_events(
         if event.visibility != "public":
             continue
         payload = event.payload
-        if event.type == "entity.state_changed":
+        if event.type == "actor.resource_changed":
+            resource = payload.get("resource_id")
+            actor_id = payload.get("actor_id")
+            after = payload.get("after")
+            if (
+                isinstance(actor_id, str)
+                and resource in {"hp", "san", "mp", "luck", "mythos"}
+                and isinstance(after, int)
+            ):
+                results.append(
+                    CommittedResult(
+                        kind="character_state",
+                        target_id=actor_id,
+                        state_key=str(resource),
+                        state_value=after,
+                        event_ref=event.event_id,
+                    )
+                )
+        elif event.type in {"actor.condition_applied", "actor.condition_removed"}:
+            condition_id, actor_id = payload.get("condition_id"), payload.get("actor_id")
+            if isinstance(condition_id, str) and isinstance(actor_id, str):
+                value = {"status": "active", **{key: payload[key] for key in ("bout_type", "duration_hours") if key in payload}} if event.type == "actor.condition_applied" else {"status": "removed"}
+                results.append(CommittedResult(kind="character_state", target_id=actor_id, state_key="condition:"+condition_id, state_value=value, event_ref=event.event_id))
+        elif event.type == "entity.state_changed":
             target_id = payload.get("entity_id")
             key = payload.get("key")
             value = payload.get("value")

@@ -67,6 +67,15 @@ export interface ActionSubmitPayload {
   visibility?: ("public" | "private") | null;
 }
 
+export interface ActorConditionView {
+  id: string;
+  name: string;
+  remaining_hours?: number | null;
+  bout_type?: string | null;
+  recovery_status?: ("care_required" | "in_treatment" | "review_due" | "interrupted") | null;
+  review_after_hours?: number | null;
+}
+
 export interface ActorResourceView {
   id: string;
   name: string;
@@ -1547,6 +1556,7 @@ export interface SelfActorView {
   skills?: ActorValueView[];
   resources?: ActorResourceView[];
   conditions?: string[];
+  condition_details?: ActorConditionView[];
   equipment?: string[];
   background_summary?: string;
   public_status_summary?: string;

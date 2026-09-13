@@ -7,6 +7,8 @@ placed by `located_in` — only exist at that scale.
 
 from __future__ import annotations
 
+from collaboration_framework.contracts.sanity import SanityLedger
+
 import json
 import unittest
 from pathlib import Path
@@ -97,6 +99,7 @@ def game_state(content: ModuleContentV3, **overrides) -> GameState:
         "scene_id": content.initial_state.start_location_id,
         "actors": {
             ACTOR: ActorState(
+                sanity=SanityLedger(),
                 player_id=PLAYER,
                 name="陈探员",
                 source_character_id="character_v3",
@@ -234,6 +237,7 @@ class ProjectionV3Tests(unittest.IsolatedAsyncioTestCase):
             room_id=ROOM,
             actors={
                 ACTOR: ActorState(
+                sanity=SanityLedger(),
                     player_id=PLAYER,
                     name="陈探员",
                     source_character_id="character_v3",
@@ -275,6 +279,7 @@ class ProjectionV3Tests(unittest.IsolatedAsyncioTestCase):
             room_id=ROOM,
             actors={
                 ACTOR: ActorState(
+                sanity=SanityLedger(),
                     player_id=PLAYER,
                     name="陈探员",
                     source_character_id="character_v3",
@@ -332,6 +337,7 @@ class ProjectionV3Tests(unittest.IsolatedAsyncioTestCase):
             room_id=ROOM,
             actors={
                 ACTOR: ActorState(
+                sanity=SanityLedger(),
                     player_id=PLAYER,
                     name="陈探员",
                     source_character_id="character_v3",
@@ -881,6 +887,7 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
             scene_id="neighborhood",
             actors={
                 ACTOR: ActorState(
+                sanity=SanityLedger(),
                     player_id=PLAYER,
                     name="陈探员",
                     source_character_id="character_v3",
@@ -1050,6 +1057,7 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
         store, engine, rules = self.build(
             actors={
                 ACTOR: ActorState(
+                sanity=SanityLedger(),
                     player_id=PLAYER,
                     name="陈探员",
                     source_character_id="character_v3",
@@ -2128,7 +2136,7 @@ class RuleOwnedCheckTests(unittest.IsolatedAsyncioTestCase):
         for roll, expected_outcome in ((5, "success"), (81, "failure")):
             store, engine, rules, published, execution = await shout(
                 request_id=f"call-figure-{roll}",
-                rolls=[roll],
+                rolls=[roll, 4],
             )
             self.assertIn("call_to_figure", published)
             self.assertNotIn("talk_to_figure", published)
@@ -3085,7 +3093,7 @@ class RuleDeclaredCheckPermissionTests(unittest.IsolatedAsyncioTestCase):
         # 后果语义仍归 coc7.sanity，E5 不接手。
         self.assertEqual(
             sanity.recognised_parameters,
-            frozenset({"success_loss", "failure_loss", "habit_cap"}),
+            frozenset({"success_loss", "failure_loss", "habit_cap", "sanity_source"}),
         )
 
     async def test_the_roll_records_which_rule_it_came_from(self) -> None:

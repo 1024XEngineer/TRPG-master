@@ -152,10 +152,14 @@
           "type": "string"
         },
         "content": {
-          "maxLength": 2000,
           "minLength": 1,
           "title": "Content",
           "type": "string"
+        },
+        "content_truncated": {
+          "default": false,
+          "title": "Content Truncated",
+          "type": "boolean"
         },
         "epistemic_status": {
           "enum": [
@@ -172,6 +176,7 @@
           "enum": [
             "public",
             "player_scoped",
+            "scene_scoped",
             "entity_scoped"
           ],
           "title": "Visibility",
@@ -313,6 +318,46 @@
         "utterance"
       ],
       "title": "PlayerInput",
+      "type": "object"
+    },
+    "RecentNpcReply": {
+      "additionalProperties": false,
+      "description": "A prior NPC utterance with its actual speaker and viewer visibility.",
+      "properties": {
+        "speaker_id": {
+          "minLength": 1,
+          "title": "Speaker Id",
+          "type": "string"
+        },
+        "speaker_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Speaker Name"
+        },
+        "text": {
+          "$ref": "#/$defs/VisibleHistoryText"
+        },
+        "listener_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Listener Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "speaker_id",
+        "text"
+      ],
+      "title": "RecentNpcReply",
       "type": "object"
     },
     "RecentSafeResult": {
@@ -468,6 +513,14 @@
             }
           ],
           "default": null
+        },
+        "npc_replies": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RecentNpcReply"
+          },
+          "title": "Npc Replies",
+          "type": "array"
         },
         "evidence_refs": {
           "default": [],
@@ -760,7 +813,8 @@
         "visibility": {
           "enum": [
             "public",
-            "player_scoped"
+            "player_scoped",
+            "scene_scoped"
           ],
           "title": "Visibility",
           "type": "string"

@@ -56,6 +56,10 @@ jobs:
         working-directory: trpg-frontend
         run: npm run lint
 
+      - name: Test components
+        working-directory: trpg-frontend
+        run: npm test
+
       # build 里已经含 tsc -b，类型检查和打包一步完成。
       - name: Build
         working-directory: trpg-frontend

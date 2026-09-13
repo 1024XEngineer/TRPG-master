@@ -88,7 +88,7 @@
     },
     "AdvanceWorldTimeEffect": {
       "additionalProperties": false,
-      "description": "Jump the room to the single next point on the discrete timeline (#245).\n\nOne effect is exactly one jump — the timeline decides *where*, the caller\nonly decides *that*. Sleeping from noon until 20:00 is therefore two of\nthese in sequence, and each one publishes its own `time.point_entered`, so\na Rule that watches for nightfall still fires on the point it was written\nagainst instead of being skipped over.\n\n`to_point_id` is not a destination request: it is the Agent stating which\npoint it believes comes next, and the Engine refuses the effect when that\ndisagrees with the authored timeline.",
+      "description": "Advance exactly one point on the authored timeline.\n\nIf provided, to_point_id must equal the next point, not a later destination.\nReaching a later point requires sequential effects so intermediate events fire.",
       "properties": {
         "type": {
           "const": "advance_world_time",
@@ -464,6 +464,69 @@
       "title": "CandidateScopeSpec",
       "type": "object"
     },
+    "ChangeActorResourceEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "change_actor_resource",
+          "default": "change_actor_resource",
+          "title": "Type",
+          "type": "string"
+        },
+        "resource_id": {
+          "enum": [
+            "hp",
+            "san",
+            "mp",
+            "luck",
+            "mythos"
+          ],
+          "title": "Resource Id",
+          "type": "string"
+        },
+        "direction": {
+          "enum": [
+            "increase",
+            "decrease"
+          ],
+          "title": "Direction",
+          "type": "string"
+        },
+        "quantity": {
+          "discriminator": {
+            "mapping": {
+              "dice": "#/$defs/DiceQuantity",
+              "fixed": "#/$defs/FixedQuantity"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/FixedQuantity"
+            },
+            {
+              "$ref": "#/$defs/DiceQuantity"
+            }
+          ],
+          "title": "Quantity"
+        },
+        "reason_code": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_.-]+$",
+          "title": "Reason Code",
+          "type": "string"
+        }
+      },
+      "required": [
+        "resource_id",
+        "direction",
+        "quantity",
+        "reason_code"
+      ],
+      "title": "ChangeActorResourceEffect",
+      "type": "object"
+    },
     "ChangeEntityStateEffect": {
       "additionalProperties": false,
       "properties": {
@@ -697,6 +760,42 @@
       "title": "CreateTimeTaskStep",
       "type": "object"
     },
+    "DiceQuantity": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "dice",
+          "default": "dice",
+          "title": "Kind",
+          "type": "string"
+        },
+        "count": {
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Count",
+          "type": "integer"
+        },
+        "sides": {
+          "maximum": 1000,
+          "minimum": 2,
+          "title": "Sides",
+          "type": "integer"
+        },
+        "bonus": {
+          "default": 0,
+          "maximum": 100000,
+          "minimum": -100,
+          "title": "Bonus",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "count",
+        "sides"
+      ],
+      "title": "DiceQuantity",
+      "type": "object"
+    },
     "EffectStep": {
       "additionalProperties": false,
       "properties": {
@@ -717,6 +816,7 @@
           "discriminator": {
             "mapping": {
               "advance_world_time": "#/$defs/AdvanceWorldTimeEffect",
+              "change_actor_resource": "#/$defs/ChangeActorResourceEffect",
               "change_entity_state": "#/$defs/ChangeEntityStateEffect",
               "commit_terminal_ending": "#/$defs/CommitTerminalEndingEffect",
               "consume_entity": "#/$defs/ConsumeEntityEffect",
@@ -757,6 +857,9 @@
             },
             {
               "$ref": "#/$defs/ChangeEntityStateEffect"
+            },
+            {
+              "$ref": "#/$defs/ChangeActorResourceEffect"
             },
             {
               "$ref": "#/$defs/ConsumeEntityEffect"
@@ -1327,6 +1430,28 @@
         "id"
       ],
       "title": "FinishStep",
+      "type": "object"
+    },
+    "FixedQuantity": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "fixed",
+          "default": "fixed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "value": {
+          "maximum": 100000,
+          "minimum": 0,
+          "title": "Value",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "FixedQuantity",
       "type": "object"
     },
     "HideInformationEffect": {
@@ -2745,6 +2870,76 @@
       "title": "RuleSpecV3",
       "type": "object"
     },
+    "SanityPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "bout_mode": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "summary",
+            "rounds"
+          ],
+          "title": "Bout Mode",
+          "type": "string"
+        },
+        "window_boundary": {
+          "default": "keeper_rest",
+          "enum": [
+            "keeper_rest",
+            "world_day"
+          ],
+          "title": "Window Boundary",
+          "type": "string"
+        },
+        "calendar_anchor": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Calendar Anchor"
+        }
+      },
+      "title": "SanityPolicy",
+      "type": "object"
+    },
+    "SanitySource": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "pattern": "^[a-z0-9][a-z0-9_.:-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "habit_cap": {
+          "anyOf": [
+            {
+              "maximum": 100000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Habit Cap"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "SanitySource",
+      "type": "object"
+    },
     "SetEndingAvailabilityEffect": {
       "additionalProperties": false,
       "properties": {
@@ -3161,6 +3356,25 @@
       },
       "title": "Rules",
       "type": "array"
+    },
+    "sanity_sources": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/SanitySource"
+      },
+      "title": "Sanity Sources",
+      "type": "array"
+    },
+    "sanity_policy": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SanityPolicy"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "core_resolution": {
       "$ref": "#/$defs/CoreResolutionSpec"

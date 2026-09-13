@@ -37,6 +37,17 @@ class ProjectionActorResource(ContractModel):
     value: int
 
 
+class ActorConditionView(ContractModel):
+    id: str
+    name: str
+    remaining_hours: int | None = Field(default=None, ge=0)
+    bout_type: str | None = None
+    recovery_status: (
+        Literal["care_required", "in_treatment", "review_due", "interrupted"] | None
+    ) = None
+    review_after_hours: int | None = Field(default=None, ge=0)
+
+
 class ProjectionSelfActor(ContractModel):
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
@@ -45,6 +56,7 @@ class ProjectionSelfActor(ContractModel):
     skills: tuple[ProjectionActorValue, ...] = ()
     resources: tuple[ProjectionActorResource, ...] = ()
     conditions: tuple[str, ...] = ()
+    condition_details: tuple[ActorConditionView, ...] = ()
     equipment: tuple[str, ...] = ()
     background_summary: str = ""
     public_status_summary: str = ""
@@ -263,6 +275,7 @@ class SelfActorView(ContractModel):
     skills: tuple[ActorValueView, ...] = ()
     resources: tuple[ActorResourceView, ...] = ()
     conditions: tuple[str, ...] = ()
+    condition_details: tuple[ActorConditionView, ...] = ()
     equipment: tuple[str, ...] = ()
     background_summary: str = ""
     public_status_summary: str = ""

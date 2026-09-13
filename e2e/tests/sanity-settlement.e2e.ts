@@ -1,4 +1,4 @@
-/** SDK → real backend sanity settlement. Run with E2E_DICE_BY_SIDES='{"100":[81],"6":[4]}' */
+/** SDK → real backend; run-e2e.ts supplies this scenario’s dice. */
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
 import { test } from 'node:test'
@@ -175,11 +175,11 @@ test(
         (event) =>
           event.type === 'adjudication.pending' && event.payload.correlationId === actionId,
       )
-      void room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {
+      const actionError = room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {
         clientActionId: actionId,
         utterance: '屏住呼吸钻进石板下的地穴入口',
         recipient: EXPLICIT_KEEPER,
-      })
+      }).then(() => undefined, (error: unknown) => error)
       const pendingEvent = (await pendingPromise) as PendingAdjudicationEvent
 
       // 骰子真的出现了——#398 之前这里什么都不会来，规则前面的效果照常提交，
@@ -241,6 +241,7 @@ test(
       assert.equal(final.agendas, 0, '跑完的 Agenda 不该留在 state 里')
       assert.equal(final.san, 56)
       assert.equal(final.facts, 1)
+      assert.equal(await actionError, undefined, '行动必须成功完成后再验证重连')
       room.host.sdk.roomSocket.disconnect()
       const reconnected = room.host.sdk.roomSocket.connect(room.roomId, room.host.token)
       await room.host.sdk.roomSocket.waitForOpen(reconnected)

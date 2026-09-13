@@ -1,4 +1,4 @@
-/** SDK → real backend sanity habituation. Run with E2E_DICE_BY_SIDES='{"100":[81,81,81],"6":[4,4,3]}' */
+/** SDK → real backend; run-e2e.ts supplies this scenario’s dice. */
 import assert from 'node:assert/strict'
 import { DatabaseSync } from 'node:sqlite'
 import { test } from 'node:test'
@@ -99,6 +99,8 @@ function seedCemeteryStench(roomId: string): void {
 function seedRepeatedChecks(roomId: string): void {
   const database = new DatabaseSync(DB_FILE)
   try {
+    database.exec('PRAGMA busy_timeout = 5000')
+    database.exec('BEGIN IMMEDIATE')
     const key = roomId.replaceAll('-', '')
     const row = database.prepare(`SELECT m.content_json, m.module_id, m.world_ref FROM module_versions m
       JOIN game_sessions g ON m.module_id=g.module_id AND m.version=g.module_version WHERE g.room_id=?`).get(key) as { content_json: string; module_id: string; world_ref: string }
@@ -112,6 +114,7 @@ function seedRepeatedChecks(roomId: string): void {
     database.prepare(`INSERT INTO module_versions(module_id,version,world_ref,content_schema_version,content_json,created_at)
       VALUES(?,?,?,?,?,CURRENT_TIMESTAMP)`).run(row.module_id,content.version,row.world_ref,3,JSON.stringify(content))
     database.prepare('UPDATE game_sessions SET module_version=? WHERE room_id=?').run(content.version,key)
+    database.exec('COMMIT')
   } finally { database.close() }
 }
 
@@ -196,11 +199,11 @@ test(
         (event) =>
           event.type === 'adjudication.pending' && event.payload.correlationId === actionId,
       )
-      void room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {
+      const actionError = room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {
         clientActionId: actionId,
         utterance: '屏住呼吸钻进石板下的地穴入口',
         recipient: EXPLICIT_KEEPER,
-      })
+      }).then(() => undefined, (error: unknown) => error)
       let pendingEvent = (await pendingPromise) as PendingAdjudicationEvent
 
       for (let i = 0; i < 3; i++) {
@@ -267,6 +270,7 @@ test(
       assert.equal(final.agendas, 0, '跑完的 Agenda 不该留在 state 里')
       assert.equal(final.san, 54)
       assert.equal(final.facts, 3)
+      assert.equal(await actionError, undefined, '行动必须成功完成后再验证重连')
       room.host.sdk.roomSocket.disconnect()
       const reconnected = room.host.sdk.roomSocket.connect(room.roomId, room.host.token)
       await room.host.sdk.roomSocket.waitForOpen(reconnected)

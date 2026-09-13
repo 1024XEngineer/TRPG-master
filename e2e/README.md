@@ -29,6 +29,20 @@ npm run test:e2e
 E2E_ONLY=tests/character-build.e2e.ts npm run test:e2e
 ```
 
+四条 SAN 穿行需要不同的有限骰列。默认 `npm run test:e2e` 会先运行普通场景，
+再依次运行下表中的四条场景；每条使用新的测试数据库和后端进程，避免骰子被其他用例
+消费或夹具并发写库。切换场景前会等待旧后端退出。任意场景失败，整个命令仍返回失败。
+
+| 场景 | D100 | 损失／状态骰 |
+|---|---|---|
+| `sanity-settlement.e2e.ts` | 81 | D6：4 |
+| `sanity-habituation.e2e.ts` | 81、81、81 | D6：4、4、3 |
+| `temporary-insanity.e2e.ts` | 81、21 | D6：5；D10：8、3、2 |
+| `indefinite-insanity.e2e.ts` | 81、81、81、81 | D6：4、4、3、1；D10：3、2 |
+
+通过 `E2E_ONLY` 选择其中一个文件或通配符时，也自动使用同一份场景配置，不需要手工
+设置骰列。`E2E_DICE_BY_SIDES` 仍可显式覆盖，用于检验错误骰列能否使行为断言失败。
+
 ## 覆盖了什么
 
 | 文件 | 内容 |

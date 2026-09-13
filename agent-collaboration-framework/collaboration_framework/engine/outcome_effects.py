@@ -1,18 +1,14 @@
 """Generic transactional effects used by world-owned check consequences."""
 
 from __future__ import annotations
-from hashlib import sha256
 from uuid import uuid4
 
 from collaboration_framework.contracts import (
-    CreateTimeTaskStep,
-    TimeTaskSpec,
     TimeTaskTargetSpec,
 )
 from collaboration_framework.contracts.resources import DiceQuantity
 from .models import ConditionExpiry, DomainEvent
 from .conditions import apply_condition, remove_condition
-from .time_tasks import create_time_task
 
 
 class OutcomeEffectSession:
@@ -57,59 +53,6 @@ class OutcomeEffectSession:
         self.events.extend(events)
         return state, events[0]
 
-    def task(self, state, *, key, absolute_hour):
-        step = CreateTimeTaskStep(
-            id="ruleset_timer",
-            next_step_id="finish",
-            task=TimeTaskSpec(
-                task_key="ruleset_" + sha256(key.encode()).hexdigest()[:32],
-                target=TimeTaskTargetSpec(
-                    day_index=absolute_hour // 24, hour_of_day=absolute_hour % 24
-                ),
-                visibility="hidden",
-                on_due_branch_id="notify",
-                bindings={"actor_id": self.actor_id},
-            ),
-        )
-        state, task, _ = create_time_task(
-            self.runtime.module_content, state, step, rule_id="engine_ruleset"
-        )
-        self.emit(
-            "time.task_created",
-            {
-                "actor_id": self.actor_id,
-                "task_id": task.task_id,
-                "occurrence_id": task.occurrence_id,
-            },
-            visibility="hidden",
-        )
-        return state, task.task_id
-
-    def cancel_task(self, state, *, task_id, reason):
-        from collaboration_framework.contracts import CancelTimeTaskStep
-        from .time_tasks import cancel_time_task
-
-        task = state.time_tasks.get(task_id)
-        if task is None or task.status != "scheduled":
-            return state
-        state, _ = cancel_time_task(
-            state,
-            CancelTimeTaskStep(
-                id="ruleset_cancel",
-                task_key=task.task_key,
-                bindings=task.bindings,
-                reason_code=reason,
-                next_step_id="finish",
-            ),
-            rule_id=task.rule_id,
-        )
-        self.emit(
-            "time.task_cancelled",
-            {"actor_id": self.actor_id, "task_id": task_id, "reason": reason},
-            visibility="hidden",
-        )
-        return state
-
     def condition(self, state, *, condition_id, key, source, hours, details):
         if any(
             c.application_key == key
@@ -124,34 +67,7 @@ class OutcomeEffectSession:
         expiry = None
         if hours is not None:
             absolute = state.world_time.current.absolute_hour + hours
-            step = CreateTimeTaskStep(
-                id="condition_expiry",
-                next_step_id="finish",
-                task=TimeTaskSpec(
-                    task_key="condition_" + sha256(key.encode()).hexdigest()[:32],
-                    target=TimeTaskTargetSpec(
-                        day_index=absolute // 24, hour_of_day=absolute % 24
-                    ),
-                    visibility="hidden",
-                    on_due_branch_id="expire",
-                    bindings={"actor_id": self.actor_id, "application_key": key},
-                ),
-            )
-            state, task, _ = create_time_task(
-                self.runtime.module_content, state, step, rule_id="engine_condition"
-            )
-            expiry = ConditionExpiry(
-                kind="time_task", reference_id=task.task_id, absolute_hour=absolute
-            )
-            self.emit(
-                "time.task_created",
-                {
-                    "actor_id": self.actor_id,
-                    "task_id": task.task_id,
-                    "occurrence_id": task.occurrence_id,
-                },
-                visibility="hidden",
-            )
+            expiry = ConditionExpiry(kind="absolute_hour", absolute_hour=absolute)
         mutation = apply_condition(
             state,
             actor_id=self.actor_id,
@@ -253,9 +169,12 @@ def expire_conditions(runtime, state, events, *, request_id, dice, offset):
                     and expiry.kind == "time_task"
                     and expiry.reference_id == event.payload.get("task_id")
                 )
-                if event.type == "time.point_entered" and expiry.kind == "time_point":
+                if event.type == "time.point_entered" and expiry.kind in {
+                    "absolute_hour",
+                    "time_point",
+                }:
                     due = (
-                        expiry.absolute_hour == state.world_time.current.absolute_hour
+                        expiry.absolute_hour <= state.world_time.current.absolute_hour
                         if expiry.absolute_hour is not None
                         else expiry.reference_id == event.payload.get("point_id")
                     )
@@ -292,7 +211,7 @@ def bind_authored_expiries(runtime, before, after, actor_id):
                         )
                     }
                 )
-            elif (
+            elif expiry.kind == "time_task" and (
                 expiry.reference_id not in after.time_tasks
                 or after.time_tasks[expiry.reference_id].status != "scheduled"
             ):

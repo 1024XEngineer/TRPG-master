@@ -248,6 +248,7 @@ test(
       const intRun = intRolled.payload.checkRun
       assert.ok(intRun)
       assert.equal(intRun.roll.value, 21)
+      assert.ok(intRun.post_roll_options)
       assert.deepEqual(intRun.post_roll_options.map(option => option.kind), ['accept_result'])
       const narration = waitForEvent(room.host.sdk, event => event.type === 'narration.push')
       room.host.sdk.roomSocket.decidePostRoll(room.hostPlayerId, {
@@ -276,6 +277,7 @@ test(
       assert.ok(view.self_actor.conditions.includes('temporary_insanity'))
       assert.ok(view.self_actor.conditions.includes('madness_bout'))
       assert.ok(view.self_actor.conditions.includes('unconscious'))
+      assert.ok(view.self_actor.condition_details)
       assert.equal(view.self_actor.condition_details.find(c => c.id === 'temporary_insanity')?.remaining_hours, 8)
       const database = new DatabaseSync(DB_FILE, { readOnly: true })
       try {

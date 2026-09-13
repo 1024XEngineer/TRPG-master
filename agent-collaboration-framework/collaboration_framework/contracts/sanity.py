@@ -92,7 +92,9 @@ class SanityTreatment(ContractModel):
     started_absolute_hour: int = Field(ge=0)
     next_review_month: int = Field(default=1, ge=1)
     due_absolute_hour: int = Field(ge=0)
-    task_id: str
+    # Read older snapshots; new courses only persist the calendar deadline.
+    task_id: str | None = None
+    review_due_notified: bool = False
     stage: Literal["treatment", "sanity_recheck"] = "treatment"
     reviews: tuple[str, ...] = ()
     interruption_outcome_id: str | None = None

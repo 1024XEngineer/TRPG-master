@@ -50,13 +50,22 @@ class ActorResources(ContractModel):
 class ConditionExpiry(ContractModel):
     """Structured lifecycle target for an expiring Actor condition.
 
-    The reference points at an authored time point or a durable TimeTask; the
-    engine never infers expiry by parsing a condition id.
+    Hour deadlines are checked after a world-time jump. Authored point/task
+    references remain available for conditions tied to story events.
     """
 
-    kind: Literal["time_point", "time_task"]
-    reference_id: str = Field(min_length=1)
+    kind: Literal["absolute_hour", "time_point", "time_task"]
+    reference_id: str | None = Field(default=None, min_length=1)
     absolute_hour: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_target(self) -> ConditionExpiry:
+        if self.kind == "absolute_hour":
+            if self.absolute_hour is None or self.reference_id is not None:
+                raise ValueError("hour expiry requires only an absolute_hour")
+        elif self.reference_id is None:
+            raise ValueError("point/task expiry requires a reference_id")
+        return self
 
 
 class ActorCondition(ContractModel):
@@ -103,9 +112,7 @@ class ActorState(ContractModel):
             )
         active_ids = tuple(
             dict.fromkeys(
-                record.condition_id
-                for record in records
-                if record.status == "active"
+                record.condition_id for record in records if record.status == "active"
             )
         )
         if records != self.condition_states:
@@ -315,11 +322,15 @@ class GameState(ContractModel):
     runtime_entities: dict[str, dict[str, JsonValue]] = Field(default_factory=dict)
     visibility_overrides: dict[str, bool] = Field(default_factory=dict)
     party_location_knowledge: dict[str, LocationKnowledge] = Field(default_factory=dict)
-    actor_location_knowledge: dict[str, dict[str, LocationKnowledge]] = Field(default_factory=dict)
+    actor_location_knowledge: dict[str, dict[str, LocationKnowledge]] = Field(
+        default_factory=dict
+    )
     actor_position_contexts: dict[str, TravelInterrupted] = Field(default_factory=dict)
     item_instances: dict[str, ItemInstance] = Field(default_factory=dict)
     party_item_knowledge: dict[str, ItemKnowledge] = Field(default_factory=dict)
-    actor_item_knowledge: dict[str, dict[str, ItemKnowledge]] = Field(default_factory=dict)
+    actor_item_knowledge: dict[str, dict[str, ItemKnowledge]] = Field(
+        default_factory=dict
+    )
     rule_agendas: dict[str, RuleAgenda] = Field(default_factory=dict)
     # 只保存**临时** occurrence：默认点每天都会来，从 module_content 现推就行，
     # 存一份等于把模组内容复制进房间状态，换版本时必然漂移。
@@ -328,6 +339,17 @@ class GameState(ContractModel):
     core_resolved: bool = False
     ending_available: bool = False
     ending_resolution: EndingResolution | None = None
+
+    @model_validator(mode="after")
+    def normalize_mechanical_timers(self) -> GameState:
+        """Read pre-update PR snapshots without retaining mechanical stops."""
+        from .mechanical_deadlines import migrate_mechanical_timers
+
+        normalized = migrate_mechanical_timers(self)
+        if normalized is not self:
+            for name in ("actors", "time_tasks", "time_occurrences"):
+                object.__setattr__(self, name, getattr(normalized, name))
+        return self
 
 
 class StateChange(ContractModel):
@@ -474,7 +496,9 @@ class CheckRun(ContractModel):
     roll: CheckRoll
     post_roll_options: tuple[PostRollOption, ...] = ()
     final_result: CheckRoll | None = None
-    resolution_kind: Literal["initial_roll", "accept_result", "spend_luck", "push"] = "initial_roll"
+    resolution_kind: Literal["initial_roll", "accept_result", "spend_luck", "push"] = (
+        "initial_roll"
+    )
     luck_spent: int | None = Field(default=None, ge=1)
     adjudication: ActionAdjudication
     # 这次掷骰出自哪条规则（#483）。此前要判断只能拿 decision_id 回头 load
@@ -492,7 +516,9 @@ class CheckConsequenceParent(ContractModel):
 PendingCheckDecision.model_rebuild()
 
 
-WorkflowRequest = SubmitAdjudicationRequest | CheckDecisionRequest | PostRollDecisionRequest
+WorkflowRequest = (
+    SubmitAdjudicationRequest | CheckDecisionRequest | PostRollDecisionRequest
+)
 
 
 class CompletedAdjudicationCommand(ContractModel):

@@ -201,7 +201,7 @@ async def test_monthly_care_expiry_is_not_cure_and_recovery_retries_atomically(
         advance = await command(engine_store_factory, room, player, actor, f"month-{i}")
         await AdjudicationEngineService(engine_store_factory()).submit(advance)
     else:
-        raise AssertionError("month task did not fire")
+        raise AssertionError("world time did not reach the review deadline")
     db_session.expire_all()
     state = await _committed_state(db_session, room)
     a = state.actors[actor]
@@ -210,7 +210,9 @@ async def test_monthly_care_expiry_is_not_cure_and_recovery_retries_atomically(
     assert a.conditions == ("indefinite_insanity",)
     assert a.sanity.window.loss_total == 0
     assert a.sanity.window.baseline_san == 48
-    assert state.time_tasks[course.task_id].status == "completed"
+    assert not state.time_tasks
+    assert a.sanity.treatment is not None
+    assert a.sanity.treatment.review_due_notified
     review = await command(engine_store_factory, room, player, actor, "review-care", name="review")
 
     def crash(_room):

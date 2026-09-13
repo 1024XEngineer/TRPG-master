@@ -107,9 +107,7 @@ def start_treatment(context):
     if context.simulation:
         return RulesetActionResult(state=context.state)
     services = _services(context)
-    state, task_id = services.task(
-        context.state, key=f"treatment:{key}:1", absolute_hour=due
-    )
+    state = context.state
     # Entering explicitly safe care ends the current bout, but not insanity.
     state = services.remove(state, condition_id="madness_bout", reason="safe_treatment")
     course = SanityTreatment(
@@ -117,7 +115,6 @@ def start_treatment(context):
         kind=kind,
         started_absolute_hour=now,
         due_absolute_hour=due,
-        task_id=task_id,
     )
     history = (
         (*ledger.treatment_history, ledger.treatment)
@@ -147,7 +144,6 @@ def interrupt_treatment(services, state, actor_id, outcome_id):
     ):
         return state
     course = ledger.treatment
-    state = services.cancel_task(state, task_id=course.task_id, reason="new_trauma")
     ledger = ledger.model_copy(
         update={
             "treatment": course.model_copy(
@@ -162,18 +158,31 @@ def interrupt_treatment(services, state, actor_id, outcome_id):
 
 
 def treatment_due(context):
-    for actor_id, actor in context.state.actors.items():
+    state = context.state
+    for actor_id, actor in tuple(state.actors.items()):
         course = actor.sanity.treatment if actor.sanity else None
         if (
             course
             and course.status == "active"
-            and course.task_id == context.event.payload.get("task_id")
+            and not course.review_due_notified
+            and state.world_time.current.absolute_hour >= course.due_absolute_hour
         ):
+            state = replace_ledger(
+                state,
+                actor_id,
+                actor.sanity.model_copy(
+                    update={
+                        "treatment": course.model_copy(
+                            update={"review_due_notified": True}
+                        )
+                    }
+                ),
+            )
             context.services.emit(
                 "actor.treatment_review_due",
                 {"actor_id": actor_id, "status": "review_required"},
             )
-    return context.state
+    return state
 
 
 def recover_indefinite(services, state, actor_id, reason):
@@ -183,9 +192,6 @@ def recover_indefinite(services, state, actor_id, reason):
     for kind in ("madness_bout", "indefinite_insanity"):
         state = services.remove(state, condition_id=kind, reason=reason)
     if ledger.treatment:
-        state = services.cancel_task(
-            state, task_id=ledger.treatment.task_id, reason=reason
-        )
         ledger = ledger.model_copy(
             update={
                 "treatment": ledger.treatment.model_copy(update={"status": "recovered"})
@@ -216,11 +222,8 @@ def review_treatment(context):
         raise RulesetActionError(
             "SANITY_TREATMENT_INELIGIBLE", "疗程已中断或角色不适用"
         )
-    task = context.state.time_tasks.get(course.task_id)
     if (
         month != course.next_review_month
-        or task is None
-        or task.status != "completed"
         or context.state.world_time.current.absolute_hour < course.due_absolute_hour
     ):
         raise RulesetActionError(
@@ -325,17 +328,17 @@ def review_treatment(context):
             state.world_time.current.absolute_hour,
             2 if outcome == "deterioration" else 1,
         )
-        while due < earliest:
+        while due // 24 < earliest // 24:
             next_month += 1
             due = month_boundary(policy, course.started_absolute_hour, next_month)
-        state, task_id = services.task(
-            state, key=f"treatment:{key}:{next_month}", absolute_hour=due
-        )
+        # A deadline processed later on the same day must not skip a whole
+        # treatment month. Keep that month's date and wait the remaining hours.
+        due = max(due, earliest)
         course = course.model_copy(
             update={
                 "next_review_month": next_month,
                 "due_absolute_hour": due,
-                "task_id": task_id,
+                "review_due_notified": False,
             }
         )
         state = replace_ledger(

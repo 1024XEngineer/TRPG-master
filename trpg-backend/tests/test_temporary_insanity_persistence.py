@@ -103,7 +103,7 @@ async def test_int_recovery_after_precommit_crash_keeps_one_loss_and_same_durati
     assert replay.event_refs == result.event_refs
 
 
-async def test_hour_expiry_survives_session_restart_and_preserves_unrelated_conditions(
+async def test_hour_deadlines_expire_once_after_restart_and_precommit_retry(
     db_session, engine_store_factory
 ):
     actor_id, request = await prepare_int(db_session, engine_store_factory)
@@ -129,15 +129,33 @@ async def test_hour_expiry_survives_session_restart_and_preserves_unrelated_cond
             check=NoAdjudicationCheck(),
             success_effects=(AdvanceWorldTimeEffect(),),
         )
-        await AdjudicationEngineService(engine_store_factory()).submit(
-            SubmitAdjudicationRequest(
-                room_id=request.room_id, player_id=request.player_id, adjudication=action
-            )
+        command = SubmitAdjudicationRequest(
+            room_id=request.room_id, player_id=request.player_id, adjudication=action
         )
+        if steps == 0:
+
+            def crash(_room_id):
+                raise RuntimeError("before-expiry-commit")
+
+            with pytest.raises(RuntimeError, match="before-expiry-commit"):
+                await AdjudicationEngineService(engine_store_factory(before_commit=crash)).submit(
+                    command
+                )
+            db_session.expire_all()
+            unchanged = await _committed_state(db_session, request.room_id)
+            assert unchanged.actors == before.actors
+            assert unchanged.world_time == before.world_time
+        result = await AdjudicationEngineService(engine_store_factory()).submit(command)
+        replay = await AdjudicationEngineService(engine_store_factory()).submit(command)
+        assert replay.event_refs == result.event_refs
         steps += 1
         assert steps < 8
     db_session.expire_all()
     state = await _committed_state(db_session, request.room_id)
     assert state.actors[actor_id].resources.san == 55
     assert not state.actors[actor_id].conditions
-    assert all(task.status == "completed" for task in state.time_tasks.values())
+    assert not state.time_tasks
+    assert not state.time_occurrences
+    # One normal twelve-hour jump crosses both deadlines, without extra stops.
+    assert state.world_time.current.absolute_hour == start + 12
+    assert steps == 1

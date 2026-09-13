@@ -80,7 +80,8 @@ async def test_int_success_applies_independent_condition_and_bout_once():
     assert temp.expiry.absolute_hour == 20
     assert bout.expiry.absolute_hour == 14
     assert actor.sanity.bouts[0].type_id == "battered"
-    assert len(state.time_tasks) == 2
+    assert not state.time_tasks
+    assert not state.time_occurrences
     assert GameState.model_validate_json(state.model_dump_json()) == state
     assert not state.rule_agendas
     facts = [
@@ -147,21 +148,19 @@ async def advance_time(store, tag, *, consent=False):
     return await AdjudicationEngineService(store).submit(command)
 
 
-async def test_bout_ends_before_temporary_insanity_at_real_occurrences():
+async def test_bout_and_temporary_insanity_expire_at_normal_time_points():
     store = make_store()
     pending = await settle(store, dice=(5,))
     await resolve_int(store, pending)
-    await advance_time(store, "two-hours")
+    await advance_time(store, "evening")
     state = store.inspect_state(ROOM)
-    assert state.world_time.current.absolute_hour == 14
+    assert state.world_time.current.absolute_hour == 18
     assert state.actors[ACTOR].conditions == ("temporary_insanity",)
-    await advance_time(store, "six-hours")
-    assert store.inspect_state(ROOM).actors[ACTOR].conditions == ("temporary_insanity",)
-    await advance_time(store, "eight-hours")
+    await advance_time(store, "next-morning")
     state = store.inspect_state(ROOM)
-    assert state.world_time.current.absolute_hour == 20
+    assert state.world_time.current.absolute_hour == 30
     assert state.actors[ACTOR].conditions == ()
-    assert all(t.status == "completed" for t in state.time_tasks.values())
+    assert not state.time_tasks
     ended = [
         e
         for e in store.inspect_domain_events(ROOM)
@@ -215,23 +214,22 @@ async def test_round_based_bout_is_explicitly_unsupported_and_loss_is_not_repeat
     assert not store.inspect_state(ROOM).time_tasks
 
 
-async def test_expiry_after_module_terminal_rolls_back_condition_application():
-    import pytest
-    from collaboration_framework.contracts import ContractError
+async def test_condition_can_outlast_story_terminal_without_rejecting_san_result():
     from tests.sanity_fixtures import sandbox_content
 
-    content = sandbox_content()
-    payload = content.to_json_dict()
+    payload = sandbox_content().to_json_dict()
     payload["time_policy"]["terminal_point"] = {"point_id": "hour_18", "day_index": 0}
-    content = content.__class__.model_validate(payload)
+    content = sandbox_content().__class__.model_validate(payload)
     store = make_store(content)
     pending = await settle(store, dice=(5,))
-    with pytest.raises(ContractError, match="invalid_time_task_target"):
-        await resolve_int(store, pending, dice=(8, 3, 2))
-    actor = store.inspect_state(ROOM).actors[ACTOR]
-    assert actor.resources.san == 55
-    assert not actor.conditions
-    assert not store.inspect_state(ROOM).time_tasks
+    result, _ = await resolve_int(store, pending, dice=(8, 3, 2))
+    assert result.status == "resolved"
+    await advance_time(store, "terminal")
+    state = store.inspect_state(ROOM)
+    assert state.world_time.current.absolute_hour == 18
+    assert state.actors[ACTOR].resources.san == 55
+    assert state.actors[ACTOR].conditions == ("temporary_insanity",)
+    assert not state.time_tasks
 
 
 async def test_real_paper_chase_rule_consumes_engine_generated_insanity_event():
@@ -314,7 +312,7 @@ async def test_required_int_blocks_new_actor_action():
     assert store.inspect_state(ROOM).actors[ACTOR].resources.san == 55
 
 
-async def test_safe_rest_clears_temporary_state_and_cancels_only_its_tasks():
+async def test_safe_rest_clears_temporary_state_before_deadlines():
     from tests.sanity_fixtures import (
         sandbox_content,
         with_world_actions,
@@ -338,7 +336,7 @@ async def test_safe_rest_clears_temporary_state_and_cancels_only_its_tasks():
     state = store.inspect_state(ROOM)
     assert state.actors[ACTOR].conditions == ()
     assert state.actors[ACTOR].resources.san == 55
-    assert all(task.status == "cancelled" for task in state.time_tasks.values())
+    assert not state.time_tasks
     assert (
         sum(
             e.type == "actor.condition_removed"

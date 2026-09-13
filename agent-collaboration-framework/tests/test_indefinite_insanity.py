@@ -255,9 +255,19 @@ async def test_actor_windows_are_isolated():
 
 
 async def test_temporary_insanity_upgrades_once_and_cancels_the_old_expiry():
-    from tests.test_temporary_insanity import resolve_int, advance_time
+    from tests.test_temporary_insanity import resolve_int
+    from tests.sanity_fixtures import (
+        sandbox_content,
+        with_world_actions,
+        invoke_world_action,
+    )
 
-    store = make_store()
+    store = make_store(
+        with_world_actions(
+            sandbox_content(),
+            {"end-bout": ("coc7.end_bout", {"reason": "keeper_intervention"})},
+        )
+    )
     pending = await settle(store, dice=(5,), request_id="initial-loss")
     await resolve_int(store, pending, dice=(8, 1, 1))
     old = next(
@@ -265,16 +275,24 @@ async def test_temporary_insanity_upgrades_once_and_cancels_the_old_expiry():
         for c in store.inspect_state(ROOM).actors[ACTOR].condition_states
         if c.condition_id == "temporary_insanity"
     )
-    await advance_time(store, "first-bout-ended")
+    await invoke_world_action(store, "end-bout", tag="first-bout-ended")
     await settle(store, dice=(4, 2, 1), request_id="underlying-stimulus")
-    await advance_time(store, "second-bout-ended")
+    await invoke_world_action(store, "end-bout", tag="second-bout-ended")
     result = await settle(store, dice=(3, 3, 1), request_id="upgrade")
     state = store.inspect_state(ROOM)
     actor = state.actors[ACTOR]
     assert result.pending_decision is None
     assert set(actor.conditions) == {"indefinite_insanity", "madness_bout"}
     assert actor.sanity.window.loss_total == 12
-    assert state.time_tasks[old.expiry.reference_id].status == "cancelled"
+    assert (
+        next(
+            c
+            for c in actor.condition_states
+            if c.application_key == old.application_key
+        ).status
+        == "removed"
+    )
+    assert not state.time_tasks
     assert (
         sum(
             e.type == "actor.indefinite_insanity"

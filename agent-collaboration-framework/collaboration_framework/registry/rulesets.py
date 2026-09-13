@@ -16,7 +16,7 @@ the CoC7 adapter therefore registers only the already executable
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Any, TYPE_CHECKING
 
@@ -343,12 +343,16 @@ class RulesetAdapterRegistry:
         return action
 
 
+def _coc7_time_point(context):
+    state = on_time_point(context)
+    return treatment_due(replace(context, state=state))
+
+
 COC7_ADAPTER = RulesetAdapter(
     world_ref="coc-7e",
     check_profiles=COC7_CHECK_PROFILES,
     event_handlers={
-        "time.point_entered": on_time_point,
-        "time.task_due": treatment_due,
+        "time.point_entered": _coc7_time_point,
     },
     check_outcome_handlers={
         "coc7.sanity": coc7_sanity_outcome,

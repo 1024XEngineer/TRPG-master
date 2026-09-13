@@ -93,10 +93,8 @@ async def test_elapsed_month_only_enables_review_and_no_automatic_cure():
     await due(store)
     state = store.inspect_state(ROOM)
     assert state.actors[ACTOR].conditions == ("indefinite_insanity",)
-    assert (
-        state.time_tasks[state.actors[ACTOR].sanity.treatment.task_id].status
-        == "completed"
-    )
+    assert not state.time_tasks
+    assert state.actors[ACTOR].sanity.treatment.review_due_notified
     assert (
         sum(
             e.type == "actor.treatment_review_due"
@@ -185,11 +183,10 @@ async def test_bad_care_loses_san_starts_bout_and_skips_next_month(kind, roll):
 
 async def test_new_trauma_interrupts_course_and_requires_new_safe_course():
     store = await begin_care()
-    first = store.inspect_state(ROOM).actors[ACTOR].sanity.treatment
     await settle(store, dice=(1, 1, 1), request_id="trauma")
     actor = store.inspect_state(ROOM).actors[ACTOR]
     assert actor.sanity.treatment.status == "interrupted"
-    assert store.inspect_state(ROOM).time_tasks[first.task_id].status == "cancelled"
+    assert not store.inspect_state(ROOM).time_tasks
     await invoke_world_action(store, "restart")
     actor = store.inspect_state(ROOM).actors[ACTOR]
     assert actor.sanity.treatment.treatment_id == "care-2"
@@ -210,33 +207,36 @@ async def test_safe_rest_preserves_indefinite_but_explicit_development_can_recov
     assert actor.sanity.treatment.status == "recovered"
 
 
-async def test_undeclared_calendar_and_unreachable_month_refuse_without_partial_course():
-    from collaboration_framework.contracts import ContractError
+async def test_undeclared_calendar_refuses_without_partial_course():
+    store = make_store(treatment_content(calendar=False))
+    await cross_threshold(store)
+    before = store.inspect_state(ROOM)
+    result = await invoke_world_action(store, "start")
+    assert result.status == "rule_failed"
+    assert (
+        store.inspect_domain_events(ROOM)[-1].payload["failure_code"]
+        == "SANITY_CALENDAR_REQUIRED"
+    )
+    assert store.inspect_state(ROOM).actors == before.actors
+    assert not store.inspect_state(ROOM).time_tasks
 
-    for calendar, terminal in (
-        (False, None),
-        (True, {"point_id": "hour_18", "day_index": 1}),
-    ):
-        payload = treatment_content(calendar=calendar).to_json_dict()
-        if terminal:
-            payload["time_policy"]["terminal_point"] = terminal
-        content = treatment_content().__class__.model_validate(payload)
-        store = make_store(content)
-        await cross_threshold(store)
-        before = store.inspect_state(ROOM)
-        if calendar:
-            with pytest.raises(ContractError, match="invalid_time_task_target"):
-                await invoke_world_action(store, "start")
-        else:
-            result = await invoke_world_action(store, "start")
-            assert result.status == "rule_failed"
-            assert (
-                store.inspect_domain_events(ROOM)[-1].payload["failure_code"]
-                == "SANITY_CALENDAR_REQUIRED"
-            )
-        after = store.inspect_state(ROOM)
-        assert after.actors == before.actors
-        assert after.time_tasks == before.time_tasks
+
+async def test_course_beyond_story_terminal_remains_pending_without_extending_story():
+    payload = treatment_content().to_json_dict()
+    payload["time_policy"]["terminal_point"] = {"point_id": "hour_18", "day_index": 1}
+    store = make_store(treatment_content().__class__.model_validate(payload))
+    await cross_threshold(store)
+    result = await invoke_world_action(store, "start")
+    assert result.status == "resolved"
+    await advance_until(store, 42)
+    state = store.inspect_state(ROOM)
+    assert state.world_time.current.absolute_hour == 42
+    assert state.actors[ACTOR].conditions == ("indefinite_insanity",)
+    assert not state.actors[ACTOR].sanity.treatment.review_due_notified
+    assert not state.time_tasks
+    assert not state.time_occurrences
+    result = await invoke_world_action(store, "review-1")
+    assert result.status == "rule_failed"
 
 
 async def test_recovery_projection_exposes_only_relative_review_status():
@@ -310,3 +310,59 @@ async def test_late_review_never_backfills_multiple_months_at_one_instant():
         > store.inspect_state(ROOM).world_time.current.absolute_hour
     )
     assert course.reviews == ("care-1:1",)
+
+
+async def test_off_grid_calendar_deadline_is_checked_at_evening_once():
+    from collaboration_framework.engine import InMemoryEngineStore, WorldTimePoint
+    from tests.test_temporary_insanity import advance_time
+
+    content = treatment_content("institution").model_copy(
+        update={
+            "sanity_policy": SanityPolicy(
+                bout_mode="summary", calendar_anchor=date(1924, 1, 1)
+            )
+        }
+    )
+    state = make_store(content).inspect_state(ROOM)
+    state = state.model_copy(
+        update={
+            "world_time": state.world_time.model_copy(
+                update={
+                    "current": WorldTimePoint(day_index=0, hour_of_day=15),
+                    "current_point_id": "occ_d0_h15",
+                    "current_time_segment": "afternoon",
+                }
+            )
+        }
+    )
+    store = InMemoryEngineStore()
+    store.register_room(module_content=content, initial_state=state)
+    await cross_threshold(store)
+    await invoke_world_action(store, "start")
+    course = store.inspect_state(ROOM).actors[ACTOR].sanity.treatment
+    assert course.due_absolute_hour == 31 * 24 + 15
+    assert not store.inspect_state(ROOM).time_tasks
+    await advance_until(store, 31 * 24 + 12)
+    assert (
+        not store.inspect_state(ROOM).actors[ACTOR].sanity.treatment.review_due_notified
+    )
+    await advance_time(store, "review-evening")
+    state = store.inspect_state(ROOM)
+    assert state.world_time.current.absolute_hour == 31 * 24 + 18
+    assert state.actors[ACTOR].sanity.treatment.review_due_notified
+    assert state.actors[ACTOR].conditions == ("indefinite_insanity",)
+    result = await invoke_world_action(store, "review-1", dice=(51,))
+    assert result.status == "resolved"
+    course = store.inspect_state(ROOM).actors[ACTOR].sanity.treatment
+    # Processing at the next normal point must not skip an entire calendar month.
+    assert course.next_review_month == 2
+    assert course.due_absolute_hour == 60 * 24 + 18
+    assert not course.review_due_notified
+    await advance_time(store, "following-morning")
+    assert (
+        sum(
+            e.type == "actor.treatment_review_due"
+            for e in store.inspect_domain_events(ROOM)
+        )
+        == 1
+    )

@@ -2861,6 +2861,15 @@ class _DeterministicStepAdjudicator:
         if adjudication is not None:
             _log_step_adjudicator_path(context, adjudication, path="deterministic")
             return adjudication
+        if context.step.kind == "travel":
+            # An unresolved destination is not a confirmation of the current scene.
+            # Match the model adapter's zero-write unresolved-travel path instead
+            # of inventing a location target for the narrative-only fallback.
+            raise TurnExecutionError(
+                "TRAVEL_DESTINATION_NOT_FOUND",
+                "没有找到与玩家描述相符且可安全创建或到达的地点",
+                retryable=False,
+            )
 
         action_text = context.step.semantic_goal.replace(
             context.player_view.scene.name,

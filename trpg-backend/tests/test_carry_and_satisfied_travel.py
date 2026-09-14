@@ -444,3 +444,28 @@ async def test_unknown_destination_anchor_cannot_become_already_here():
     assert not any(
         e.type.startswith("travel.") for e in store.inspect_domain_events("companions")[before:]
     )
+
+
+@pytest.mark.parametrize("goal", ["我要去吃饭", "前往不存在的星空之城"])
+async def test_fake_unknown_travel_does_not_confirm_current_location(goal):
+    store, rules, engine = await make_runtime()
+    app = build_action_plan_turn_application(
+        store=store,
+        engine=rules,
+        adjudication_engine=engine,
+        settings=Settings(host_model_provider="fake"),
+        memory_source=EmptyMemory(),
+    )
+    before = len(store.inspect_domain_events("companions"))
+    result = await app.start(
+        room_id="companions", player_id="player", client_action_id="test", utterance=goal
+    )
+
+    assert result.status == "needs_clarification"
+    assert result.narration is not None
+    assert "已经在" not in result.narration.text
+    run = await app.get_plan("companions", "test")
+    assert run is not None
+    assert run.steps[0].already_at_destination_id is None
+    assert run.steps[0].safe_failure_code == "TRAVEL_DESTINATION_NOT_FOUND"
+    assert len(store.inspect_domain_events("companions")) == before

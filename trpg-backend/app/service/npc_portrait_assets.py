@@ -91,12 +91,6 @@ HAPPY_FROG_VILLAGE_NPC_PORTRAITS = (
         "frog_head_guest.webp",
         "现代度假村游客，用宽大衣物遮挡身体异样，神情麻木，方形角色立绘",
     ),
-    NpcPortraitSpec(
-        "dream_frogs",
-        "梦游青蛙",
-        "dream_frogs.webp",
-        "森林池塘边几乎不躲避来人的鲜艳青蛙，梦境般氛围，方形角色立绘",
-    ),
 )
 HAPPY_FROG_VILLAGE_ASSET_ROOT = "/assets/npc_portraits/happy-frog-village"
 

@@ -5,7 +5,14 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
-from pydantic import BeforeValidator, Field, JsonValue, TypeAdapter, ValidationError, model_validator
+from pydantic import (
+    BeforeValidator,
+    Field,
+    JsonValue,
+    TypeAdapter,
+    ValidationError,
+    model_validator,
+)
 
 from collaboration_framework.contracts import (
     ActionAdjudication,
@@ -98,6 +105,8 @@ def reservation_is_expired(
 class ActionPlanStepRun(ContractModel):
     step_id: str = Field(min_length=1, max_length=100)
     step_request_id: str = Field(min_length=1, max_length=200)
+    # Set by the host after resolving this step against its current view, never by the model.
+    already_at_destination_id: str | None = Field(default=None, min_length=1)
     step: ActionPlanStep
     status: PlanStepStatus = "pending"
     source_revision: str | None = Field(default=None, min_length=1)
@@ -368,6 +377,7 @@ class ActionPlanRun(ContractModel):
 
 
 class CompletedPlanStepSummary(ContractModel):
+    already_at_destination_id: str | None = Field(default=None, min_length=1)
     step_index: int = Field(ge=0)
     semantic_goal: str = Field(min_length=1, max_length=1000)
     outcome: Literal["success", "failure", "cancelled"]

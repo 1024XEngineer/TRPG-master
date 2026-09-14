@@ -3,7 +3,7 @@
 from collaboration_framework.contracts import ActionPlanPolicy
 
 PROMPT_VERSION = "trpg-host-intent-v10"
-TURN_PLANNER_PROMPT_VERSION = "trpg-turn-planner-v3"
+TURN_PLANNER_PROMPT_VERSION = "trpg-turn-planner-v4"
 
 
 def turn_planning_instructions(policy: ActionPlanPolicy) -> str:
@@ -23,6 +23,9 @@ def turn_planning_instructions(policy: ActionPlanPolicy) -> str:
   人不在场时，只能依据公开位置先会合；不知位置时保留寻找目标，不得猜测隐藏位置。
   当前公开状态尚未随行时，“带人去某处”应先尝试建立同行，再前往目的地；已在随行的
   人无需重复建立。否定、解除同行和玩家明确要求的目的地必须保留，不得改写成肯定行动。
+- NPC 随行与物品携带分开：只有 NPC 才尝试建立同行；物品依据 inventory / loose_items
+  判断是否已持有。需要取得物品时，先写清“尝试取得并携带某物”，再安排旅行；不得把取得
+  泛化为“与它一起行动”。背包已有对应实例则复用，不重复取得；保留单个与群体的区别。
 - step.kind 只能是 travel、wait、rest、action、dialogue；步骤不得分支、循环、并行或动态追加。
 - plan.goal、semantic_goal 和 public_progress_label 必须完全玩家安全，只描述玩家希望完成的事。
 - 玩家明确说出的 PlayerView 公开地点、人物、物件名称或别名，以及动作限定词，必须在对应
@@ -63,6 +66,11 @@ def current_step_adjudication_instructions() -> str:
 
     return """
 只裁决当前 ActionPlan step，以本次最新 PlayerView 为准，不预读、裁决或描述未来步骤。
+本次“玩家当前意图”仅指 step.semantic_goal；player_input 和 plan_goal 是父任务背景，
+只用于指代和限定条件，不能据此提前执行后续目标。取得物品只处理取得，不顺带旅行。
+每步重新核对当前 inventory、同行状态与 scene，不把计划开始时的位置沿用到后续步骤。
+取得失败或尚未同行时不得宣称带着目标出发。纯旅行已在目的地时，仍用 travel 表达本步
+旅行目标，以已消解的地点为 target；应用层依据最新位置将已满足目标归并为零写入完成。
 request_id、source_revision、actor_id 由应用层注入，输出不能改变身份。
 按 ActionAdjudication 契约返回检定与结果，需要玩家选择时停在当前步骤。
 step.kind 只表示语义目标类型，不绕过规则匹配，也不免除应提交的持久效果。

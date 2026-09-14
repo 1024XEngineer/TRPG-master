@@ -1361,7 +1361,7 @@ async def test_model_receives_shared_adjudication_contract_once(entry: str) -> N
 
     instructions = captured["instructions"]
     assert instructions.count(_SAFE_ADJUDICATION_INSTRUCTIONS) == 1
-    assert instructions.startswith(prefix)
+    assert instructions.endswith(prefix) if entry == "step" else instructions.startswith(prefix)
     # Entry-specific scope must not carry a second set of effect / Runtime rules.
     for effect in (
         "ensure_runtime_location",

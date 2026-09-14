@@ -809,10 +809,16 @@ def build_entities() -> list[dict[str, Any]]:
         entity(
             "dream_frogs",
             "梦游青蛙",
-            "几乎不躲避来人的鲜艳青蛙。",
+            "池塘中聚集着几乎不躲避来人的鲜艳青蛙。",
             location="frog_pond",
-            kind="npc",
-            voice_type="zh_female_mizai_saturn_bigtts",
+        ),
+        entity(
+            "dream_frog_item",
+            "一只梦游青蛙",
+            "池边一只几乎不躲避来人的鲜艳青蛙，可以尝试捉起携带。",
+            location="frog_pond",
+            portable=True,
+            aliases=["青蛙", "这只青蛙"],
         ),
         entity(
             "night_ritual",
@@ -1689,7 +1695,7 @@ def build_module() -> dict[str, Any]:
     return {
         "content_schema_version": 3,
         "module_id": "happy-frog-village",
-        "version": "3.0.14",
+        "version": "3.0.16",
         "opening_key_facts": [
             "调查员因寻人委托来到莱恩庄园。",
             "委托人理查德·莱恩是企业家，也是失踪青年詹姆斯·莱恩的父亲。",
@@ -1701,7 +1707,7 @@ def build_module() -> dict[str, Any]:
             "警方常规搜寻没有进展。",
             "詹姆斯最后被看见独自往城郊老林地方向去。",
             "在詹姆斯房间的垃圾桶中找到了一张彩色传单。",
-            "管家在场接待，补充线索并递交这张传单。"
+            "管家在场接待，补充线索并递交这张传单。",
         ],
         "opening_text": "你们接到了一个找人的委托，来到了莱恩庄园，一位衣着华贵但面容憔悴的中年男人在管家的陪同下接待了你们。他是本市有名的企业家，理查德·莱恩先生。没有寒暄，他直接将一个厚厚的信封放在桌上，里面装有100美金。\n\n“我知道你们的本事和……收费。”他声音沙哑，开门见山。“我儿子，詹姆斯·莱恩，已经失踪一周了。这是预付金。找到他，把他安全地带回来，你们每人还能再拿到四百金币。”\n\n他推过来一张照片，上面是一个笑容开朗的二十来岁青年。\n\n“警方的常规搜寻毫无进展。他最后被看见，是独自一人往城郊的‘老林地’方向去了。在他房间的垃圾桶里，我们只找到了这个。”管家补充道，递过来一张被揉皱后又展平的彩色传单。",
         "world_ref": "coc-7e",
@@ -2069,7 +2075,10 @@ def provenance(module: dict[str, Any]) -> dict[str, Any]:
             "index_base": 0,
             "selection": "默认起始路径的公开原文；保留作者措辞与单位，排除 KP 指导和其它分支。",
         },
-        "opening_key_facts": {"source_field": "opening_text", "selection": "仅从同路径 opening_text 提取公开任务、线索、数量、时间和条件；运行时作为改写提醒，不替代原文。"},
+        "opening_key_facts": {
+            "source_field": "opening_text",
+            "selection": "仅从同路径 opening_text 提取公开任务、线索、数量、时间和条件；运行时作为改写提醒，不替代原文。",
+        },
         "paragraph_numbering": "python-docx Document.paragraphs 0-based index",
         "source_images": [
             {
@@ -2151,6 +2160,19 @@ def review_markdown(module: dict[str, Any], source_map: dict[str, Any]) -> str:
 | 对象 | 数量 | 已映射 |
 | --- | ---: | ---: |
 {chr(10).join(rows)}
+
+## 青蛙携带修正（3.0.16）
+
+- 蛙群是场景中的观察对象；单只青蛙有独立可携带物品实例，捕获取得后由引擎写入背包。
+- 两者均不作为 NPC，不使用随行状态或 NPC 音色；调查蛙群不等于取得物品。
+- 复用既有物品取得、放下及保管关系，不移动整个蛙群，不因重复携带复制个体。
+- 进入大厅自动公开地图与楼层布局的规则保持不变；已有房间仍绑定原版本。
+
+## 大厅地图版本更新（3.0.15）
+
+- 按“进入大厅就自动获取地图信息并解锁楼层布局”的预期重新发布现有地图规则。
+- `see_reception_map` 在抵达大厅后公开 `resort_map_layout`，`learn_locations_from_map` 随后公开楼层地点；无需另行主动读图。
+- 本次只更新发布版本，不改变已有规则、门锁和通行限制；现有房间继续绑定原版本，新建房间使用 3.0.15。
 
 ## 地图与信息修正（3.0.13）
 

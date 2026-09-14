@@ -152,7 +152,7 @@ async def test_happy_frog_village_npc_portraits_are_seeded_idempotently(
     await load_builtin_modules(db_session)
     after = list(await db_session.scalars(query))
 
-    assert len(before) == len(after) == 7
+    assert len(before) == len(after) == 6
     assert {asset.entity_id: asset.url for asset in after} == {
         "villager_accounts": ("/assets/npc_portraits/happy-frog-village/villager_accounts.webp"),
         "ezra": "/assets/npc_portraits/happy-frog-village/ezra.webp",
@@ -160,7 +160,6 @@ async def test_happy_frog_village_npc_portraits_are_seeded_idempotently(
         "emily": "/assets/npc_portraits/happy-frog-village/emily.webp",
         "james": "/assets/npc_portraits/happy-frog-village/james.webp",
         "frog_head_guest": ("/assets/npc_portraits/happy-frog-village/frog_head_guest.webp"),
-        "dream_frogs": "/assets/npc_portraits/happy-frog-village/dream_frogs.webp",
     }
 
 

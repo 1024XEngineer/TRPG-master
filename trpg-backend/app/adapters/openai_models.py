@@ -147,13 +147,17 @@ move_entity(holder_actor_id=self_actor.id)，新 id 只用于这两个 effects�
 - enter_location：使用已知且已定位的地点、公开出口或同次创建的地点。引擎按公开路线寻路，
   在锁门或交互边界中断；不因目的地超过一跳就要求玩家分段输入。
 - change_entity_state：记录具体可观察的变化，key 只用字母、数字、下划线、短横。
-  NPC 持续随队用 accompanying=true/false，以该 NPC 为 target、character_state 为持久意图。
+  只有 NPC 持续随队才用 accompanying=true/false，以该 NPC 为 target、character_state 为持久意图。
   结合情境与历史判断意愿；普通请求未判断出不愿意时默认同意，不愿意则拒绝。
   强制行为的检定及成功效果在同次裁决绑定，适用规则仍优先。enter_location 自动带上随行者，
   不为随行追加 move_entity；不得把否定或解除随行改成同意。
 - move_entity：NPC 移动到 location_id 的对象须当前可见且与本次行动相关；物品取得、保留、
   转交使用 holder_actor_id，放置或丢弃使用 location_id。进入背包的 entity_id 仅来自
   loose_items、inventory 或同次创建的 Runtime object，visible_entities 中的固定实体不够。
+  携带物品必须形成 inventory 中的 ItemInstance 保管关系，不能给物品设置 accompanying。
+  捕获可携带个体使用对应 loose_items 实例，不把场景群体整体搬走；观察成功不等于取得。
+  已在当前角色背包中的实例直接复用；取得失败不宣称携带成功。carried 表示随身持有，
+  不要求旁白额外描写“塞进包里”。没有实例时只有满足 Runtime 条件才创建，不能复制 Canon。
 - consume_entity：物品耗尽、被毁或彻底失效时使用；可重复使用且仍随身携带的工具不移动或消费。
   物品使用后的归宿按实际语义和成功 / 失败分支处理，不一律删除或留在背包。
 - advance_world_time：仅用于明确等待、休息、过夜或等待指定时刻；普通行动不推进时间。
@@ -202,8 +206,12 @@ player_input.interlocutor_id / interlocutor_name 指定当前对话对象；结�
 
 NPC 直接台词只写在 npc_replies，最多 3 条，同一 NPC 最多一条；speaker_id 逐字复制
 当前可见 NPC 的 ID。台词仅表达该人物的立场、反应和公开知识，不宣告未确认的世界变化，
-不夹带舞台动作。text 写结果及引入台词的简短旁白，不重复或转述台词；两者同次输出且含义
-一致，不能一边给出回答一边宣称沉默。确有情境依据时才描写拒绝开口或无法说话。
+不夹带舞台动作。界面先显示 text，再依次显示 npc_replies；它们是独立消息，各自完整成句，
+不要把一段带引号的对话拆成前后两截。text 简洁交代已确认的动作、结果和必要现场变化，
+不重复玩家刚说的问题，不重复或转述台词，也不用“她轻声说道，”这类等待台词接上的引语前缀。
+NPC 的语气和态度主要由台词体现；旁白中的神态、动作只在提供新的可观察信息或有助理解
+行动结果时描写。两者同次输出且含义一致，不能一边给出回答一边宣称沉默。
+确有情境依据时才描写拒绝开口或无法说话。
 本次必写信息的完整原文可保留作者的人称与引号，仅这些来源句段适用该例外。
 
 【行动主体与身体条件】
@@ -225,6 +233,9 @@ committed_results 确认抵达当前场景时，以最终 scene 的公开描述�
 引用对应 location 结果。将可见人物、物件、公开状态、出入口和新增事实融入连贯段落，
 避免列表播报和重复信息；保留公开访问限制，知道位置不代表获准进入。
 首次展示可充分介绍空间与氛围，重返时结合历史重点交代变化。同地点连续行动先讲新结果。
+completed_steps[].already_at_destination_id 表示该步执行前已经在目的地，未发生旅行；
+它不代表重返，不重写抵达开场，也不撤销其他步骤真实取得、抵达或发现的结果。
+本轮 event_refs 对应的到访是刚发生的结果，不是过去经历；不能据此写“上次”“再次”。
 previous_published_narration 用于衔接，不照抄出发地画面；不同地点可有相同时段、光线或天气。
 background 约束语气，不要求反复从风格意象起笔。资料不足时不补造空间结构、路线或物件。
 
@@ -566,8 +577,8 @@ class PromptActionPlanStepAdjudicator:
                 schema_name="trpg_action_plan_step_adjudication",
                 schema=ActionAdjudication.model_json_schema(mode="serialization"),
                 instructions=(
-                    f"{current_step_adjudication_instructions()}\n\n"
-                    f"{_SAFE_ADJUDICATION_INSTRUCTIONS}"
+                    f"{_SAFE_ADJUDICATION_INSTRUCTIONS}\n\n"
+                    f"{current_step_adjudication_instructions()}"
                 ),
                 input_payload=context.to_json_dict(),
             )

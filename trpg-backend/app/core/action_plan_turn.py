@@ -57,6 +57,7 @@ from collaboration_framework.host.application import (
     TurnExecutionError,
     narration_subject_rejection_reason,
 )
+from collaboration_framework.host.application.satisfied_travel import satisfied_travel_adjudication
 from collaboration_framework.host.ports import (
     ActionPlanStepAdjudicator,
     ActionPlanStepFailure,
@@ -383,30 +384,81 @@ class ActionPlanTurnResult:
         }
 
 
+def _planning_public_texts(
+    player_view: PlayerView,
+    planning_context: TurnPlanningContext | None,
+) -> tuple[str, ...]:
+    """只收集公开正文，不把历史、记忆或物品的内部引用 ID 当作公开文字。"""
+
+    view = (
+        planning_context.planning_view
+        if planning_context is not None
+        else TurnPlanningView.from_player_view(player_view)
+    )
+    texts = [view.self_name, view.current_scene_name, *view.location_breadcrumbs]
+    for item in (
+        *view.visible_entities,
+        *view.visible_actors,
+        *view.available_destinations,
+        *view.known_locations,
+        *view.inventory_items,
+        *view.known_information,
+    ):
+        texts.extend((item.name, *item.aliases))
+    # 地面物品可能只有实例投影，没有同 ID 的场景 Canon 实体。
+    texts.extend(item.name for item in player_view.scene.loose_items)
+    for info in player_view.known_information:
+        texts.extend((info.title, info.summary, info.content))
+    if planning_context is not None:
+        for turn in planning_context.recent_history.turns:
+            texts.append(turn.player_utterance.text)
+            if turn.accepted_intent_summary:
+                texts.append(turn.accepted_intent_summary)
+            if turn.published_narration is not None:
+                texts.append(turn.published_narration.text)
+            if turn.player_safe_result is not None:
+                texts.extend(fact.text for fact in turn.player_safe_result.visible_facts)
+            for reply in turn.npc_replies:
+                if reply.speaker_name:
+                    texts.append(reply.speaker_name)
+                texts.append(reply.text.text)
+        texts.extend(memory.content for memory in planning_context.memories)
+        summary = planning_context.conversation_summary
+        if summary is not None:
+            texts.extend((summary.summary, *summary.unresolved_questions))
+    return tuple(text.casefold() for text in texts if text)
+
+
 def _action_plan_disclosure_reason(
     plan: ActionPlan,
     *,
     player_input: PlayerInput,
     player_view: PlayerView,
     capabilities: KeeperCapabilityView | None,
+    planning_context: TurnPlanningContext | None = None,
 ) -> str | None:
     """在持久化前拒绝把 Keeper 私密词汇写进玩家可见计划。
 
-    规划器只收到 TurnPlanningView，但模型可能回显其它上下文或自行猜测；这里
-    使用公开/隐藏词汇索引做确定性拒绝，不尝试替换文本，以免篡改玩家意图。
+    公开名称只放行该文字，不公开同名实体的 ID 或关联隐藏 Information。
+    按文字判断也覆盖 Canon 定义 ID 与 Inventory 实例 ID 不同的情况。
     """
     if capabilities is None:
         return None
-    player_text = player_input.utterance.casefold()
+    public_texts = _planning_public_texts(player_view, planning_context)
+    allowed_texts = (player_input.utterance.casefold(), *public_texts)
+    public_info_ids = {item.id for item in player_view.known_information}
     hidden: set[str] = set()
+    internal_ids = {item.id.casefold() for item in capabilities.entities}
+    internal_ids.update(item.id.casefold() for item in capabilities.information)
+    internal_ids.update(
+        item.id.casefold() for item in (*player_view.inventory, *player_view.scene.loose_items)
+    )
     for info in capabilities.information:
-        if not (info.known_by_party or info.known_by_actor):
-            hidden.update(
-                value.casefold() for value in (info.id, info.title, info.summary, info.content)
-            )
+        if info.id not in public_info_ids and not (info.known_by_party or info.known_by_actor):
+            hidden.update(value.casefold() for value in (info.title, info.summary, info.content))
     for entity in capabilities.entities:
-        if not any(item.id == entity.id for item in player_view.scene.visible_entities):
-            hidden.update(value.casefold() for value in (entity.id, entity.name))
+        hidden.add(entity.name.casefold())
+    hidden = {term for term in hidden if term and not any(term in text for text in allowed_texts)}
     fields = (
         plan.goal,
         *(step.semantic_goal for step in plan.steps),
@@ -414,9 +466,17 @@ def _action_plan_disclosure_reason(
     )
     for value in fields:
         text = value.casefold()
-        for secret in hidden:
-            if secret and secret in text and secret not in player_text:
-                return "hidden_keeper_term"
+        if any(secret in text for secret in hidden):
+            return "hidden_keeper_term"
+        # 英文公开名可能包含与 ID 相同的词；先排除公开文字中的这些出现。
+        # ID 不因出现在输入或历史元数据里而公开，仍禁止额外输出机器引用。
+        for public_text in sorted(public_texts, key=len, reverse=True):
+            pattern = rf"(?<![a-z0-9_:-]){re.escape(public_text)}(?![a-z0-9_:-])"
+            text = re.sub(pattern, " ", text)
+        for identifier in internal_ids:
+            pattern = rf"(?<![a-z0-9_:-]){re.escape(identifier)}(?![a-z0-9_:-])"
+            if re.search(pattern, text):
+                return "internal_target_id"
     return None
 
 
@@ -936,6 +996,28 @@ def _best_label_overlap(text: str, labels: tuple[str, ...]) -> str | None:
     return max(candidates, key=lambda item: (len(item), item)) if candidates else None
 
 
+def _already_at_destination_narration(
+    context: ActionPlanNarrationContext,
+) -> ActionPlanNarrationOutput | None:
+    """A successful location confirmation needs no model-authored scene opening."""
+    if (
+        context.termination_status != "resolved"
+        or not context.completed_steps
+        or context.narration_evidence
+        or context.player_input.interlocutor_id is not None
+        or any(
+            step.outcome != "success"
+            or step.already_at_destination_id != context.player_view.scene.id
+            or step.committed_results
+            for step in context.completed_steps
+        )
+    ):
+        return None
+    return ActionPlanNarrationOutput(
+        text=f"{_acting_address(context)}已经在{context.player_view.scene.name}了。",
+    )
+
+
 class DeterministicActionPlanNarrationModel:
     async def generate(self, context: ActionPlanNarrationContext) -> object:
         completed = "；".join(
@@ -1135,9 +1217,15 @@ class ActionPlanTurnApplication:
                     player_input=player_input,
                     player_view=view,
                     capabilities=keeper_capabilities,
+                    planning_context=planning_context,
                 )
                 if reason is not None:
-                    logger.warning("turn_plan_rejected_for_disclosure", reason=reason)
+                    logger.warning(
+                        "turn_plan_rejected_for_disclosure",
+                        action=client_action_id,
+                        attempt=1,
+                        reason=reason,
+                    )
                     # 安全边界失败只允许重新调用同一个安全 Planner；绝不回退融合调用。
                     decision = await self._semantic_planner.generate(planning_context)
                     reason = _action_plan_disclosure_reason(
@@ -1145,11 +1233,20 @@ class ActionPlanTurnApplication:
                         player_input=player_input,
                         player_view=view,
                         capabilities=keeper_capabilities,
+                        planning_context=planning_context,
                     )
                     if reason is not None:
+                        logger.warning(
+                            "turn_plan_rejected_for_disclosure",
+                            action=client_action_id,
+                            attempt=2,
+                            reason=reason,
+                        )
+                        await _emit_phase(on_phase, "generating_narration")
                         return self._planning_failure_clarification(
                             player_input=player_input,
                             player_view=view,
+                            failure_reason="disclosure",
                         )
             else:
                 # 明确的单步请求可走轻量安全生产器；即使保留旧接口，也不向它
@@ -1185,6 +1282,7 @@ class ActionPlanTurnApplication:
             return self._planning_failure_clarification(
                 player_input=player_input,
                 player_view=view,
+                failure_reason="structure",
             )
         if use_semantic_planner and isinstance(self._planner, DeterministicHostTurnDecisionModel):
             latest_view = await self._projector.project(player_input)
@@ -1297,20 +1395,27 @@ class ActionPlanTurnApplication:
         *,
         player_input: PlayerInput,
         player_view: PlayerView,
+        failure_reason: Literal["intent", "structure", "disclosure"] = "intent",
     ) -> ActionPlanTurnResult:
-        """规划模型连续返回坏结构时，生成零提交的玩家可见主持人回复。"""
+        """规划尚未提交时，区分意图澄清与模型失败，不把校验失败归咎于玩家。"""
 
+        if failure_reason == "disclosure":
+            text = "我暂时无法根据当前已知信息安排这次行动，行动尚未执行。请稍后重试。"
+        elif failure_reason == "structure":
+            text = "这次行动的规划暂时出了问题，行动尚未执行。请稍后重试。"
+        else:
+            text = (
+                "我暂时没能准确理解这次行动。"
+                f"请再明确一下{_view_actor_name(player_view)}"
+                "想做什么，以及行动的对象或地点。"
+            )
         return ActionPlanTurnResult(
             player_input=player_input,
             player_view=player_view,
             status="needs_clarification",
             narration=ActionPlanNarrationOutput(
                 kind="clarification",
-                text=(
-                    "我暂时没能准确理解这次行动。"
-                    f"请再明确一下{_view_actor_name(player_view)}"
-                    "想做什么，以及行动的对象或地点。"
-                ),
+                text=text,
             ),
         )
 
@@ -1826,6 +1931,8 @@ class ActionPlanTurnApplication:
                 public_entity_ids = {item.id for item in context.player_view.scene.visible_entities}
                 # 随身物品不在场景实体列表里，但对当前玩家同样公开。
                 public_entity_ids.update(item.id for item in context.player_view.inventory)
+                public_entity_ids.update(item.id for item in context.player_view.scene.loose_items)
+                public_texts = _planning_public_texts(context.player_view, None)
                 # 用有序映射而不是 set：命中禁词时只能记来源 id，不能记词本身
                 # （禁词取自尚未公开的剧情内容），所以索引必须与来源表严格同序。
                 term_sources: dict[str, str] = {}
@@ -1844,7 +1951,13 @@ class ActionPlanTurnApplication:
                 for entity in capabilities.entities:
                     if entity.id not in public_entity_ids:
                         for field, value in (("id", entity.id), ("name", entity.name)):
-                            if value:
+                            # A public inventory name may contain another entity's name
+                            # (one frog vs the frog group). Names already disclosed there
+                            # are safe words; the other entity's internal ID stays private.
+                            public_name = field == "name" and any(
+                                value.casefold() in text.casefold() for text in public_texts
+                            )
+                            if value and not public_name:
                                 term_sources.setdefault(value, f"entity:{entity.id}:{field}")
                 forbidden_terms = tuple(term_sources)
                 forbidden_sources = tuple(term_sources.values())
@@ -1876,7 +1989,16 @@ class ActionPlanTurnApplication:
                 player_view=context.player_view,
                 addressing_mode=addressing_mode,
                 acting_character_name=acting_character_name,
-                memories=memory_context.entries,
+                # Current-turn visits are already represented by committed results. They
+                # must not masquerade as earlier visits in the narrator's history.
+                memories=tuple(
+                    entry
+                    for entry in memory_context.entries
+                    if not (
+                        entry.kind == "visit"
+                        and entry.source_event_id in context.allowed_evidence_refs
+                    )
+                ),
                 conversation_summary=memory_context.conversation_summary,
                 opening_world_time=context.opening_world_time,
                 allowed_evidence_refs=context.allowed_evidence_refs,
@@ -1896,6 +2018,16 @@ class ActionPlanTurnApplication:
                     "forbidden_disclosure_terms": forbidden_terms,
                 }
             )
+        short_output = _already_at_destination_narration(context)
+        if short_output is not None:
+            narration = self._narrator.validate(context, short_output)
+            logger.info(
+                "action_plan_narration_completed",
+                action=context.player_input.client_action_id[:12],
+                attempts=0,
+                path="already_at_destination",
+            )
+            return narration
         started_at = time.monotonic()
         for attempt in range(2):
             try:
@@ -2010,8 +2142,10 @@ class ActionPlanTurnApplication:
                     context = context.model_copy(
                         update={
                             "narration_retry_hint": (
-                                "NPC 台词只放进 npc_replies，text 保留已确认结果并简短引入回答，"
-                                "不重复或转述台词；旁白与实际回答须一致。"
+                                "NPC 台词只放进 npc_replies。text 与每条台词是独立消息，"
+                                "各自完整成句；text 简洁交代已确认结果，"
+                                "不使用等待台词接上的引语前缀，"
+                                "不重复或转述台词；语气主要由台词体现，旁白与实际回答须一致。"
                             )
                         }
                     )
@@ -2727,6 +2861,15 @@ class _DeterministicStepAdjudicator:
         if adjudication is not None:
             _log_step_adjudicator_path(context, adjudication, path="deterministic")
             return adjudication
+        if context.step.kind == "travel":
+            # An unresolved destination is not a confirmation of the current scene.
+            # Match the model adapter's zero-write unresolved-travel path instead
+            # of inventing a location target for the narrative-only fallback.
+            raise TurnExecutionError(
+                "TRAVEL_DESTINATION_NOT_FOUND",
+                "没有找到与玩家描述相符且可安全创建或到达的地点",
+                retryable=False,
+            )
 
         action_text = context.step.semantic_goal.replace(
             context.player_view.scene.name,
@@ -2988,25 +3131,8 @@ def _deterministic_step_adjudication(
             # is not a creation allowlist: every other requested location still
             # falls through to the Agent's WorldProfile/Canon-aware judgement.
             return _ambient_venue_adjudication(context)
-        if destination.id == context.player_view.scene.id:
-            # “去旅馆”也可能是在创建旅馆后的下一轮再次指向同一地点。此时行动
-            # 已经满足，不应重复提交 enter_location，更不应因零位置变化要求澄清。
-            return ActionAdjudication(
-                request_id=context.step_request_id,
-                source_revision=context.player_view.revision,
-                actor_id=context.player_input.actor_id,
-                summary=f"已经位于{destination.name}",
-                target=ActionTarget(kind="location", id=destination.id),
-                method=ActionMethod(
-                    family="action",
-                    description=f"确认当前已在{destination.name}",
-                ),
-                persistence_intent="none",
-                check=NoAdjudicationCheck(),
-                success_effects=(NarrativeOnlyEffect(),),
-            )
         destination_id = destination.id
-        return ActionAdjudication(
+        proposal = ActionAdjudication(
             request_id=context.step_request_id,
             source_revision=context.player_view.revision,
             actor_id=context.player_input.actor_id,
@@ -3018,6 +3144,10 @@ def _deterministic_step_adjudication(
             ),
             check=NoAdjudicationCheck(),
             success_effects=(EnterLocationEffect(location_id=destination_id),),
+        )
+
+        return (
+            satisfied_travel_adjudication(context.step, context.player_view, proposal) or proposal
         )
 
     action_text = context.step.semantic_goal.replace(

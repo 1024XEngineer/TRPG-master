@@ -1588,6 +1588,67 @@ describe('RoomPage conversation history', () => {
     expect(screen.getAllByText(full)).toHaveLength(1)
   })
 
+  it.each([true, false])('presents and speaks narration before its NPC reply (streamed=%s)', async (streamed) => {
+    const { audio } = installRoomSpeechApi()
+    localStorage.setItem('aidm-host-speech-settings', JSON.stringify({ enabled: true }))
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    const narration = '渐进片段一号。渐进片段二号。'
+    const reply: ServerToClientEvent = {
+      type: 'dialogue.npc',
+      payload: {
+        messageId: 'npc-after-narration',
+        speakerId: 'caretaker',
+        speakerName: '守墓人',
+        text: '历史 NPC 语音',
+        sceneId: 'scene-1',
+        sourceDialogueId: 'dialogue-player-1',
+        sourceActionId: 'action-206',
+        ordinal: 0,
+        sourceRevision: 'revision-1',
+        sentAt: '2026-07-28T10:03:00Z',
+        audiencePlayerIds: ['player-1'],
+      },
+    }
+    act(() => {
+      if (streamed) {
+        emitWsMessage({
+          type: 'narration.chunk',
+          payload: { messageId: 'action-206', sequence: 0, text: narration },
+        })
+      }
+      emitWsMessage({
+        type: 'narration.push',
+        payload: { messageId: 'action-206', text: narration },
+      })
+      emitWsMessage(reply)
+      // 重连重放也不能让 NPC 越过旁白，或重复显示、朗读。
+      emitWsMessage(reply)
+    })
+
+    if (streamed) {
+      expect(await screen.findByText('生成中…')).toBeInTheDocument()
+      expect(screen.queryByText('历史 NPC 语音')).not.toBeInTheDocument()
+      expect(mockGetHostSpeechManifest).not.toHaveBeenCalled()
+      expect(mockGetNpcSpeechManifest).not.toHaveBeenCalled()
+    }
+    await waitFor(
+      () => expect(screen.getByText('历史 NPC 语音')).toBeInTheDocument(),
+      { timeout: 4000 },
+    )
+    expect(screen.queryByText('生成中…')).not.toBeInTheDocument()
+    expect(screen.getAllByText(/渐进片段一号。渐进片段二号。|历史 NPC 语音/)
+      .map((node) => node.textContent)).toEqual([narration, '历史 NPC 语音'])
+    await waitFor(() => expect(audio.play).toHaveBeenCalledTimes(1))
+    expect(mockGetHostSpeechManifest).toHaveBeenCalledTimes(1)
+    expect(mockGetNpcSpeechManifest).not.toHaveBeenCalled()
+    act(() => { audio.dispatchEvent(new Event('ended')) })
+    await waitFor(() => expect(audio.play).toHaveBeenCalledTimes(2))
+    expect(mockGetNpcSpeechManifest).toHaveBeenCalledTimes(1)
+    expect(mockGetNpcSpeechManifest.mock.calls[0]?.[1]).toBe('npc-after-narration')
+  })
+
   // 回归：待提交槽位原本是单个，揭示 A 的过程中到达的 B 会把 A 顶掉，A 既不
   // 进消息列表也不朗读，只能靠刷新走历史恢复（PR #213 review 指出）。
   it('keeps an earlier narration when another push lands mid-reveal', async () => {

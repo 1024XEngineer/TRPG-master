@@ -1,7 +1,7 @@
 {
   "content_schema_version": 3,
   "module_id": "happy-frog-village",
-  "version": "3.0.14",
+  "version": "3.0.16",
   "world_ref": "coc-7e",
   "background": "默认采用现代城郊。莱恩夫妇委托调查员寻找失踪的儿子詹姆斯，线索指向不存在于官方记录的蛙蛙度假村。叙事从温馨田园与整齐笑容逐渐滑向梦境、身体异变和选择权被剥夺的恐怖；信使本体、青蛙来源和水晶弱点只能随权威信息揭示。",
   "opening_text": "你们接到了一个找人的委托，来到了莱恩庄园，一位衣着华贵但面容憔悴的中年男人在管家的陪同下接待了你们。他是本市有名的企业家，理查德·莱恩先生。没有寒暄，他直接将一个厚厚的信封放在桌上，里面装有100美金。\n\n“我知道你们的本事和……收费。”他声音沙哑，开门见山。“我儿子，詹姆斯·莱恩，已经失踪一周了。这是预付金。找到他，把他安全地带回来，你们每人还能再拿到四百金币。”\n\n他推过来一张照片，上面是一个笑容开朗的二十来岁青年。\n\n“警方的常规搜寻毫无进展。他最后被看见，是独自一人往城郊的‘老林地’方向去了。在他房间的垃圾桶里，我们只找到了这个。”管家补充道，递过来一张被揉皱后又展平的彩色传单。",
@@ -1570,20 +1570,40 @@
     },
     {
       "id": "dream_frogs",
-      "kind": "npc",
+      "kind": "object",
       "origin": "canon",
       "name": "梦游青蛙",
       "player_visible_name": "梦游青蛙",
       "player_visible_aliases": [],
-      "description": "几乎不躲避来人的鲜艳青蛙。",
+      "description": "池塘中聚集着几乎不躲避来人的鲜艳青蛙。",
       "located_in": "frog_pond",
       "relations": [],
       "state": {},
       "item_component": null,
-      "voice": {
-        "provider": "doubao",
-        "resource_id": "seed-tts-2.0",
-        "voice_type": "zh_female_mizai_saturn_bigtts"
+      "visibility": "public",
+      "visibility_conditions": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "dream_frog_item",
+      "kind": "object",
+      "origin": "canon",
+      "name": "一只梦游青蛙",
+      "player_visible_name": "一只梦游青蛙",
+      "player_visible_aliases": [
+        "青蛙",
+        "这只青蛙"
+      ],
+      "description": "池边一只几乎不躲避来人的鲜艳青蛙，可以尝试捉起携带。",
+      "located_in": "frog_pond",
+      "relations": [],
+      "state": {},
+      "item_component": {
+        "portable": true,
+        "unique": true,
+        "quantity": 1,
+        "capabilities": []
       },
       "visibility": "public",
       "visibility_conditions": [],

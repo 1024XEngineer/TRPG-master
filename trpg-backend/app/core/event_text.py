@@ -33,6 +33,11 @@ def event_text(event_type: str, payload: Mapping[str, Any]) -> str:
 
 def game_event_text(event_type: str, payload: Mapping[str, Any], actor_id: str) -> str:
     """Only materialize facts carried by recognized authoritative event types."""
+    if event_type in {"travel.resolved", "location.entered"}:
+        destination = payload.get("destination_id") or payload.get("location_id")
+        path = payload.get("path")
+        if isinstance(path, list) and path and path[0] == destination:
+            return ""
     if text := event_text(event_type, payload):
         return text
     entity = payload.get("entity_id")

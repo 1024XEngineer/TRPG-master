@@ -58,6 +58,7 @@ from collaboration_framework.host.schemas import (
 from .errors import TurnExecutionError
 from .player_view_projector import PlayerViewProjector
 from .semantic_preservation import compare_repair_semantics
+from .satisfied_travel import satisfied_travel_adjudication
 
 logger = logging.getLogger(__name__)
 
@@ -1066,6 +1067,7 @@ class ActionPlanOrchestrator:
                         "status": "stopped",
                         "source_revision": None,
                         "adjudication": None,
+                        "already_at_destination_id": None,
                         "safe_failure_code": "SEMANTIC_REPAIR_REQUIRES_CLARIFICATION",
                         "repair_baseline": None,
                         "repair_feedback": None,
@@ -1077,9 +1079,15 @@ class ActionPlanOrchestrator:
                     tuple(steps),
                     status="needs_clarification",
                 )
+        satisfied = satisfied_travel_adjudication(current.step, view, adjudication)
+        if satisfied is not None:
+            adjudication = satisfied
         steps = list(run.steps)
         steps[index] = current.model_copy(
             update={
+                "already_at_destination_id": view.scene.id
+                if satisfied is not None
+                else None,
                 "status": "ready",
                 "source_revision": view.revision,
                 "adjudication": adjudication,
@@ -1104,6 +1112,7 @@ class ActionPlanOrchestrator:
                 "status": "pending",
                 "source_revision": None,
                 "adjudication": None,
+                "already_at_destination_id": None,
                 "adjudication_execution": None,
                 "event_refs": (),
                 "pending_action_request_id": None,
@@ -1134,6 +1143,7 @@ class ActionPlanOrchestrator:
                 "status": "stopped",
                 "source_revision": None,
                 "adjudication": None,
+                "already_at_destination_id": None,
                 "adjudication_execution": None,
                 "event_refs": (),
                 "pending_action_request_id": None,
@@ -1365,6 +1375,7 @@ class ActionPlanOrchestrator:
                 {
                     "source_revision": None,
                     "adjudication": None,
+                    "already_at_destination_id": None,
                     "adjudication_execution": None,
                     "event_refs": (),
                     "pending_action_request_id": None,
@@ -1497,6 +1508,7 @@ class ActionPlanOrchestrator:
                 raise ContractError("已完成 PlanRun 步骤不得保留 pending outcome")
             summaries.append(
                 CompletedPlanStepSummary(
+                    already_at_destination_id=step.already_at_destination_id,
                     step_index=index,
                     semantic_goal=step.step.semantic_goal,
                     outcome=execution.outcome,
@@ -1522,6 +1534,7 @@ class ActionPlanOrchestrator:
                     raise ContractError("已停止 PlanRun 步骤不得保留 pending outcome")
                 summaries.append(
                     CompletedPlanStepSummary(
+                        already_at_destination_id=step.already_at_destination_id,
                         step_index=run.current_step_index,
                         semantic_goal=step.step.semantic_goal,
                         outcome=execution.outcome,

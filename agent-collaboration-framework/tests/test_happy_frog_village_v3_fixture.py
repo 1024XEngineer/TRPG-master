@@ -129,7 +129,6 @@ class HappyFrogContentGateTests(unittest.TestCase):
             "emily",
             "james",
             "frog_head_guest",
-            "dream_frogs",
         }
         self.assertEqual(set(profiles), expected_ids)
         self.assertTrue(all(profile is not None for profile in profiles.values()))

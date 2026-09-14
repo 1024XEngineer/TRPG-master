@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { RoomSocketServerError, TurnFailedError, type RoomSocketConnectionState, type AdjudicationPendingPayload, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type CheckResultPayload, type EndingDraft, type NarrationPushPayload, type RoomActionStatePayload, type RoomConversationEvent, type RoomPlayerSummary, type SceneTransitionPendingPayload, type TimeAdvancePendingPayload } from 'trpg-sdk'
+import { RoomSocketServerError, TurnFailedError, type RoomSocketConnectionState, type AdjudicationPendingPayload, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type CheckResultPayload, type EndingDraft, type DialogueNpcPayload, type NarrationPushPayload, type RoomActionStatePayload, type RoomConversationEvent, type RoomPlayerSummary, type SceneTransitionPendingPayload, type TimeAdvancePendingPayload } from 'trpg-sdk'
 import { ArrowLeft, Users, Map, MapPin, BookOpen, ScrollText, Star, X, SendHorizontal, FlagOff, Heart, Brain, Volume2, Pause, Play, Square, RotateCcw, Mic, LoaderCircle, Clock3, Check, ChevronRight } from 'lucide-react'
 import { useCallback, useState, useRef, useEffect, useMemo, type Dispatch, type FormEvent, type ReactNode, type SetStateAction } from 'react'
 import { useRoomStore } from '@/stores/room-store'
@@ -243,6 +243,10 @@ interface Message {
   speakerId?: string
   avatarUrl?: string
 }
+
+type PendingPresentation =
+  | { type: 'narration.push'; payload: NarrationPushPayload }
+  | { type: 'dialogue.npc'; payload: DialogueNpcPayload }
 
 interface SelectedRecipient {
   kind: 'keeper' | 'npc'
@@ -1669,10 +1673,9 @@ export default function RoomPage() {
   const [historyReloadKey, setHistoryReloadKey] = useState(0)
   const [secondaryProgressLabel, setSecondaryProgressLabel] = useState<string | null>(null)
   const [streamingNarration, setStreamingNarration] = useState<StreamingNarration | null>(null)
-  // 队列而不是单槽：揭示窗口最长 REVEAL_MAX_MS，这期间完全可能再来一条叙事
-  // （无片段的叙事后端会跳过切片，直接发 push）。用单槽的话后到的会把前一条
-  // 顶掉，被顶掉的那条既不进 messages 也不朗读，只能靠刷新走历史恢复。
-  const [pendingNarrations, setPendingNarrations] = useState<NarrationPushPayload[]>([])
+  // 旁白与 NPC 回复共用队列：逐字揭示期间到达的台词不能先显示或先朗读。
+  // 保留所有待展示消息，后到的旁白也不能覆盖队首。
+  const [pendingPresentations, setPendingPresentations] = useState<PendingPresentation[]>([])
   const [actionError, setActionError] = useState('')
   const [actionErrorRetryable, setActionErrorRetryable] = useState(false)
   const [actionErrorIsGuidance, setActionErrorIsGuidance] = useState(false)
@@ -2009,6 +2012,21 @@ export default function RoomPage() {
     })
   }, [enqueueHostSpeech])
 
+  const commitNpcDialogue = useCallback((payload: DialogueNpcPayload) => {
+    enqueueNpcSpeech(payload.messageId)
+    setMessages((prev) => appendLiveMessage(prev, {
+      type: 'npc',
+      channel: 'action',
+      messageId: conversationMessageId('dialogue.npc', payload.messageId),
+      speechMessageId: payload.messageId,
+      sender: payload.speakerName,
+      speakerId: payload.speakerId,
+      avatarUrl: payload.avatarUrl ?? undefined,
+      content: payload.text,
+      time: formatRoomTime(payload.sentAt),
+    }))
+  }, [enqueueNpcSpeech])
+
   // 逐字揭示：片段几乎同时到达，节奏由这里控制。长文本按比例加快，总时长
   // 不超过 REVEAL_MAX_MS。
   useEffect(() => {
@@ -2035,27 +2053,33 @@ export default function RoomPage() {
   // 权威消息何时接管：按到达顺序逐条提交，队首那条还没揭示完就等着。
   //
   // 严格按队首处理（而不是跳过它先提交后面的）是为了保持叙事顺序：后到的
-  // 叙事最多被队首多等一个揭示周期，但不会插到前一条之前，也不会把它挤掉。
+  // 消息最多被队首多等一个揭示周期，但不会插到前一条之前，也不会把它挤掉。
   useEffect(() => {
-    const next = pendingNarrations[0]
+    const next = pendingPresentations[0]
     if (!next) return
+    if (next.type === 'dialogue.npc') {
+      commitNpcDialogue(next.payload)
+      setPendingPresentations((current) => current.slice(1))
+      return
+    }
+    const payload = next.payload
     const belongsToStream =
       streamingNarration !== null &&
-      next.messageId != null &&
+      payload.messageId != null &&
       streamingNarration.messageId ===
-        conversationMessageId('narration.push', next.messageId)
+        conversationMessageId('narration.push', payload.messageId)
     if (
       belongsToStream &&
       streamingNarration.revealed < streamingNarrationText(streamingNarration).length
     ) {
       return
     }
-    commitNarration(next)
-    setPendingNarrations((current) => current.slice(1))
+    commitNarration(payload)
+    setPendingPresentations((current) => current.slice(1))
     // 只清掉刚提交的这条对应的片段状态。别的叙事还在揭示时不能顺手清空，
     // 否则它的文字会凭空消失。
     if (belongsToStream) setStreamingNarration(null)
-  }, [commitNarration, pendingNarrations, streamingNarration])
+  }, [commitNarration, commitNpcDialogue, pendingPresentations, streamingNarration])
 
   // 服务端主持人回复：只订阅 narration.push，不从 turn.completed 或本地逻辑
   // 生成主持叙述。
@@ -2081,7 +2105,7 @@ export default function RoomPage() {
         clearSettledAction(envelope.payload.messageId)
         // 不在这里直接落地：权威消息比最后一个片段只晚到半毫秒，立刻接管会让
         // 刚开始的渐进展示当场被整段覆盖。入队，交给上面的 effect 按序裁决。
-        setPendingNarrations((current) => [...current, envelope.payload])
+        setPendingPresentations((current) => [...current, envelope])
       } else if (envelope.type === 'opening.started') {
         setTyping(true)
         setProgressLabel('守秘人正在生成开场叙事')
@@ -2139,18 +2163,7 @@ export default function RoomPage() {
       } else if (envelope.type === 'dialogue.npc') {
         setTyping(false)
         clearBackendProgress()
-        enqueueNpcSpeech(envelope.payload.messageId)
-        setMessages((prev) => appendLiveMessage(prev, {
-          type: 'npc',
-          channel: 'action',
-          messageId: conversationMessageId('dialogue.npc', envelope.payload.messageId),
-          speechMessageId: envelope.payload.messageId,
-          sender: envelope.payload.speakerName,
-          speakerId: envelope.payload.speakerId,
-          avatarUrl: envelope.payload.avatarUrl ?? undefined,
-          content: envelope.payload.text,
-          time: formatRoomTime(envelope.payload.sentAt),
-        }))
+        setPendingPresentations((current) => [...current, envelope])
       } else if (envelope.type === 'check.request') {
         setTyping(false)
         showBackendPhase('waiting_for_check')
@@ -2341,7 +2354,7 @@ export default function RoomPage() {
       setProgressLabel('守秘人正在生成开场叙事')
     }
     return off
-  }, [clearBackendProgress, clearSettledAction, enqueueHostSpeech, enqueueNpcSpeech, handleHostSpeechSettingsUpdated, openDiceForCheck, playerId, senderName, showBackendPhase])
+  }, [clearBackendProgress, clearSettledAction, handleHostSpeechSettingsUpdated, openDiceForCheck, playerId, senderName, showBackendPhase])
 
   const submitPlayerAction = (action: {
     clientActionId: string

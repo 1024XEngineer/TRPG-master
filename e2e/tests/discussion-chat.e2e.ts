@@ -264,10 +264,10 @@ test('多人 roleplay 不调用主持，也不写入权威事件、记忆或摘�
   }
 })
 
-test('NPC 对话使用结构化接收者、独立气泡事件并可从历史恢复', async () => {
+test('NPC 对话经过主持主链，旁白与台词分开并可按序恢复', async () => {
   const room = await createRoomWithModule('npcdialogue')
   const actionId = `npc-dialogue-${randomUUID()}`
-  const utterance = `我去地下室并使用侦查，请记住蓝色钟摆-${randomUUID()}`
+  const utterance = `你好，请记住蓝色钟摆-${randomUUID()}`
 
   await room.host.sdk.rooms.startStory(room.roomId, room.reconnectToken)
   await buildCharacter(room.host.sdk, room.roomId, room.reconnectToken)
@@ -291,6 +291,10 @@ test('NPC 对话使用结构化接收者、独立气泡事件并可从历史恢�
       room.host.sdk,
       (event) => event.type === 'dialogue.player' && event.payload.clientActionId === actionId,
     )
+    const narration = waitForEvent(
+      room.host.sdk,
+      (event) => event.type === 'narration.push' && event.payload.messageId === actionId,
+    )
     const npcDialogue = waitForEvent(
       room.host.sdk,
       (event) => event.type === 'dialogue.npc' && event.payload.sourceActionId === actionId,
@@ -303,8 +307,11 @@ test('NPC 对话使用结构化接收者、独立气泡事件并可从历史恢�
       }),
       true,
     )
-    const [playerEvent, npcEvent] = await Promise.all([playerDialogue, npcDialogue])
+    const [playerEvent, narrationEvent, npcEvent] = await Promise.all([
+      playerDialogue, narration, npcDialogue,
+    ])
     assert.equal(playerEvent.type, 'dialogue.player')
+    assert.equal(narrationEvent.type, 'narration.push')
     assert.equal(npcEvent.type, 'dialogue.npc')
     if (playerEvent.type === 'dialogue.player' && npcEvent.type === 'dialogue.npc') {
       assert.equal(playerEvent.payload.interlocutorId, npc.id)
@@ -329,21 +336,25 @@ test('NPC 对话使用结构化接收者、独立气泡事件并可从历史恢�
       true,
     )
 
+    const narrationIndex = conversation.findIndex(
+      (event) => event.type === 'narration.push' && event.payload.messageId === actionId,
+    )
+    const npcIndex = conversation.findIndex(
+      (event) => event.type === 'dialogue.npc' && event.payload.sourceActionId === actionId,
+    )
+    assert.ok(narrationIndex >= 0 && narrationIndex < npcIndex)
+    assert.equal(room.host.sdk.roomSocket.getPlayerView()?.scene.id, view?.scene.id)
+    assert.equal(conversation.some((event) => event.type === 'check.result'), false)
+    assert.equal(conversation.some((event) => event.type === 'action.broadcast'), false)
+
+    // @NPC 和 @守秘人共用主持主链；SQLite 的 Uuid 列存储无连字符的值。
     const db = new DatabaseSync(DB_FILE, { readOnly: true })
     db.exec('PRAGMA busy_timeout = 5000')
     try {
       const actionPlan = db.prepare(
         'SELECT COUNT(*) AS count FROM action_plan_runs WHERE room_id = ? AND parent_action_id = ?',
-      ).get(room.roomId, actionId) as { count: number }
-      const gameEvents = db.prepare(
-        'SELECT COUNT(*) AS count FROM game_events WHERE room_id = ? AND client_action_id = ?',
-      ).get(room.roomId, actionId) as { count: number }
-      const memories = db.prepare(
-        'SELECT COUNT(*) AS count FROM memory_entries WHERE room_id = ? AND content LIKE ?',
-      ).get(room.roomId, `%${utterance}%`) as { count: number }
-      assert.equal(actionPlan.count, 0)
-      assert.equal(gameEvents.count, 0)
-      assert.equal(memories.count, 0)
+      ).get(room.roomId.replaceAll('-', ''), actionId) as { count: number }
+      assert.equal(actionPlan.count, 1)
     } finally {
       db.close()
     }

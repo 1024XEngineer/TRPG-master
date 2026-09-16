@@ -7,8 +7,8 @@
  *
  * ## 结果怎么来的
  * 自由掷骰不预先挑结果面，而是让骰子自然停下、读此刻朝上的那一面。服务端检定
- * 可以传入已经持久化的权威骰点；舞台会在收束阶段把对应面平滑转到上方，保证动画、
- * 画面结果和服务端状态一致，同时不会因为刷新或重试再次随机。
+ * 可以传入已经持久化的权威骰点；舞台先预演翻滚轨迹，在首帧之前把该点数分配给
+ * 自然落面，再播放同一条轨迹。播放中不换数字，也不在最后强制翻到另一面。
  *
  * 均匀性由 `shuffle()` 保证（见该文件注释），与物理是否有偏无关。
  */
@@ -46,10 +46,14 @@ const ARENA = { halfX: 2.9, halfZ: 1.35, floorY: 0 }
 /** 安全上限，防止物理异常时永远不结束。 */
 const MAX_TUMBLE_SECONDS = 4.5
 const SETTLE_SECONDS = 0.55
+/** 预演与播放共用的轨迹采样间隔，不依赖设备帧率。 */
+const TUMBLE_STEP = 1 / 120
 
 interface FaceInfo {
   value: number
   normal: Vector3
+  material: MeshPhysicalMaterial
+  uv: [number, number][]
 }
 
 interface Die {
@@ -59,6 +63,11 @@ interface Die {
   /** 仅用于轻量骰子间碰撞的保守包围半径。 */
   collisionRadius: number
   faces: FaceInfo[]
+}
+
+interface DiePose {
+  position: Vector3
+  quaternion: Quaternion
 }
 
 interface DiceActor {
@@ -81,8 +90,6 @@ function rand(min: number, max: number): number {
 function buildDie(
   kind: PolyhedronKind,
   palette: Palette,
-  values: number[],
-  labels: string[],
 ): Die {
   const polys = polyhedronFaces(kind)
   const group = new Group()
@@ -90,9 +97,8 @@ function buildDie(
   const coreTris: number[] = []
   let minInradius = Infinity
   let maxVertexRadius = 0
-  const usePips = kind === 'd6'
 
-  polys.forEach((verts, faceIndex) => {
+  polys.forEach((verts) => {
     for (const vertex of verts) maxVertexRadius = Math.max(maxVertexRadius, vertex.length())
     // 保证顶点绕序让法线朝外。
     const normal = faceNormal(verts)
@@ -142,26 +148,18 @@ function buildDie(
     geom.setAttribute('uv', new Float32BufferAttribute(uvs, 2))
     geom.computeVertexNormals()
 
-    const tex = makeFaceTexture(
-      palette,
-      labels[faceIndex],
-      uvPoly,
-      usePips ? values[faceIndex] : undefined,
-    )
-    const mesh = new Mesh(
-      geom,
-      new MeshPhysicalMaterial({
-        map: tex,
-        roughness: 0.32,
-        metalness: 0.05,
-        clearcoat: 0.7,
-        clearcoatRoughness: 0.25,
-      }),
-    )
+    // 贴图等轨迹预演完成、点数分配确定后再生成，首帧之后不再更换。
+    const material = new MeshPhysicalMaterial({
+      roughness: 0.32,
+      metalness: 0.05,
+      clearcoat: 0.7,
+      clearcoatRoughness: 0.25,
+    })
+    const mesh = new Mesh(geom, material)
     mesh.castShadow = true
     group.add(mesh)
 
-    faces.push({ value: values[faceIndex], normal: normal.clone() })
+    faces.push({ value: 0, normal: normal.clone(), material, uv: uvPoly })
   })
 
   const coreGeom = new BufferGeometry()
@@ -326,7 +324,8 @@ export function createDiceStage({
   let frame = 0
   let lastFrame = performance.now()
   let disposed = false
-  let requestedValue: number | null = null
+  let trajectory: DiePose[][] = []
+  let playbackTime = 0
 
   // 让 three 同时写 canvas 的 CSS 尺寸（setSize 的第三参默认 true）。
   // 原型里用的是 setSize(w, h, false)，靠它自己页面的 CSS 把 canvas 拉成 100%；
@@ -364,6 +363,7 @@ export function createDiceStage({
       disposeGroup(actor.die.group)
     }
     actors = []
+    trajectory = []
   }
 
   /** 找出此刻法线最朝上的面——就是玩家看到的那一面。 */
@@ -393,14 +393,6 @@ export function createDiceStage({
   const enterAlign = () => {
     phase = 'align'
     alignProgress = 0
-    const requestedFaces = (() => {
-      if (requestedValue === null) return null
-      if (kind === 'd100') {
-        const normalized = requestedValue === 100 ? 0 : requestedValue
-        return [Math.floor(normalized / 10) * 10, normalized % 10]
-      }
-      return [requestedValue]
-    })()
     const targets = actors.map((actor) => ({
       x: actor.die.group.position.x,
       z: actor.die.group.position.z,
@@ -419,17 +411,14 @@ export function createDiceStage({
     for (const [index, actor] of actors.entries()) {
       actor.qStart = actor.die.group.quaternion.clone()
       actor.pStart = actor.die.group.position.clone()
-      const requestedFace = requestedFaces
-        ? actor.die.faces.find((face) => face.value === requestedFaces[index])
-        : null
-      const top = requestedFace ?? findTopFace(actor.die)
+      const top = findTopFace(actor.die)
       actor.value = top.value
-      // 自由掷骰只修正自然朝上的面；服务端已经持久化骰点的检定则把权威结果
-      // 对应的面平滑转到上方。这样重连/重试不会在客户端生成第二个结果。
-      actor.qTarget = new Quaternion().setFromUnitVectors(
-        top.normal.clone(),
-        new Vector3(0, 1, 0),
-      )
+      // 在当前世界姿态上只补最短的倾斜修正，保留水平朝向。直接从局部法线
+      // 重算目标姿态会把 yaw 一起重置，哪怕正确面已经朝上也会额外扭转。
+      const worldNormal = top.normal.clone().applyQuaternion(actor.qStart)
+      actor.qTarget = new Quaternion()
+        .setFromUnitVectors(worldNormal, new Vector3(0, 1, 0))
+        .multiply(actor.qStart)
       const target = actor.die.group.position.clone()
       target.x = targets[index].x
       target.y = actor.die.restY
@@ -438,97 +427,115 @@ export function createDiceStage({
     }
   }
 
+  const stepTumble = (dt: number) => {
+    elapsed += dt
+    // 前 0.5 秒放开翻滚，之后逐渐加大阻尼让它自己停下来。
+    const damp = elapsed > 0.5 ? Math.min((elapsed - 0.5) / 0.8, 1) : 0
+    let allResting = true
+
+    for (const actor of actors) {
+      const g = actor.die.group
+      actor.vel.y += GRAVITY * dt
+      g.position.addScaledVector(actor.vel, dt)
+
+      if (g.position.y < actor.die.restY) {
+        g.position.y = actor.die.restY
+        actor.vel.y = Math.abs(actor.vel.y) * 0.42
+        actor.vel.x *= 0.7
+        actor.vel.z *= 0.7
+        actor.angSpeed *= 0.7
+        actor.angAxis.set(rand(-1, 1), rand(-1, 1), rand(-1, 1)).normalize()
+        if (actor.vel.y < 0.8) actor.vel.y = 0
+      }
+      if (g.position.x > ARENA.halfX) {
+        g.position.x = ARENA.halfX
+        actor.vel.x = -Math.abs(actor.vel.x) * 0.6
+      }
+      if (g.position.x < -ARENA.halfX) {
+        g.position.x = -ARENA.halfX
+        actor.vel.x = Math.abs(actor.vel.x) * 0.6
+      }
+      if (g.position.z > ARENA.halfZ) {
+        g.position.z = ARENA.halfZ
+        actor.vel.z = -Math.abs(actor.vel.z) * 0.6
+      }
+      if (g.position.z < -ARENA.halfZ) {
+        g.position.z = -ARENA.halfZ
+        actor.vel.z = Math.abs(actor.vel.z) * 0.6
+      }
+
+      if (damp > 0) {
+        actor.angSpeed *= Math.pow(0.06, dt * damp)
+        const pk = Math.pow(0.12, dt * damp)
+        actor.vel.x *= pk
+        actor.vel.z *= pk
+      }
+
+      g.quaternion.premultiply(
+        new Quaternion().setFromAxisAngle(actor.angAxis, actor.angSpeed * dt),
+      )
+
+      // 只看速度会在弹跳顶点误判为静止，必须同时要求真的贴着地面。
+      const grounded = Math.abs(g.position.y - actor.die.restY) < 0.03
+      if (
+        actor.angSpeed > 0.15 ||
+        Math.abs(actor.vel.y) > 0.05 ||
+        Math.abs(actor.vel.x) > 0.05 ||
+        Math.abs(actor.vel.z) > 0.05 ||
+        !grounded
+      ) {
+        allResting = false
+      }
+    }
+
+    if (actors.length === 2) {
+      const collided = resolveSphereCollision(
+        {
+          position: actors[0].die.group.position,
+          velocity: actors[0].vel,
+          radius: actors[0].die.collisionRadius,
+        },
+        {
+          position: actors[1].die.group.position,
+          velocity: actors[1].vel,
+          radius: actors[1].die.collisionRadius,
+        },
+      )
+      if (collided) allResting = false
+      for (const actor of actors) {
+        const position = actor.die.group.position
+        position.x = Math.min(Math.max(position.x, -ARENA.halfX), ARENA.halfX)
+        position.y = Math.max(position.y, actor.die.restY)
+        position.z = Math.min(Math.max(position.z, -ARENA.halfZ), ARENA.halfZ)
+      }
+    }
+
+    if ((allResting && elapsed >= minTumble) || elapsed >= MAX_TUMBLE_SECONDS) {
+      enterAlign()
+    }
+  }
+
   const step = (dt: number) => {
     if (phase === 'tumble') {
-      elapsed += dt
-      // 前 0.5 秒放开翻滚，之后逐渐加大阻尼让它自己停下来。
-      const damp = elapsed > 0.5 ? Math.min((elapsed - 0.5) / 0.8, 1) : 0
-      let allResting = true
-
-      for (const actor of actors) {
-        const g = actor.die.group
-        actor.vel.y += GRAVITY * dt
-        g.position.addScaledVector(actor.vel, dt)
-
-        if (g.position.y < actor.die.restY) {
-          g.position.y = actor.die.restY
-          actor.vel.y = Math.abs(actor.vel.y) * 0.42
-          actor.vel.x *= 0.7
-          actor.vel.z *= 0.7
-          actor.angSpeed *= 0.7
-          actor.angAxis.set(rand(-1, 1), rand(-1, 1), rand(-1, 1)).normalize()
-          if (actor.vel.y < 0.8) actor.vel.y = 0
-        }
-        if (g.position.x > ARENA.halfX) {
-          g.position.x = ARENA.halfX
-          actor.vel.x = -Math.abs(actor.vel.x) * 0.6
-        }
-        if (g.position.x < -ARENA.halfX) {
-          g.position.x = -ARENA.halfX
-          actor.vel.x = Math.abs(actor.vel.x) * 0.6
-        }
-        if (g.position.z > ARENA.halfZ) {
-          g.position.z = ARENA.halfZ
-          actor.vel.z = -Math.abs(actor.vel.z) * 0.6
-        }
-        if (g.position.z < -ARENA.halfZ) {
-          g.position.z = -ARENA.halfZ
-          actor.vel.z = Math.abs(actor.vel.z) * 0.6
-        }
-
-        if (damp > 0) {
-          actor.angSpeed *= Math.pow(0.06, dt * damp)
-          const pk = Math.pow(0.12, dt * damp)
-          actor.vel.x *= pk
-          actor.vel.z *= pk
-        }
-
-        g.quaternion.premultiply(
-          new Quaternion().setFromAxisAngle(actor.angAxis, actor.angSpeed * dt),
-        )
-
-        // 只看速度会在弹跳顶点误判为静止，必须同时要求真的贴着地面。
-        const grounded = Math.abs(g.position.y - actor.die.restY) < 0.03
-        if (
-          actor.angSpeed > 0.15 ||
-          Math.abs(actor.vel.y) > 0.05 ||
-          Math.abs(actor.vel.x) > 0.05 ||
-          Math.abs(actor.vel.z) > 0.05 ||
-          !grounded
-        ) {
-          allResting = false
-        }
-      }
-
-      if (actors.length === 2) {
-        const collided = resolveSphereCollision(
-          {
-            position: actors[0].die.group.position,
-            velocity: actors[0].vel,
-            radius: actors[0].die.collisionRadius,
-          },
-          {
-            position: actors[1].die.group.position,
-            velocity: actors[1].vel,
-            radius: actors[1].die.collisionRadius,
-          },
-        )
-        if (collided) allResting = false
-        for (const actor of actors) {
-          const position = actor.die.group.position
-          position.x = Math.min(Math.max(position.x, -ARENA.halfX), ARENA.halfX)
-          position.y = Math.max(position.y, actor.die.restY)
-          position.z = Math.min(Math.max(position.z, -ARENA.halfZ), ARENA.halfZ)
-        }
-      }
-
-      if ((allResting && elapsed >= minTumble) || elapsed >= MAX_TUMBLE_SECONDS) {
-        enterAlign()
+      playbackTime = Math.min(playbackTime + dt, (trajectory.length - 1) * TUMBLE_STEP)
+      const sample = playbackTime / TUMBLE_STEP
+      const index = Math.min(Math.floor(sample), trajectory.length - 1)
+      const next = Math.min(index + 1, trajectory.length - 1)
+      const mix = sample - index
+      actors.forEach((actor, i) => {
+        const a = trajectory[index][i]
+        const b = trajectory[next][i]
+        actor.die.group.position.lerpVectors(a.position, b.position, mix)
+        actor.die.group.quaternion.slerpQuaternions(a.quaternion, b.quaternion, mix)
+      })
+      if (playbackTime >= (trajectory.length - 1) * TUMBLE_STEP) {
+        phase = 'align'
+        trajectory = []
       }
     } else if (phase === 'align') {
       alignProgress += dt / SETTLE_SECONDS
       const k = Math.min(alignProgress, 1)
-      const ease = 1 - Math.pow(1 - k, 3)
+      const ease = k * k * (3 - 2 * k)
       for (const actor of actors) {
         if (!actor.qStart || !actor.qTarget || !actor.pStart || !actor.pTarget) continue
         actor.die.group.quaternion.slerpQuaternions(actor.qStart, actor.qTarget, ease)
@@ -537,7 +544,6 @@ export function createDiceStage({
       if (k >= 1) {
         phase = 'idle'
         onSettled(readValue())
-        requestedValue = null
       }
     }
   }
@@ -546,7 +552,8 @@ export function createDiceStage({
     // context 丢了就别再排下一帧，也别往死掉的 context 里画。
     if (disposed || contextLost) return
     frame = requestAnimationFrame(loop)
-    const dt = Math.min((now - lastFrame) / 1000, 0.05)
+    // 同一浏览器帧内开始掷骰时，rAF 时间戳可能略早于 roll() 的 performance.now()。
+    const dt = Math.max(0, Math.min((now - lastFrame) / 1000, 0.05))
     lastFrame = now
     step(dt)
     renderer.render(scene, camera)
@@ -561,14 +568,13 @@ export function createDiceStage({
       // 下一次 roll() 会按新骰型重新生成。
       clearActors()
       phase = 'idle'
-      requestedValue = null
     },
     roll(targetValue?: number) {
       if (disposed || contextLost || phase !== 'idle') return false
-      requestedValue = targetValue ?? null
       clearActors()
-      diceDefinitions(kind).forEach((def, index) => {
-        const die = buildDie(def.poly, def.palette, def.values, def.labels)
+      const definitions = diceDefinitions(kind)
+      definitions.forEach((def, index) => {
+        const die = buildDie(def.poly, def.palette)
         die.group.position.set(def.restX + rand(-0.6, 0.6), 3.4 + index * 0.7, rand(-0.4, 0.4))
         die.group.quaternion.setFromEuler(
           new Euler(rand(0, 6.28), rand(0, 6.28), rand(0, 6.28)),
@@ -584,6 +590,48 @@ export function createDiceStage({
       })
       elapsed = 0
       minTumble = rand(1.2, 1.5)
+      phase = 'tumble'
+      const capture = () => actors.map(({ die }) => ({
+        position: die.group.position.clone(),
+        quaternion: die.group.quaternion.clone(),
+      }))
+      trajectory = [capture()]
+      // 只运行有上限的 CPU 物理预演，不绘制、不触发 onSettled。播放严格复用
+      // 这些采样，因此设备帧率变化不会让最终落面与预演不一致。
+      while (phase === 'tumble') {
+        stepTumble(TUMBLE_STEP)
+        trajectory.push(capture())
+      }
+      const normalized = targetValue === 100 && kind === 'd100' ? 0 : targetValue
+      const requestedFaces = normalized === undefined ? null : kind === 'd100'
+        ? [Math.floor(normalized / 10) * 10, normalized % 10]
+        : [normalized]
+      actors.forEach((actor, index) => {
+        const def = definitions[index]
+        const topIndex = actor.die.faces.indexOf(findTopFace(actor.die))
+        const requestedIndex = requestedFaces ? def.values.indexOf(requestedFaces[index]) : -1
+        if (requestedIndex >= 0) {
+          // 只交换首帧前的面值排列，保留每个点数恰好出现一次。自由骰保留原有
+          // Fisher–Yates 排列，物理轨迹完全不读取面值，均匀性不变。
+          ;[def.values[topIndex], def.values[requestedIndex]] =
+            [def.values[requestedIndex], def.values[topIndex]]
+          ;[def.labels[topIndex], def.labels[requestedIndex]] =
+            [def.labels[requestedIndex], def.labels[topIndex]]
+        }
+        actor.die.faces.forEach((face, faceIndex) => {
+          face.value = def.values[faceIndex]
+          face.material.map = makeFaceTexture(
+            def.palette, def.labels[faceIndex], face.uv,
+            def.poly === 'd6' ? face.value : undefined,
+          )
+        })
+        actor.value = actor.die.faces[topIndex].value
+        actor.die.group.position.copy(trajectory[0][index].position)
+        actor.die.group.quaternion.copy(trajectory[0][index].quaternion)
+      })
+      playbackTime = 0
+      alignProgress = 0
+      lastFrame = performance.now()
       phase = 'tumble'
       return true
     },

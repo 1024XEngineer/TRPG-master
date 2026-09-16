@@ -54,9 +54,13 @@ export function cubeFaces(): Vector3[][] {
  * 上下各 5 个风筝形面：两圈交错的腰顶点（A/B，相位差 36°）分别与上下极点围成面。
  */
 export function trapezohedronFaces(): Vector3[][] {
-  const waistY = 0.42
   const apexY = 1.28
   const radius = 1
+  // 同一风筝面中，两颗较高的腰顶点在面中轴上的投影半径为 r*cos(36°)，
+  // 中间较低的腰顶点为 r。四点共面要求 c*(H+h) = H-h，因此腰高不能独立
+  // 指定：旧值 0.42 会让一个面的两个渲染三角形折出约 48° 的夹角。
+  const halfSectorCos = Math.cos(Math.PI / 5)
+  const waistY = apexY * (1 - halfSectorCos) / (1 + halfSectorCos)
   const upper: Vector3[] = []
   const lower: Vector3[] = []
   for (let i = 0; i < 5; i += 1) {
